@@ -88,6 +88,15 @@ void main() {
         hasLength(6),
       );
       expect(schemes.map((scheme) => scheme.primary).toSet(), hasLength(6));
+      final surfaceTintDistance = (Color a, Color b) =>
+          (a.red - b.red).abs() +
+          (a.green - b.green).abs() +
+          (a.blue - b.blue).abs();
+      expect(
+        surfaceTintDistance(schemes.first.surface, schemes.last.surface),
+        greaterThanOrEqualTo(8),
+        reason: '$brightness artwork palettes should visibly tint app surfaces',
+      );
       expect(themes[0].cardTheme.color, schemes[0].surfaceContainerLow);
       expect(
         themes[0].inputDecorationTheme.fillColor,

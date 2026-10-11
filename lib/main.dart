@@ -154,18 +154,18 @@ ThemeData auroraTheme(Brightness brightness, Color accent) {
   const mutedIvory = Color(0xffd9cec1);
   const brown = Color(0xff38312c);
   Color tinted(Color base, double amount) => Color.lerp(base, accent, amount)!;
-  final surface = tinted(dark ? ink : paper, dark ? .045 : .025);
+  final surface = tinted(dark ? ink : paper, dark ? .08 : .04);
   final surfaceLow = tinted(
     dark ? const Color(0xff191512) : const Color(0xfffffaf5),
-    dark ? .055 : .035,
+    dark ? .11 : .055,
   );
   final surfaceMid = tinted(
     dark ? const Color(0xff211b17) : const Color(0xffeee6dd),
-    dark ? .065 : .045,
+    dark ? .15 : .07,
   );
   final surfaceHigh = tinted(
     dark ? const Color(0xff2b231e) : const Color(0xffe7ddd2),
-    dark ? .075 : .055,
+    dark ? .19 : .085,
   );
   final onPrimary = dark ? const Color(0xff151514) : Colors.white;
   var primary = dark
@@ -199,11 +199,11 @@ ThemeData auroraTheme(Brightness brightness, Color accent) {
         surface: surface,
         surfaceDim: tinted(
           dark ? const Color(0xff0c0a09) : const Color(0xffded5cc),
-          .035,
+          dark ? .06 : .04,
         ),
         surfaceBright: tinted(
           dark ? const Color(0xff39302a) : const Color(0xfffffcf8),
-          .045,
+          dark ? .09 : .05,
         ),
         onSurface: dark ? ivory : const Color(0xff201a16),
         onSurfaceVariant: dark ? mutedIvory : const Color(0xff51463e),

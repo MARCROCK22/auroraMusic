@@ -1199,13 +1199,16 @@ class AppController extends ChangeNotifier {
           0.65,
         ).toColor();
       }
+      if (currentTrack?.id != track.id || !adaptiveColors || _disposed) {
+        return;
+      }
       await preferences.setInt(key, selected.toARGB32());
       if (currentTrack?.id == track.id && adaptiveColors && !_disposed) {
         accentColor = selected;
         _notify();
       }
     } catch (_) {
-      if (currentTrack?.id == track.id) {
+      if (currentTrack?.id == track.id && adaptiveColors && !_disposed) {
         accentColor = fallback;
         _notify();
       }

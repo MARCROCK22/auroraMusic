@@ -69,7 +69,11 @@ void main() {
           final playRect = tester.getRect(playButton);
           expect(metadataRect.right, lessThanOrEqualTo(playRect.left - 12));
         }
-        expect(tester.takeException(), isNull);
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: 'layout $size at scale $scale',
+        );
       }
 
       await tester.pumpWidget(const SizedBox.shrink());

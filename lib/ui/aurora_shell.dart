@@ -740,7 +740,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Artwork(track: t, size: constraints.maxWidth, radius: 16),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           Text(
             t.title,
             maxLines: 2,
