@@ -256,7 +256,7 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(390, 844));
     await tester.pumpAndSettle();
     await capture('aurora-103-mobile-lyrics');
-    await tester.tap(find.byTooltip('Cerrar letras'));
+    await tester.tap(find.text('Volver'));
     await tester.pumpAndSettle();
     expect(lyricsClosed, isTrue);
     await tester.pumpWidget(const SizedBox.shrink());
