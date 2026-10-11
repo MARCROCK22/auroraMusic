@@ -35,7 +35,7 @@ Get-ChildItem -LiteralPath $ReleaseDirectory -Force | Copy-Item -Destination $pa
 $packageTools = Join-Path $package 'tools'
 New-Item -ItemType Directory -Path $packageTools -Force | Out-Null
 foreach ($name in 'yt-dlp.exe','deno.exe','ffmpeg.exe','ffprobe.exe','tools.lock.json','binaries.sha256.json','licenses') {
-    Copy-Item -LiteralPath (Join-Path $ToolDirectory $name) -Destination $packageTools -Recurse
+    Copy-Item -LiteralPath (Join-Path $ToolDirectory $name) -Destination $packageTools -Recurse -Force
 }
 @'
 # Aurora para Windows

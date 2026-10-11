@@ -103,6 +103,7 @@ class FakeAudio extends AudioBackend {
 
 class FakeSource extends SourceBackend {
   Completer<List<Track>>? pendingSearch;
+  final searchQueries = <String>[];
   final resolved = <String>[];
   final pendingResolves = <String, Completer<ResolvedAudio>>{};
   int activeDownloads = 0;
@@ -118,8 +119,11 @@ class FakeSource extends SourceBackend {
   }
 
   @override
-  Future<List<Track>> search(String query, {int limit = 20}) async =>
-      pendingSearch?.future ?? [];
+  Future<List<Track>> search(String query, {int limit = 20}) async {
+    searchQueries.add(query);
+    return pendingSearch?.future ?? [];
+  }
+
   @override
   Future<List<Track>> importPlaylist(Uri url) async => [];
   @override

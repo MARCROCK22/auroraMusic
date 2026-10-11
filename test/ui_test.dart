@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -73,6 +74,32 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets(
+    'typing and repeated submission cannot duplicate a pending YouTube search',
+    (tester) async {
+      await mount(tester, const Size(800, 900));
+      await tester.tap(find.text('Encontrar música'));
+      await tester.pumpAndSettle();
+      final source = controller.source as FakeSource;
+      source.pendingSearch = Completer<List<Track>>();
+      await tester.enterText(find.byType(TextField), 'Me at the zoo');
+      await tester.pump(const Duration(seconds: 1));
+      expect(source.searchQueries, isEmpty);
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pump();
+      expect(source.searchQueries, ['Me at the zoo']);
+      await tester.enterText(find.byType(TextField), 'ab');
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pump(const Duration(seconds: 1));
+      expect(controller.searching, isTrue);
+      expect(source.searchQueries, ['Me at the zoo']);
+      source.pendingSearch!.complete([controller.tracks.first]);
+      await tester.pumpAndSettle();
+      expect(controller.searching, isFalse);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   for (final size in [
     const Size(320, 700),
     const Size(800, 900),
@@ -99,6 +126,7 @@ void main() {
       if (size.width == 320) {
         await tester.enterText(find.byType(TextField), 'sin coincidencias');
         await tester.pump(const Duration(milliseconds: 600));
+        await tester.testTextInput.receiveAction(TextInputAction.search);
         await tester.pumpAndSettle();
         expect(find.text('Sin resultados'), findsOneWidget);
         controller.searchResults = [controller.tracks.first];
@@ -106,8 +134,8 @@ void main() {
         await tester.pumpAndSettle();
         await tester.enterText(find.byType(TextField), 'ab');
         await tester.pumpAndSettle();
-        expect(controller.searchResults, isEmpty);
-        expect(find.text('Encuentra algo que te mueva'), findsOneWidget);
+        expect(controller.searchResults, [controller.tracks.first]);
+        expect(find.text(controller.tracks.first.title), findsOneWidget);
         expect(tester.takeException(), isNull);
       }
       await tester.pumpWidget(const SizedBox.shrink());
@@ -221,10 +249,7 @@ void main() {
         find.textContaining('cookies.txt en formato Netscape'),
         findsOneWidget,
       );
-      expect(
-        find.textContaining('No garantiza resolver los límites de la red.'),
-        findsOneWidget,
-      );
+      expect(find.textContaining('ni los errores 429.'), findsOneWidget);
       await tester.dragUntilVisible(
         find.text('Importar sesión'),
         settingsScroll,

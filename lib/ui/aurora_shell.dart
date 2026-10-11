@@ -560,12 +560,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
           ),
           onSubmitted: (query) => _submitSearch(c, query),
-          onChanged: (query) {
-            if (query.trim().length < 3) {
-              c.search('');
-            }
-            setState(() {});
-          },
+          onChanged: (_) => setState(() {}),
         ),
       ),
       if (c.searching) const LinearProgressIndicator(minHeight: 2),
@@ -1105,8 +1100,9 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       const SizedBox(height: 12),
       const Text(
         'Importa un archivo cookies.txt en formato Netscape exportado por ti de tu sesión de YouTube. '
-        'Aurora guarda una copia local que puedes eliminar cuando quieras. '
-        'No garantiza resolver los límites de la red.',
+        'Aurora guarda una copia local. Puedes reemplazarla al importar otra sesión '
+        'o eliminarla desde aquí; el archivo que exportaste permanece intacto. '
+        'Una sesión no garantiza resolver los límites de YouTube ni los errores 429.',
         style: TextStyle(height: 1.6),
       ),
       const SizedBox(height: 16),

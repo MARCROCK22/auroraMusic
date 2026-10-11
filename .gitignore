@@ -5,6 +5,7 @@ dist/
 android/key.properties
 *.jks
 *.keystore
+*cookies*.txt
 *.class
 *.log
 *.pyc
