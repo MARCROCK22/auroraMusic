@@ -98,11 +98,16 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     super.dispose();
   }
 
-  void _navigate(int value) => setState(() {
-    _section = value;
-    _playlist = null;
-    _likesSelected = false;
-  });
+  void _navigate(int value) {
+    if (value != 0) {
+      ref.read(controllerProvider).cancelRecommendationDiscovery();
+    }
+    setState(() {
+      _section = value;
+      _playlist = null;
+      _likesSelected = false;
+    });
+  }
 
   void _submitSearch(AppController c, String query) {
     if (c.searching) return;
@@ -521,6 +526,8 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
           ),
         ),
       const SizedBox(height: 28),
+      _recommendations(c),
+      const SizedBox(height: 28),
       _sectionTitle(
         'Tu colección',
         '${c.tracks.length} canciones · ${c.playlists.length} listas',
@@ -536,6 +543,125 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         ),
     ],
   );
+
+  Widget _recommendations(AppController c) {
+    final recommendations = c.recommendations;
+    final libraryIds = c.tracks.map((track) => track.id).toSet();
+    final personalized =
+        c.favoriteIds.any(libraryIds.contains) ||
+        c.playlists.any(
+          (playlist) => playlist.trackIds.any(libraryIds.contains),
+        ) ||
+        c.recentTracks.isNotEmpty;
+    final contextTracks = recommendations
+        .map((recommendation) => recommendation.track)
+        .toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionTitle(
+          'Para ti',
+          personalized
+              ? 'Basado en tus favoritos, listas y escucha reciente'
+              : 'Aún no hay señales personales; elegimos de tu biblioteca',
+        ),
+        const SizedBox(height: 12),
+        if (recommendations.isEmpty)
+          _empty(
+            Icons.auto_awesome_outlined,
+            'Tu biblioteca está lista para crecer',
+            'Añade canciones reproducibles y aparecerán recomendaciones aquí.',
+          )
+        else
+          ...recommendations.map(
+            (recommendation) => ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+              leading: Artwork(
+                track: recommendation.track,
+                size: 48,
+                radius: 8,
+              ),
+              title: Text(
+                recommendation.track.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Text(
+                '${recommendation.track.artist} · ${recommendation.reason}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              onTap: () =>
+                  c.playTrack(recommendation.track, context: contextTracks),
+              trailing: IconButton(
+                tooltip: 'Reproducir ${recommendation.track.title}',
+                onPressed: () =>
+                    c.playTrack(recommendation.track, context: contextTracks),
+                icon: const Icon(Icons.play_arrow_rounded),
+              ),
+            ),
+          ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: c.discoveringRecommendations || recommendations.isEmpty
+                ? null
+                : c.discoverRecommendations,
+            icon: c.discoveringRecommendations
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.travel_explore),
+            label: Text(
+              c.discoveringRecommendations
+                  ? 'Buscando en YouTube…'
+                  : c.discoveredRecommendations.isEmpty
+                  ? 'Descubrir en YouTube'
+                  : 'Actualizar descubrimiento',
+            ),
+          ),
+        ),
+        if (c.recommendationDiscoveryError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'No se pudo buscar: ${c.recommendationDiscoveryError}',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
+        if (c.discoveredRecommendations.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _sectionTitle('Encontradas en YouTube', 'Búsqueda solicitada por ti'),
+          ...c.discoveredRecommendations.map(
+            (track) => ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+              leading: Artwork(track: track, size: 48, radius: 8),
+              title: Text(
+                track.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Text(
+                '${track.artist} · Resultado de YouTube',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              onTap: () =>
+                  c.playTrack(track, context: c.discoveredRecommendations),
+              trailing: IconButton(
+                tooltip: 'Reproducir ${track.title}',
+                onPressed: () =>
+                    c.playTrack(track, context: c.discoveredRecommendations),
+                icon: const Icon(Icons.play_arrow_rounded),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
 
   Widget _sectionTitle(String title, String subtitle) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,

@@ -16,6 +16,7 @@ import 'core/models.dart';
 import 'core/source_backend.dart';
 import 'import/spotify_import.dart';
 import 'library_database.dart';
+import 'recommendations.dart';
 
 final controllerProvider = ChangeNotifierProvider<AppController>((ref) {
   throw StateError('Override controllerProvider at application startup.');
@@ -55,6 +56,9 @@ class AppController extends ChangeNotifier {
   String? diagnostics;
   List<Track> tracks = [];
   List<Track> searchResults = [];
+  List<Track> discoveredRecommendations = [];
+  bool discoveringRecommendations = false;
+  String? recommendationDiscoveryError;
   String _searchQuery = '';
   int _searchLimit = 20;
   bool get hasMoreSearchResults =>
@@ -85,6 +89,7 @@ class AppController extends ChangeNotifier {
   int _playGeneration = 0;
   int _recoveryGeneration = 0;
   int _searchGeneration = 0;
+  int _recommendationDiscoveryGeneration = 0;
   bool _processingDownloads = false;
   Future<void>? _downloadWorker;
   final _closed = Completer<void>();
@@ -107,6 +112,68 @@ class AppController extends ChangeNotifier {
 
   Track? get currentTrack =>
       queueIndex >= 0 && queueIndex < queue.length ? queue[queueIndex] : null;
+  List<TrackRecommendation> get recommendations => recommendTracks(
+    library: tracks,
+    favoriteIds: favoriteIds,
+    playlists: playlists,
+    history: recentTracks,
+    currentTrackId: currentTrack?.id,
+  );
+
+  Future<void> discoverRecommendations() async {
+    if (discoveringRecommendations || _disposed) return;
+    final seed =
+        strongestTasteArtist(
+          library: tracks,
+          favoriteIds: favoriteIds,
+          playlists: playlists,
+          history: recentTracks,
+        ) ??
+        recommendations.firstOrNull?.track.artist;
+    if (seed == null) return;
+    final generation = ++_recommendationDiscoveryGeneration;
+    discoveringRecommendations = true;
+    recommendationDiscoveryError = null;
+    _notify();
+    try {
+      final results = await source.search('$seed songs', limit: 12);
+      if (generation != _recommendationDiscoveryGeneration || _disposed) return;
+      final seenIds = {
+        ...tracks.map((track) => track.id),
+        ...discoveredRecommendations.map((track) => track.id),
+      };
+      final fresh = <Track>[];
+      for (final track in results) {
+        if (!seenIds.add(track.id) ||
+            track.isPendingSpotifyMatch ||
+            track.pageUrl == null) {
+          continue;
+        }
+        fresh.add(track);
+      }
+      discoveredRecommendations = [
+        ...discoveredRecommendations,
+        ...fresh,
+      ].take(6).toList();
+    } catch (exception) {
+      if (generation == _recommendationDiscoveryGeneration && !_disposed) {
+        recommendationDiscoveryError = exception.toString();
+      }
+    } finally {
+      if (generation == _recommendationDiscoveryGeneration && !_disposed) {
+        discoveringRecommendations = false;
+        _notify();
+      }
+    }
+  }
+
+  void cancelRecommendationDiscovery() {
+    if (!discoveringRecommendations) return;
+    ++_recommendationDiscoveryGeneration;
+    discoveringRecommendations = false;
+    _notify();
+  }
+
   Duration? get sleepRemaining {
     final end = _sleepEnd;
     if (end == null) return null;

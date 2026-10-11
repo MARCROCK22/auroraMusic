@@ -138,6 +138,55 @@ void main() {
     });
   }
 
+  testWidgets('Inicio shows honest cold-start recommendations that play', (
+    tester,
+  ) async {
+    await mount(tester, const Size(800, 900));
+
+    expect(find.text('Para ti'), findsOneWidget);
+    expect(
+      find.text('Aún no hay señales personales; elegimos de tu biblioteca'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('De tu biblioteca'), findsWidgets);
+    final recommended = controller.recommendations.first.track;
+    await tester.tap(find.byTooltip('Reproducir ${recommended.title}'));
+    await tester.pumpAndSettle();
+
+    expect(controller.currentTrack?.id, recommended.id);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'YouTube discovery runs only on request and stays outside library',
+    (tester) async {
+      await mount(tester, const Size(800, 900));
+      final source = controller.source as FakeSource;
+      source.searchMatches = const [
+        Track(
+          id: 'discovered',
+          title: 'Una sugerencia nueva',
+          artist: 'Aurora',
+          pageUrl: 'https://youtu.be/discovered',
+        ),
+      ];
+      expect(source.searchQueries, isEmpty);
+      await tester.ensureVisible(find.text('Descubrir en YouTube'));
+      await tester.tap(find.text('Descubrir en YouTube'));
+      await tester.pumpAndSettle();
+
+      expect(source.searchQueries, ['Aurora songs']);
+      expect(find.text('Una sugerencia nueva'), findsOneWidget);
+      expect(find.text('Encontradas en YouTube'), findsOneWidget);
+      expect(controller.tracks.map((track) => track.id).toSet(), {
+        'one',
+        'two',
+      });
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('600px-high desktop navigation stays scroll-safe and routes', (
     tester,
   ) async {
