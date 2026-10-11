@@ -59,6 +59,7 @@ class AppController extends ChangeNotifier {
   List<Track> discoveredRecommendations = [];
   bool discoveringRecommendations = false;
   String? recommendationDiscoveryError;
+  String? personalDjError;
   String _searchQuery = '';
   int _searchLimit = 20;
   bool get hasMoreSearchResults =>
@@ -90,6 +91,12 @@ class AppController extends ChangeNotifier {
   int _recoveryGeneration = 0;
   int _searchGeneration = 0;
   int _recommendationDiscoveryGeneration = 0;
+  int _personalDjGeneration = 0;
+  int _personalDjDiscoverySearches = 0;
+  bool _personalDjActive = false;
+  bool _personalDjIncludeDiscovery = false;
+  Set<String> _personalDjSeenKeys = {};
+  Future<void>? _personalDjRefillTask;
   bool _processingDownloads = false;
   Future<void>? _downloadWorker;
   final _closed = Completer<void>();
@@ -119,6 +126,31 @@ class AppController extends ChangeNotifier {
     history: recentTracks,
     currentTrackId: currentTrack?.id,
   );
+  bool get canDiscoverRecommendations =>
+      strongestTasteArtist(
+            library: tracks,
+            favoriteIds: favoriteIds,
+            playlists: playlists,
+            history: recentTracks,
+          ) !=
+          null ||
+      recommendations.isNotEmpty;
+  bool get personalDjActive => _personalDjActive;
+  bool get personalDjIncludeDiscovery => _personalDjIncludeDiscovery;
+  bool get canStartPersonalDj =>
+      recommendations.isNotEmpty ||
+      (_personalDjIncludeDiscovery && discoveredRecommendations.isNotEmpty);
+
+  String _recommendationTasteKey() {
+    final sortedFavorites = favoriteIds.toList()..sort();
+    return [
+      ...sortedFavorites,
+      ...playlists.map(
+        (playlist) => '${playlist.id}:${playlist.trackIds.join(',')}',
+      ),
+      ...recentTracks.map((track) => track.id),
+    ].join('|');
+  }
 
   Future<void> discoverRecommendations() async {
     if (discoveringRecommendations || _disposed) return;
@@ -132,31 +164,34 @@ class AppController extends ChangeNotifier {
         recommendations.firstOrNull?.track.artist;
     if (seed == null) return;
     final generation = ++_recommendationDiscoveryGeneration;
+    final tasteKey = _recommendationTasteKey();
     discoveringRecommendations = true;
     recommendationDiscoveryError = null;
     _notify();
     try {
       final results = await source.search('$seed songs', limit: 12);
-      if (generation != _recommendationDiscoveryGeneration || _disposed) return;
-      final seenIds = {
-        ...tracks.map((track) => track.id),
-        ...discoveredRecommendations.map((track) => track.id),
-      };
+      if (generation != _recommendationDiscoveryGeneration ||
+          _disposed ||
+          tasteKey != _recommendationTasteKey()) {
+        return;
+      }
+      final seenIds = {...tracks.expand(recommendationTrackKeys)};
       final fresh = <Track>[];
       for (final track in results) {
-        if (!seenIds.add(track.id) ||
+        final keys = recommendationTrackKeys(track);
+        if (keys.any(seenIds.contains) ||
             track.isPendingSpotifyMatch ||
             track.pageUrl == null) {
           continue;
         }
+        seenIds.addAll(keys);
         fresh.add(track);
       }
-      discoveredRecommendations = [
-        ...discoveredRecommendations,
-        ...fresh,
-      ].take(6).toList();
+      discoveredRecommendations = fresh.take(6).toList();
     } catch (exception) {
-      if (generation == _recommendationDiscoveryGeneration && !_disposed) {
+      if (generation == _recommendationDiscoveryGeneration &&
+          !_disposed &&
+          tasteKey == _recommendationTasteKey()) {
         recommendationDiscoveryError = exception.toString();
       }
     } finally {
@@ -172,6 +207,180 @@ class AppController extends ChangeNotifier {
     ++_recommendationDiscoveryGeneration;
     discoveringRecommendations = false;
     _notify();
+  }
+
+  Future<void> startPersonalDj({bool includeDiscovery = false}) async {
+    if (personalDjActive) return;
+    final preserveCurrent =
+        currentTrack != null &&
+        (_playIntent || busy || audio.isPlaying || _loadedTrackId != null);
+    final existingKeys = preserveCurrent
+        ? queue.expand(recommendationTrackKeys).toSet()
+        : <String>{};
+    final seedTracks = <Track>[];
+    final seenKeys = <String>{...existingKeys};
+    for (final track in [
+      ...recommendations.map((item) => item.track),
+      if (includeDiscovery) ...discoveredRecommendations,
+    ]) {
+      final keys = recommendationTrackKeys(track);
+      if (keys.any(seenKeys.contains)) continue;
+      seenKeys.addAll(keys);
+      seedTracks.add(track);
+      if (seedTracks.length == 6) break;
+    }
+    if (seedTracks.isEmpty) return;
+    ++_personalDjGeneration;
+    _personalDjActive = true;
+    _personalDjIncludeDiscovery = includeDiscovery;
+    _personalDjDiscoverySearches = 0;
+    personalDjError = null;
+    _personalDjSeenKeys = seenKeys;
+    _notify();
+    if (preserveCurrent) {
+      final insertAt = queueIndex + 1;
+      for (var i = 0; i < _shuffleHistory.length; i++) {
+        if (_shuffleHistory[i] >= insertAt) {
+          _shuffleHistory[i] += seedTracks.length;
+        }
+      }
+      final shiftedPlayed = _shufflePlayed
+          .map((index) => index >= insertAt ? index + seedTracks.length : index)
+          .toSet();
+      _shufflePlayed
+        ..clear()
+        ..addAll(shiftedPlayed);
+      queue.insertAll(insertAt, seedTracks);
+      await _saveQueue();
+      _notify();
+      if (audio.isPlaying) unawaited(_refillPersonalDjQueue());
+      return;
+    }
+    queue = seedTracks;
+    queueIndex = 0;
+    _shuffleHistory.clear();
+    _shufflePlayed
+      ..clear()
+      ..add(queueIndex);
+    _resumePosition = Duration.zero;
+    _playIntent = true;
+    await _playCurrent();
+  }
+
+  void stopPersonalDj() {
+    if (!_personalDjActive) return;
+    ++_personalDjGeneration;
+    _personalDjActive = false;
+    personalDjError = null;
+    _notify();
+  }
+
+  void setPersonalDjIncludeDiscovery(bool value) {
+    if (_personalDjIncludeDiscovery == value) return;
+    _personalDjIncludeDiscovery = value;
+    _notify();
+  }
+
+  Future<void> _refillPersonalDjQueue() async {
+    if (!_personalDjActive || !_playIntent || _disposed) return;
+    final pending = _personalDjRefillTask;
+    if (pending != null) {
+      await pending;
+      if (_personalDjActive && _playIntent && !_disposed) {
+        await _refillPersonalDjQueue();
+      }
+      return;
+    }
+    if (queue.isEmpty || queueIndex < 0 || queue.length >= 24) return;
+    final upcoming = shuffle
+        ? queue.length - _shufflePlayed.length
+        : queue.length - queueIndex - 1;
+    if (upcoming > 2) return;
+    final generation = _personalDjGeneration;
+    final task = _performPersonalDjRefill(generation);
+    _personalDjRefillTask = task;
+    try {
+      await task;
+    } finally {
+      if (identical(_personalDjRefillTask, task)) {
+        _personalDjRefillTask = null;
+      }
+    }
+  }
+
+  Future<void> _performPersonalDjRefill(int generation) async {
+    final target = (24 - queue.length).clamp(0, 3);
+    var added = 0;
+    void addTrack(Track track) {
+      queue.add(track);
+      _personalDjSeenKeys.addAll(recommendationTrackKeys(track));
+      added++;
+    }
+
+    final local = recommendTracks(
+      library: tracks,
+      favoriteIds: favoriteIds,
+      playlists: playlists,
+      history: recentTracks,
+      currentTrackId: currentTrack?.id,
+      limit: 24,
+    );
+    for (final recommendation in local) {
+      final track = recommendation.track;
+      final keys = recommendationTrackKeys(track);
+      if (keys.any(_personalDjSeenKeys.contains)) continue;
+      addTrack(track);
+      if (added >= target) break;
+    }
+
+    if (added < target &&
+        _personalDjIncludeDiscovery &&
+        _personalDjDiscoverySearches < 2 &&
+        generation == _personalDjGeneration &&
+        _personalDjActive) {
+      final artist =
+          strongestTasteArtist(
+            library: tracks,
+            favoriteIds: favoriteIds,
+            playlists: playlists,
+            history: recentTracks,
+          ) ??
+          currentTrack?.artist;
+      if (artist != null) {
+        _personalDjDiscoverySearches++;
+        try {
+          final results = await source.search('$artist songs', limit: 12);
+          if (generation == _personalDjGeneration &&
+              _personalDjActive &&
+              _personalDjIncludeDiscovery &&
+              !_disposed) {
+            final libraryKeys = tracks.expand(recommendationTrackKeys).toSet();
+            for (final track in results) {
+              final keys = recommendationTrackKeys(track);
+              if (track.isPendingSpotifyMatch ||
+                  track.pageUrl == null ||
+                  keys.any(libraryKeys.contains) ||
+                  keys.any(_personalDjSeenKeys.contains)) {
+                continue;
+              }
+              addTrack(track);
+              if (added >= target) break;
+            }
+          }
+        } catch (exception) {
+          if (generation == _personalDjGeneration &&
+              _personalDjActive &&
+              _personalDjIncludeDiscovery) {
+            personalDjError = exception.toString();
+            _notify();
+          }
+        }
+      }
+    }
+    if (added > 0 && generation == _personalDjGeneration && !_disposed) {
+      await _saveQueue();
+      _notify();
+    }
   }
 
   Duration? get sleepRemaining {
@@ -374,6 +583,11 @@ class AppController extends ChangeNotifier {
       search(_searchQuery, limit: (_searchLimit + 20).clamp(1, 50));
 
   Future<void> playTrack(Track track, {List<Track>? context}) async {
+    if (_personalDjActive) stopPersonalDj();
+    await _playTrack(track, context: context);
+  }
+
+  Future<void> _playTrack(Track track, {List<Track>? context}) async {
     _playIntent = true;
     _expiryRetries = 0;
     queue = List.of(context?.isNotEmpty == true ? context! : [track]);
@@ -394,6 +608,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> playQueueAt(int index) async {
     if (index < 0 || index >= queue.length) return;
+    stopPersonalDj();
     _playIntent = true;
     _expiryRetries = 0;
     queueIndex = index;
@@ -526,6 +741,11 @@ class AppController extends ChangeNotifier {
         _pendingResolveVideoId = null;
         busy = false;
         _notify();
+        if (_personalDjActive &&
+            _loadedTrackId == track.id &&
+            audio.isPlaying) {
+          unawaited(_refillPersonalDjQueue());
+        }
       }
     }
   }
@@ -548,6 +768,7 @@ class AppController extends ChangeNotifier {
       if (_controls != null && !await _controls!.activate()) return;
       if (generation != _playGeneration || _disposed) return;
       await audio.play();
+      if (_personalDjActive) unawaited(_refillPersonalDjQueue());
     } catch (exception) {
       _report(exception);
     }
@@ -635,6 +856,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> stopPlayback() async {
+    stopPersonalDj();
     ++_playGeneration;
     _playIntent = false;
     _cancelRecovery();
@@ -661,12 +883,32 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _onCompleted() async {
+    if (!_playIntent || _disposed) return;
+    final duration = audio.duration;
+    if (duration > Duration.zero &&
+        audio.position + const Duration(milliseconds: 750) < duration) {
+      return;
+    }
     if (repeat == RepeatMode.one) {
       _resumePosition = Duration.zero;
       await _playCurrent();
-    } else {
-      await next();
+      return;
     }
+    final generation = _playGeneration;
+    final occurrence = queueIndex;
+    final hasNoUpcoming = shuffle
+        ? queue.length - _shufflePlayed.length <= 0
+        : queueIndex == queue.length - 1;
+    if (_personalDjActive && hasNoUpcoming) {
+      await _refillPersonalDjQueue();
+      if (!_playIntent ||
+          _disposed ||
+          generation != _playGeneration ||
+          occurrence != queueIndex) {
+        return;
+      }
+    }
+    await next();
   }
 
   Future<void> next() async {
