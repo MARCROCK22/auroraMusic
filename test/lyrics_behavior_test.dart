@@ -264,21 +264,154 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 250));
       expect(
-        tester.widget<Text>(find.text('fixture first')).style!.fontWeight,
+        tester
+            .widget<AnimatedDefaultTextStyle>(
+              find
+                  .ancestor(
+                    of: find.text('fixture first'),
+                    matching: find.byType(AnimatedDefaultTextStyle),
+                  )
+                  .first,
+            )
+            .style
+            .fontWeight,
         FontWeight.w700,
       );
 
       await audio.seek(const Duration(seconds: 3));
       await tester.pump();
       expect(
-        tester.widget<Text>(find.text('fixture second')).style!.fontWeight,
+        tester
+            .widget<AnimatedDefaultTextStyle>(
+              find
+                  .ancestor(
+                    of: find.text('fixture second'),
+                    matching: find.byType(AnimatedDefaultTextStyle),
+                  )
+                  .first,
+            )
+            .style
+            .fontWeight,
         FontWeight.w700,
       );
       expect(
-        tester.widget<Text>(find.text('fixture first')).style!.fontWeight,
+        tester
+            .widget<AnimatedDefaultTextStyle>(
+              find
+                  .ancestor(
+                    of: find.text('fixture first'),
+                    matching: find.byType(AnimatedDefaultTextStyle),
+                  )
+                  .first,
+            )
+            .style
+            .fontWeight,
         FontWeight.w400,
       );
     });
+
+    testWidgets(
+      'tapping synced lines seeks both ways without changing play state',
+      (tester) async {
+        await mount(tester);
+        controller.queue = [_track];
+        controller.queueIndex = 0;
+        controller.notifyListeners();
+        await controller.togglePlayback();
+        service.results[_track.id]!.complete(
+          const LyricsResult(
+            LyricsKind.synced,
+            lines: [
+              LyricLine(Duration(seconds: 8), 'earlier lyric'),
+              LyricLine(Duration(seconds: 16), 'later lyric'),
+            ],
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 250));
+
+        audio.isPlaying = true;
+        audio.position = const Duration(seconds: 12);
+        audio.notifyListeners();
+        await tester.pump();
+        await tester.tap(find.text('earlier lyric'));
+        await tester.pump();
+        expect(audio.position, const Duration(seconds: 8));
+        expect(audio.isPlaying, isTrue);
+
+        await tester.tap(find.text('later lyric'));
+        await tester.pump();
+        expect(audio.position, const Duration(seconds: 16));
+        expect(audio.isPlaying, isTrue);
+
+        await controller.pausePlayback();
+        audio.position = const Duration(seconds: 12);
+        audio.notifyListeners();
+        await tester.pump();
+        await tester.tap(find.text('earlier lyric'));
+        await tester.pump();
+        expect(audio.position, const Duration(seconds: 8));
+        expect(audio.isPlaying, isFalse);
+      },
+    );
+
+    testWidgets(
+      'player controls seek, adjust volume, toggle playback, and close',
+      (tester) async {
+        var closed = false;
+        await tester.binding.setSurfaceSize(const Size(320, 650));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: LyricsPanel(
+                controller: controller,
+                service: service,
+                onClose: () => closed = true,
+              ),
+            ),
+          ),
+        );
+        controller.queue = [_track];
+        controller.queueIndex = 0;
+        controller.notifyListeners();
+        service.results[_track.id]!.complete(
+          const LyricsResult(LyricsKind.plain, text: 'Plain lyric text'),
+        );
+        await tester.pump();
+        await tester.pump();
+
+        expect(find.byTooltip('Cerrar letras'), findsOneWidget);
+        expect(find.byTooltip('Reproducir'), findsOneWidget);
+        expect(
+          find.bySemanticsLabel('Posición de reproducción'),
+          findsOneWidget,
+        );
+        expect(find.bySemanticsLabel('Volumen'), findsOneWidget);
+
+        await tester.tap(find.byTooltip('Reproducir'));
+        await tester.pumpAndSettle();
+        expect(audio.isPlaying, isTrue);
+        await tester.tap(find.byTooltip('Pausar'));
+        await tester.pumpAndSettle();
+        expect(audio.isPlaying, isFalse);
+
+        final progressSlider = find.byType(Slider).first;
+        await tester.drag(progressSlider, const Offset(45, 0));
+        await tester.pump();
+        expect(audio.position, greaterThan(Duration.zero));
+        expect(audio.isPlaying, isFalse);
+
+        final volumeSlider = find.byType(Slider).last;
+        await tester.drag(volumeSlider, const Offset(-40, 0));
+        await tester.pump();
+        expect(audio.volume, lessThan(.75));
+
+        await tester.tap(find.byTooltip('Cerrar letras'));
+        expect(closed, isTrue);
+        expect(tester.takeException(), isNull);
+      },
+    );
 
     testWidgets(
       'discards stale track result and handles narrow enlarged text',
