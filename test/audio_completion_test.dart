@@ -90,8 +90,8 @@ void main() {
         isPlaying: true,
         isBuffering: false,
         cleanEof: true,
-        decoded: duration - const Duration(milliseconds: 22),
-        consumed: duration - const Duration(milliseconds: 22),
+        decoded: duration - const Duration(milliseconds: 1001),
+        consumed: duration - const Duration(milliseconds: 1001),
         expected: duration,
       ),
       isFalse,
@@ -109,6 +109,36 @@ void main() {
         expected: const Duration(seconds: 188),
       ),
       isTrue,
+    );
+  });
+
+  test('integer metadata duration allows rounding up to one second', () {
+    for (final shortfall in [
+      const Duration(milliseconds: 500),
+      const Duration(milliseconds: 1000),
+    ]) {
+      expect(
+        isCompleteAudioStream(
+          isPlaying: true,
+          isBuffering: false,
+          cleanEof: true,
+          decoded: const Duration(seconds: 187) + shortfall,
+          consumed: const Duration(seconds: 187) + shortfall,
+          expected: const Duration(seconds: 188),
+        ),
+        isTrue,
+      );
+    }
+    expect(
+      isCompleteAudioStream(
+        isPlaying: true,
+        isBuffering: false,
+        cleanEof: true,
+        decoded: const Duration(milliseconds: 186999),
+        consumed: const Duration(milliseconds: 186999),
+        expected: const Duration(seconds: 188),
+      ),
+      isFalse,
     );
   });
 

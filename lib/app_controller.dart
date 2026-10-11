@@ -98,6 +98,7 @@ class AppController extends ChangeNotifier {
   String? _recoveryTrackId;
   String? _recoverableRemoteTrackId;
   int _expiryRetries = 0;
+  Duration _recoveryProgressPosition = Duration.zero;
 
   Track? get currentTrack =>
       queueIndex >= 0 && queueIndex < queue.length ? queue[queueIndex] : null;
@@ -208,6 +209,14 @@ class AppController extends ChangeNotifier {
   void _audioChanged() {
     final audioError = audio.lastError;
     if (audioError != null && audioError != error) error = audioError;
+    if (_playIntent &&
+        !_recovering &&
+        audio.isPlaying &&
+        audio.position - _recoveryProgressPosition >=
+            const Duration(seconds: 30)) {
+      _expiryRetries = 0;
+      _recoveryProgressPosition = audio.position;
+    }
     if (audioError != null &&
         _usingRemote &&
         _recoverableRemoteTrackId == currentTrack?.id &&
@@ -294,6 +303,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> playTrack(Track track, {List<Track>? context}) async {
     _playIntent = true;
+    _expiryRetries = 0;
     queue = List.of(context?.isNotEmpty == true ? context! : [track]);
     final remembered = {for (final item in tracks) item.id: item};
     queue = queue.map((item) => remembered[item.id] ?? item).toList();
@@ -313,6 +323,7 @@ class AppController extends ChangeNotifier {
   Future<void> playQueueAt(int index) async {
     if (index < 0 || index >= queue.length) return;
     _playIntent = true;
+    _expiryRetries = 0;
     queueIndex = index;
     _resumePosition = Duration.zero;
     _shuffleHistory.clear();
@@ -431,36 +442,46 @@ class AppController extends ChangeNotifier {
   Future<void> _recoverExpiredStream() async {
     final trackId = currentTrack?.id;
     final occurrence = queueIndex;
-    final generation = _playGeneration;
     final recoveryGeneration = ++_recoveryGeneration;
     final failedError = audio.lastError;
-    if (trackId == null || generation == 0) return;
+    final resumePosition = audio.position > Duration.zero
+        ? audio.position
+        : _resumePosition;
+    if (trackId == null || _playGeneration == 0) return;
     _recovering = true;
-    _expiryRetries++;
-    if (audio.position > Duration.zero) _resumePosition = audio.position;
+    _resumePosition = resumePosition;
     try {
-      if (_expiryRetries > 1) {
-        await Future<void>.delayed(
-          Duration(milliseconds: 250 * (_expiryRetries - 1)),
-        );
-      }
-      if (generation != _playGeneration ||
-          occurrence != queueIndex ||
-          currentTrack?.id != trackId ||
-          !_playIntent ||
-          _disposed) {
-        return;
-      }
-      await _playCurrent(fromRecovery: true);
-      if (_playIntent &&
-          occurrence == queueIndex &&
-          currentTrack?.id == trackId &&
-          _loadedTrackId == trackId &&
-          audio.isPlaying &&
-          audio.lastError == null &&
-          error == failedError) {
-        error = null;
-        _notify();
+      while (_expiryRetries < _maxStreamRecoveryAttempts) {
+        _expiryRetries++;
+        if (_expiryRetries > 1) {
+          await Future<void>.delayed(
+            Duration(milliseconds: 250 * (_expiryRetries - 1)),
+          );
+        }
+        if (recoveryGeneration != _recoveryGeneration ||
+            occurrence != queueIndex ||
+            currentTrack?.id != trackId ||
+            !_playIntent ||
+            _disposed) {
+          return;
+        }
+        _resumePosition = resumePosition;
+        await _playCurrent(fromRecovery: true);
+        if (recoveryGeneration != _recoveryGeneration ||
+            occurrence != queueIndex ||
+            currentTrack?.id != trackId ||
+            !_playIntent ||
+            _disposed) {
+          return;
+        }
+        if (_loadedTrackId == trackId &&
+            audio.isPlaying &&
+            audio.lastError == null) {
+          _recoveryProgressPosition = audio.position;
+          if (error == failedError) error = null;
+          _notify();
+          return;
+        }
       }
     } finally {
       if (recoveryGeneration == _recoveryGeneration) _recovering = false;
@@ -473,7 +494,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> togglePlayback() async {
-    if (_playIntent && (audio.isPlaying || _recovering)) {
+    if (_playIntent && (audio.isPlaying || busy || _recovering)) {
       await pausePlayback();
       await _saveQueue();
     } else {

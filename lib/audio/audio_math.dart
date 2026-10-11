@@ -28,12 +28,11 @@ bool isCompleteAudioStream({
     !isBuffering &&
     cleanEof &&
     decoded > Duration.zero &&
-    // The native mixer reports consumed time as float32. Allow one 1024-frame
-    // mix block at 48 kHz (about 21.34 ms) for conversion rounding and block
-    // granularity; larger unconsumed tails still prevent completion.
+    // The native mixer reports consumed time as float32, so allow one 1024
+    // frame mix block at 48 kHz (about 21.34 ms) for rounding and granularity.
     consumed + const Duration(microseconds: 21334) >= decoded &&
     (expected <= Duration.zero ||
-        decoded + const Duration(microseconds: 21334) >= expected);
+        decoded + const Duration(seconds: 1) >= expected);
 
 bool shouldResumeAfterSeek({
   required int request,

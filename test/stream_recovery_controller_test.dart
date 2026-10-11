@@ -20,7 +20,7 @@ const _second = Track(
 );
 
 class _FailingAudio extends FakeAudio {
-  bool failNextLoad = false;
+  int failedLoadsRemaining = 0;
 
   @override
   Future<void> load(
@@ -28,10 +28,26 @@ class _FailingAudio extends FakeAudio {
     String? ffmpegExecutable,
     Duration start = Duration.zero,
   }) async {
-    if (failNextLoad) {
-      failNextLoad = false;
+    if (failedLoadsRemaining > 0) {
+      failedLoadsRemaining--;
       throw Exception('socket timeout');
     }
+    await super.load(source, ffmpegExecutable: ffmpegExecutable, start: start);
+  }
+}
+
+class _PendingAudio extends FakeAudio {
+  final loadStarted = Completer<void>();
+  final loadGate = Completer<void>();
+
+  @override
+  Future<void> load(
+    ResolvedAudio source, {
+    String? ffmpegExecutable,
+    Duration start = Duration.zero,
+  }) async {
+    if (!loadStarted.isCompleted) loadStarted.complete();
+    await loadGate.future;
     await super.load(source, ffmpegExecutable: ffmpegExecutable, start: start);
   }
 }
@@ -80,7 +96,7 @@ void main() {
   );
 
   test(
-    'timeout recovery retries twice, clears recovered error, and stays bounded',
+    'failed refresh retries automatically and later outage recovers',
     () async {
       final source = FakeSource();
       final audio = _FailingAudio();
@@ -91,14 +107,7 @@ void main() {
       addTearDown(() => closeTestController(controller));
       await controller.playTrack(_first);
       audio.position = const Duration(seconds: 24);
-      audio.failNextLoad = true;
-      audio.lastError = 'SocketException: connection timed out';
-      audio.notifyListeners();
-      await _settle(controller);
-      expect(source.resolved, ['one', 'one']);
-      expect(audio.position, Duration.zero);
-      expect(controller.error, 'socket timeout');
-
+      audio.failedLoadsRemaining = 1;
       audio.lastError = 'SocketException: connection timed out';
       audio.notifyListeners();
       await Future<void>.delayed(const Duration(milliseconds: 300));
@@ -107,15 +116,21 @@ void main() {
       expect(audio.position, const Duration(seconds: 24));
       expect(controller.error, isNull);
 
+      // No retry is scheduled after exhausting the bounded incident budget.
       audio.lastError = 'SocketException: connection timed out';
       audio.notifyListeners();
       await _settle(controller);
       expect(source.resolved, ['one', 'one', 'one']);
       expect(controller.error, 'SocketException: connection timed out');
 
-      await controller.resumePlayback();
+      // A real 30 second advance resets the budget for a later outage.
+      audio.position = const Duration(seconds: 54);
+      audio.notifyListeners();
+      audio.lastError = 'SocketException: connection timed out';
+      audio.notifyListeners();
+      await _settle(controller);
       expect(source.resolved, ['one', 'one', 'one', 'one']);
-      expect(audio.position, const Duration(seconds: 24));
+      expect(controller.error, isNull);
     },
   );
 
@@ -187,13 +202,28 @@ void main() {
     expect(source.resolved, ['one', 'one']);
   });
 
+  test('toggle pauses an initial load that is still busy', () async {
+    final audio = _PendingAudio();
+    final controller = await createTestController(audio: audio);
+    addTearDown(() => closeTestController(controller));
+    final starting = controller.playTrack(_first);
+    await audio.loadStarted.future;
+
+    await controller.togglePlayback();
+    audio.loadGate.complete();
+    await starting;
+
+    expect(audio.isPlaying, isFalse);
+    expect(audio.loadCount, 1);
+  });
+
   test('pause cancels the bounded retry backoff', () async {
     final source = FakeSource();
     final audio = _FailingAudio();
     final controller = await createTestController(source: source, audio: audio);
     addTearDown(() => closeTestController(controller));
     await controller.playTrack(_first);
-    audio.failNextLoad = true;
+    audio.failedLoadsRemaining = 1;
     audio.lastError = 'SocketException: connection timed out';
     audio.notifyListeners();
     await _settle(controller);
