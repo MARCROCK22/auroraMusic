@@ -1,0 +1,1254 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/legacy.dart';
+import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'audio/media_controls.dart';
+import 'core/audio_backend.dart';
+import 'core/models.dart';
+import 'core/source_backend.dart';
+import 'library_database.dart';
+
+final controllerProvider = ChangeNotifierProvider<AppController>((ref) {
+  throw StateError('Override controllerProvider at application startup.');
+});
+
+class AppController extends ChangeNotifier {
+  AppController({
+    required this.audio,
+    required this.source,
+    required this.database,
+    required this.preferences,
+    required this.supportDirectory,
+  });
+  final AudioBackend audio;
+  final SourceBackend source;
+  final LibraryDatabase database;
+  final SharedPreferences preferences;
+  final Directory supportDirectory;
+  MediaControls? _controls;
+  StreamSubscription<void>? _completedSubscription;
+  bool _disposed = false;
+  bool ready = false;
+  bool busy = false;
+  bool searching = false;
+  bool diagnosing = false;
+  bool sessionBusy = false;
+  bool get hasYouTubeSession => source.cookieFile != null;
+  String? error;
+  String? diagnostics;
+  List<Track> tracks = [];
+  List<Track> searchResults = [];
+  String _searchQuery = '';
+  int _searchLimit = 20;
+  bool get hasMoreSearchResults =>
+      searchResults.length >= _searchLimit && _searchLimit < 50;
+  List<Track> recentTracks = [];
+  List<MusicPlaylist> playlists = [];
+  List<DownloadJob> downloads = [];
+  Set<String> favoriteIds = {};
+  List<Track> queue = [];
+  int queueIndex = -1;
+  bool shuffle = false;
+  RepeatMode repeat = RepeatMode.off;
+  bool eqEnabled = false;
+  List<double> eqGains = List.filled(8, 0);
+  bool adaptiveColors = true;
+  bool reducedMotion = false;
+  ThemeMode themeMode = ThemeMode.dark;
+  Color accentColor = const Color(0xffe8b568);
+  Timer? _sleepTimer;
+  DateTime? _sleepEnd;
+  int _playGeneration = 0;
+  int _searchGeneration = 0;
+  bool _processingDownloads = false;
+  Future<void>? _downloadWorker;
+  final _closed = Completer<void>();
+  Future<void> get closed => _closed.future;
+  String? _loadedTrackId;
+  Duration _resumePosition = Duration.zero;
+  final Random _random = Random();
+  final List<int> _shuffleHistory = [];
+  final Set<int> _shufflePlayed = {};
+  DateTime _lastSnapshot = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _recovering = false;
+  bool _usingRemote = false;
+  String? _recoveryTrackId;
+  int _expiryRetries = 0;
+
+  Track? get currentTrack =>
+      queueIndex >= 0 && queueIndex < queue.length ? queue[queueIndex] : null;
+  Duration? get sleepRemaining {
+    final end = _sleepEnd;
+    if (end == null) return null;
+    final remaining = end.difference(DateTime.now());
+    return remaining.isNegative ? Duration.zero : remaining;
+  }
+
+  Future<void> initialize({bool mediaControls = true}) async {
+    try {
+      tracks = await database.readTracks();
+      favoriteIds = await database.readFavorites();
+      playlists = await database.readPlaylists();
+      downloads = await database.readDownloads();
+      recentTracks = _lookup(await database.readHistory());
+      adaptiveColors = preferences.getBool('adaptiveColors') ?? true;
+      reducedMotion = preferences.getBool('reducedMotion') ?? false;
+      themeMode = ThemeMode.values.firstWhere(
+        (mode) => mode.name == preferences.getString('themeMode'),
+        orElse: () => ThemeMode.dark,
+      );
+      eqEnabled = preferences.getBool('eqEnabled') ?? false;
+      final savedGains = preferences.getStringList('eqGains');
+      if (savedGains?.length == 8) {
+        eqGains = savedGains!
+            .map((v) => (double.tryParse(v) ?? 0).clamp(-12.0, 12.0))
+            .toList();
+      }
+      queue = _lookup(preferences.getStringList('queue') ?? []);
+      queueIndex = queue.isEmpty
+          ? -1
+          : (preferences.getInt('queueIndex') ?? 0).clamp(0, queue.length - 1);
+      _resumePosition = Duration(
+        milliseconds: preferences.getInt('position') ?? 0,
+      );
+      repeat = RepeatMode.values.firstWhere(
+        (mode) => mode.name == preferences.getString('repeat'),
+        orElse: () => RepeatMode.off,
+      );
+      shuffle = preferences.getBool('shuffle') ?? false;
+      final directory = preferences.getString('toolDirectory');
+      if (directory != null && Platform.isWindows) {
+        try {
+          await source.configureToolDirectory(directory);
+        } catch (_) {
+          error =
+              'La carpeta de herramientas cambió. Configúrala en Ajustes para usar YouTube.';
+        }
+      }
+      await audio.initialize();
+      audio.setVolume(preferences.getDouble('volume') ?? 0.75);
+      audio.setEqualizer(eqEnabled, eqGains);
+      audio.addListener(_audioChanged);
+      _completedSubscription = audio.completed.listen(
+        (_) => unawaited(_onCompleted()),
+      );
+      if (mediaControls) {
+        try {
+          _controls = MediaControls(
+            audio: audio,
+            onPlay: resumePlayback,
+            onPause: audio.pause,
+            onStop: stopPlayback,
+            onNext: next,
+            onPrevious: previous,
+            onSeek: seek,
+          );
+          await _controls!.initialize();
+          _controls!.updateTrack(currentTrack);
+        } catch (_) {
+          error =
+              'No se pudieron iniciar los controles multimedia del sistema. Puedes usar los controles de la app.';
+        }
+      }
+      if (currentTrack != null) unawaited(_updateAccent(currentTrack!));
+    } catch (exception) {
+      _report(exception);
+    } finally {
+      ready = true;
+      _notify();
+    }
+  }
+
+  List<Track> _lookup(List<String> ids) {
+    final byId = {for (final track in tracks) track.id: track};
+    return ids.map((id) => byId[id]).whereType<Track>().toList();
+  }
+
+  void _audioChanged() {
+    final audioError = audio.lastError;
+    if (audioError != null && audioError != error) error = audioError;
+    if (audioError != null &&
+        _loadedTrackId != null &&
+        _usingRemote &&
+        !_recovering &&
+        _expiryRetries == 0 &&
+        RegExp(
+          r'403|410|Forbidden|expired',
+          caseSensitive: false,
+        ).hasMatch(audioError)) {
+      unawaited(_recoverExpiredStream());
+    }
+    if (audio.isPlaying &&
+        DateTime.now().difference(_lastSnapshot).inSeconds >= 5) {
+      _lastSnapshot = DateTime.now();
+      unawaited(_saveQueue());
+    }
+    _notify();
+  }
+
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
+
+  void _report(Object exception) {
+    error = exception.toString().replaceFirst(
+      RegExp(r'^(Exception|StateError|Bad state):\s*'),
+      '',
+    );
+    _notify();
+  }
+
+  void clearError() {
+    error = null;
+    _notify();
+  }
+
+  Future<void> _remember(Track track) async {
+    final index = tracks.indexWhere((item) => item.id == track.id);
+    if (index >= 0 &&
+        track.localPath == null &&
+        tracks[index].localPath != null) {
+      track = track.copyWith(localPath: tracks[index].localPath);
+    }
+    if (index < 0) {
+      tracks.insert(0, track);
+    } else {
+      tracks[index] = track;
+    }
+    await database.saveTrack(track);
+  }
+
+  Future<void> search(String query, {int limit = 20}) async {
+    final generation = ++_searchGeneration;
+    _searchQuery = query.trim();
+    _searchLimit = limit.clamp(1, 50);
+    if (query.trim().isEmpty) {
+      searchResults = [];
+      searching = false;
+      _notify();
+      return;
+    }
+    searching = true;
+    error = null;
+    _notify();
+    try {
+      final result = await source.search(query.trim(), limit: _searchLimit);
+      if (generation == _searchGeneration) searchResults = result;
+    } catch (exception) {
+      if (generation == _searchGeneration) _report(exception);
+    } finally {
+      if (generation == _searchGeneration) {
+        searching = false;
+        _notify();
+      }
+    }
+  }
+
+  Future<void> loadMoreSearch() =>
+      search(_searchQuery, limit: (_searchLimit + 20).clamp(1, 50));
+
+  Future<void> playTrack(Track track, {List<Track>? context}) async {
+    queue = List.of(context?.isNotEmpty == true ? context! : [track]);
+    final remembered = {for (final item in tracks) item.id: item};
+    queue = queue.map((item) => remembered[item.id] ?? item).toList();
+    queueIndex = queue.indexWhere((item) => item.id == track.id);
+    if (queueIndex < 0) {
+      queue.insert(0, track);
+      queueIndex = 0;
+    }
+    _shuffleHistory.clear();
+    _shufflePlayed
+      ..clear()
+      ..add(queueIndex);
+    _resumePosition = Duration.zero;
+    await _playCurrent();
+  }
+
+  Future<void> playQueueAt(int index) async {
+    if (index < 0 || index >= queue.length) return;
+    queueIndex = index;
+    _resumePosition = Duration.zero;
+    _shuffleHistory.clear();
+    _shufflePlayed
+      ..clear()
+      ..add(index);
+    await _playCurrent();
+  }
+
+  Future<void> _playCurrent() async {
+    final track = currentTrack;
+    if (track == null) return;
+    if (_recoveryTrackId != track.id) {
+      _recoveryTrackId = track.id;
+      _expiryRetries = 0;
+    }
+    final generation = ++_playGeneration;
+    busy = true;
+    error = null;
+    _loadedTrackId = null;
+    _notify();
+    try {
+      await audio.stop();
+      if (generation != _playGeneration || _disposed) return;
+      for (final item in List<Track>.of(queue)) {
+        await _remember(item);
+        if (generation != _playGeneration || _disposed) return;
+      }
+      if (generation != _playGeneration || _disposed) return;
+      final remembered = tracks
+          .where((item) => item.id == track.id)
+          .firstOrNull;
+      final local = track.localPath ?? remembered?.localPath;
+      final availableLocally = local != null && await File(local).exists();
+      if (generation != _playGeneration || _disposed) return;
+      _usingRemote = !availableLocally;
+      if (!availableLocally && track.pageUrl == null) {
+        throw StateError(
+          'El archivo ya no está disponible. Vuelve a importarlo.',
+        );
+      }
+      final resolved = availableLocally
+          ? ResolvedAudio(input: local, duration: track.duration)
+          : await source.resolve(track);
+      if (generation != _playGeneration || _disposed) return;
+      await audio.load(
+        resolved,
+        ffmpegExecutable: source.ffmpegExecutable,
+        start: _resumePosition,
+      );
+      if (generation != _playGeneration || _disposed) return;
+      _resumePosition = Duration.zero;
+      _loadedTrackId = track.id;
+      if (_controls != null && !await _controls!.activate()) {
+        throw StateError(
+          'Otra aplicación está usando el audio. Intenta reproducir de nuevo.',
+        );
+      }
+      if (generation != _playGeneration || _disposed) return;
+      await audio.play();
+      if (generation != _playGeneration || _disposed) return;
+      final readyTrack = audio.duration > Duration.zero
+          ? track.copyWith(duration: audio.duration, localPath: local)
+          : track;
+      if (generation == _playGeneration &&
+          queueIndex >= 0 &&
+          queueIndex < queue.length) {
+        queue[queueIndex] = readyTrack;
+      }
+      await _remember(readyTrack);
+      if (generation != _playGeneration || _disposed) return;
+      _controls?.updateTrack(readyTrack);
+      await database.recordPlay(track.id);
+      if (generation != _playGeneration || _disposed) return;
+      recentTracks = [
+        readyTrack,
+        ...recentTracks.where((item) => item.id != track.id),
+      ].take(100).toList();
+      await _saveQueue();
+      unawaited(_updateAccent(track));
+    } catch (exception) {
+      if (generation == _playGeneration) _report(exception);
+    } finally {
+      if (generation == _playGeneration) {
+        busy = false;
+        _notify();
+      }
+    }
+  }
+
+  Future<void> resumePlayback() async {
+    if (currentTrack == null) return;
+    if (_loadedTrackId != currentTrack!.id) {
+      await _playCurrent();
+      return;
+    }
+    try {
+      final generation = _playGeneration;
+      if (_controls != null && !await _controls!.activate()) return;
+      if (generation != _playGeneration || _disposed) return;
+      await audio.play();
+    } catch (exception) {
+      _report(exception);
+    }
+  }
+
+  Future<void> _recoverExpiredStream() async {
+    _recovering = true;
+    _expiryRetries++;
+    _resumePosition = audio.position;
+    try {
+      await _playCurrent();
+    } finally {
+      _recovering = false;
+    }
+  }
+
+  Future<void> togglePlayback() async {
+    if (audio.isPlaying) {
+      await audio.pause();
+      await _saveQueue();
+    } else {
+      await resumePlayback();
+    }
+  }
+
+  Future<void> stopPlayback() async {
+    ++_playGeneration;
+    busy = false;
+    await audio.stop();
+    _controls?.updateTrack(null);
+    _loadedTrackId = null;
+    _resumePosition = Duration.zero;
+    await _saveQueue();
+    _notify();
+  }
+
+  Future<void> seek(Duration position) async {
+    if (_loadedTrackId == null) return;
+    try {
+      await audio.seek(position);
+      await _saveQueue();
+    } catch (exception) {
+      _report(exception);
+    }
+  }
+
+  Future<void> _onCompleted() async {
+    if (repeat == RepeatMode.one) {
+      _resumePosition = Duration.zero;
+      await _playCurrent();
+    } else {
+      await next();
+    }
+  }
+
+  Future<void> next() async {
+    if (queue.isEmpty) return;
+    if (shuffle && queue.length > 1) {
+      var candidates = List.generate(
+        queue.length,
+        (i) => i,
+      ).where((i) => !_shufflePlayed.contains(i)).toList();
+      if (candidates.isEmpty) {
+        if (repeat != RepeatMode.all) {
+          await stopPlayback();
+          return;
+        }
+        _shufflePlayed
+          ..clear()
+          ..add(queueIndex);
+        candidates = List.generate(
+          queue.length,
+          (i) => i,
+        ).where((i) => i != queueIndex).toList();
+      }
+      _shuffleHistory.add(queueIndex);
+      queueIndex = candidates[_random.nextInt(candidates.length)];
+      _shufflePlayed.add(queueIndex);
+    } else if (queueIndex + 1 < queue.length) {
+      queueIndex++;
+    } else if (repeat == RepeatMode.all) {
+      queueIndex = 0;
+    } else {
+      await stopPlayback();
+      return;
+    }
+    _resumePosition = Duration.zero;
+    await _playCurrent();
+  }
+
+  Future<void> previous() async {
+    if (audio.position > const Duration(seconds: 3)) {
+      await seek(Duration.zero);
+      return;
+    }
+    if (queue.isEmpty) return;
+    if (shuffle && _shuffleHistory.isNotEmpty) {
+      queueIndex = _shuffleHistory.removeLast();
+    } else {
+      queueIndex = (queueIndex - 1).clamp(0, queue.length - 1);
+    }
+    _resumePosition = Duration.zero;
+    await _playCurrent();
+  }
+
+  Future<void> _saveQueue() async {
+    await preferences.setStringList('queue', queue.map((t) => t.id).toList());
+    await preferences.setInt('queueIndex', queueIndex);
+    await preferences.setInt(
+      'position',
+      (_loadedTrackId == null ? _resumePosition : audio.position)
+          .inMilliseconds,
+    );
+  }
+
+  Future<void> persistSession() => _saveQueue();
+  Future<void> addToQueue(Track track) async {
+    await _remember(track);
+    queue.add(track);
+    if (queueIndex < 0) queueIndex = 0;
+    await _saveQueue();
+    _notify();
+  }
+
+  Future<void> removeFromQueue(int index) async {
+    if (index < 0 || index >= queue.length) return;
+    final currentRemoved = index == queueIndex;
+    queue.removeAt(index);
+    if (index < queueIndex || queueIndex >= queue.length) queueIndex--;
+    _shuffleHistory.clear();
+    _shufflePlayed.clear();
+    if (currentRemoved) {
+      _resumePosition = Duration.zero;
+      if (queue.isEmpty) {
+        queueIndex = -1;
+        await stopPlayback();
+      } else {
+        queueIndex = index.clamp(0, queue.length - 1);
+        await _playCurrent();
+      }
+    }
+    await _saveQueue();
+    _notify();
+  }
+
+  Future<void> reorderQueue(int oldIndex, int newIndex) async {
+    if (oldIndex < 0 ||
+        oldIndex >= queue.length ||
+        newIndex < 0 ||
+        newIndex > queue.length) {
+      return;
+    }
+    final target = newIndex > oldIndex ? newIndex - 1 : newIndex;
+    final item = queue.removeAt(oldIndex);
+    queue.insert(target, item);
+    if (queueIndex == oldIndex) {
+      queueIndex = target;
+    } else if (oldIndex < queueIndex && target >= queueIndex) {
+      queueIndex--;
+    } else if (oldIndex > queueIndex && target <= queueIndex) {
+      queueIndex++;
+    }
+    _shuffleHistory.clear();
+    _shufflePlayed
+      ..clear()
+      ..add(queueIndex);
+    await _saveQueue();
+    _notify();
+  }
+
+  void setShuffle(bool value) {
+    shuffle = value;
+    _shuffleHistory.clear();
+    _shufflePlayed
+      ..clear()
+      ..add(queueIndex);
+    unawaited(preferences.setBool('shuffle', value));
+    _notify();
+  }
+
+  void cycleRepeat() {
+    repeat = RepeatMode.values[(repeat.index + 1) % RepeatMode.values.length];
+    unawaited(preferences.setString('repeat', repeat.name));
+    _notify();
+  }
+
+  Future<void> toggleFavorite(Track track) async {
+    try {
+      await _remember(track);
+      final selected = !favoriteIds.contains(track.id);
+      await database.setFavorite(track.id, selected);
+      if (selected) {
+        favoriteIds.add(track.id);
+      } else {
+        favoriteIds.remove(track.id);
+      }
+      _notify();
+    } catch (exception) {
+      _report(exception);
+    }
+  }
+
+  Future<void> createPlaylist(String name) async {
+    if (name.trim().isEmpty) return;
+    final playlist = MusicPlaylist(
+      id: 'list_${DateTime.now().microsecondsSinceEpoch}',
+      name: name.trim(),
+    );
+    await database.savePlaylist(playlist);
+    playlists.add(playlist);
+    _notify();
+  }
+
+  Future<void> renamePlaylist(MusicPlaylist playlist, String name) async {
+    if (name.trim().isEmpty) return;
+    playlist = _latestPlaylist(playlist);
+    await _replacePlaylist(
+      MusicPlaylist(
+        id: playlist.id,
+        name: name.trim(),
+        trackIds: playlist.trackIds,
+      ),
+    );
+  }
+
+  Future<void> deletePlaylist(MusicPlaylist playlist) async {
+    await database.deletePlaylist(playlist.id);
+    playlists.removeWhere((item) => item.id == playlist.id);
+    _notify();
+  }
+
+  Future<void> _replacePlaylist(MusicPlaylist playlist) async {
+    final index = playlists.indexWhere((item) => item.id == playlist.id);
+    if (index < 0) return;
+    playlists[index] = playlist;
+    await database.savePlaylist(playlist);
+    _notify();
+  }
+
+  MusicPlaylist _latestPlaylist(MusicPlaylist playlist) => playlists.firstWhere(
+    (item) => item.id == playlist.id,
+    orElse: () => playlist,
+  );
+  Future<void> addToPlaylist(MusicPlaylist playlist, Track track) async {
+    await _remember(track);
+    playlist = _latestPlaylist(playlist);
+    if (playlist.trackIds.contains(track.id)) return;
+    await _replacePlaylist(
+      MusicPlaylist(
+        id: playlist.id,
+        name: playlist.name,
+        trackIds: [...playlist.trackIds, track.id],
+      ),
+    );
+  }
+
+  Future<void> removeFromPlaylist(MusicPlaylist playlist, Track track) async {
+    playlist = _latestPlaylist(playlist);
+    await _replacePlaylist(
+      MusicPlaylist(
+        id: playlist.id,
+        name: playlist.name,
+        trackIds: playlist.trackIds.where((id) => id != track.id).toList(),
+      ),
+    );
+  }
+
+  Future<void> reorderPlaylist(
+    MusicPlaylist playlist,
+    int oldIndex,
+    int newIndex,
+  ) async {
+    playlist = _latestPlaylist(playlist);
+    final ids = List.of(playlist.trackIds);
+    if (oldIndex < 0 ||
+        oldIndex >= ids.length ||
+        newIndex < 0 ||
+        newIndex > ids.length) {
+      return;
+    }
+    ids.insert(
+      newIndex > oldIndex ? newIndex - 1 : newIndex,
+      ids.removeAt(oldIndex),
+    );
+    await _replacePlaylist(
+      MusicPlaylist(id: playlist.id, name: playlist.name, trackIds: ids),
+    );
+  }
+
+  Future<void> importFiles() async {
+    try {
+      final selection = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['mp3', 'wav', 'flac', 'ogg', 'opus', 'm4a', 'aac'],
+      );
+      if (selection.isEmpty) return;
+      final directory = Directory(p.join(supportDirectory.path, 'imports'));
+      await directory.create(recursive: true);
+      for (final file in selection) {
+        final path = file.path;
+        if (path == null) continue;
+        final id = 'local_${DateTime.now().microsecondsSinceEpoch}';
+        final destination = p.join(
+          directory.path,
+          '$id${p.extension(path).toLowerCase()}',
+        );
+        await File(path).copy(destination);
+        await _remember(
+          Track(
+            id: id,
+            title: p.basenameWithoutExtension(file.name),
+            artist: 'Archivo local',
+            localPath: destination,
+          ),
+        );
+      }
+      _notify();
+    } catch (exception) {
+      _report(exception);
+    }
+  }
+
+  Future<void> importPlaylist(String url) async {
+    busy = true;
+    _notify();
+    try {
+      final imported = await source.importPlaylist(Uri.parse(url.trim()));
+      for (final track in imported) {
+        await _remember(track);
+      }
+      final playlist = MusicPlaylist(
+        id: 'list_${DateTime.now().microsecondsSinceEpoch}',
+        name: 'Lista importada',
+        trackIds: imported.map((item) => item.id).toList(),
+      );
+      await database.savePlaylist(playlist);
+      playlists.add(playlist);
+    } catch (exception) {
+      _report(exception);
+    } finally {
+      busy = false;
+      _notify();
+    }
+  }
+
+  Future<void> downloadTrack(Track track) async {
+    if (track.isLocal ||
+        downloads.any(
+          (job) =>
+              job.track.id == track.id &&
+              (job.status == DownloadStatus.queued ||
+                  job.status == DownloadStatus.downloading ||
+                  job.status == DownloadStatus.completed),
+        )) {
+      return;
+    }
+    await _remember(track);
+    final job = DownloadJob(
+      id: 'job_${DateTime.now().microsecondsSinceEpoch}',
+      track: track,
+    );
+    downloads.insert(0, job);
+    await database.saveDownload(job);
+    _notify();
+    if (!_processingDownloads) {
+      _downloadWorker = _processDownloads();
+      unawaited(_downloadWorker);
+    }
+  }
+
+  Future<void> _processDownloads() async {
+    if (_processingDownloads || _disposed) return;
+    _processingDownloads = true;
+    try {
+      while (!_disposed) {
+        final waiting = downloads.where(
+          (job) => job.status == DownloadStatus.queued,
+        );
+        if (waiting.isEmpty) break;
+        final job = waiting.last;
+        job.status = DownloadStatus.downloading;
+        await database.saveDownload(job);
+        if (_disposed) return;
+        if (job.status == DownloadStatus.cancelled) continue;
+        _notify();
+        try {
+          final directory = Directory(
+            p.join(supportDirectory.path, 'downloads'),
+          );
+          await directory.create(recursive: true);
+          if (_disposed) return;
+          final safeId = job.track.id.replaceAll(
+            RegExp(r'[^a-zA-Z0-9_-]'),
+            '_',
+          );
+          final destination = File(p.join(directory.path, '$safeId.mp3'));
+          await source.download(
+            job.track,
+            destination,
+            jobId: job.id,
+            onProgress: (progress) {
+              if (job.status != DownloadStatus.downloading) return;
+              job.progress = progress.clamp(0, 1);
+              _notify();
+            },
+          );
+          if (_disposed) return;
+          if (job.status != DownloadStatus.cancelled) {
+            job.status = DownloadStatus.completed;
+            job.progress = 1;
+            job.localPath = destination.path;
+            final downloaded = job.track.copyWith(localPath: destination.path);
+            await _remember(downloaded);
+            queue = queue
+                .map((item) => item.id == downloaded.id ? downloaded : item)
+                .toList();
+            searchResults = searchResults
+                .map((item) => item.id == downloaded.id ? downloaded : item)
+                .toList();
+            recentTracks = recentTracks
+                .map((item) => item.id == downloaded.id ? downloaded : item)
+                .toList();
+          } else if (await destination.exists()) {
+            final root = await directory.resolveSymbolicLinks();
+            final target = await destination.resolveSymbolicLinks();
+            if (p.isWithin(root, target)) await File(target).delete();
+          }
+        } catch (exception) {
+          if (_disposed) return;
+          if (job.status != DownloadStatus.cancelled) {
+            job.status = DownloadStatus.failed;
+            job.error = exception.toString();
+          }
+        }
+        if (_disposed) return;
+        await database.saveDownload(job);
+        _notify();
+      }
+    } finally {
+      _processingDownloads = false;
+    }
+  }
+
+  Future<void> cancelDownload(DownloadJob job) async {
+    if (job.status != DownloadStatus.queued &&
+        job.status != DownloadStatus.downloading) {
+      return;
+    }
+    job.status = DownloadStatus.cancelled;
+    await source.cancel(job.id);
+    await database.saveDownload(job);
+    _notify();
+  }
+
+  Future<void> retryDownload(DownloadJob job) async {
+    if (job.status != DownloadStatus.failed &&
+        job.status != DownloadStatus.cancelled) {
+      return;
+    }
+    await downloadTrack(job.track);
+  }
+
+  Future<void> removeDownload(DownloadJob job) async {
+    if (job.status != DownloadStatus.completed) return;
+    try {
+      final localPath = job.localPath;
+      if (localPath != null && await File(localPath).exists()) {
+        final root = await Directory(
+          p.join(supportDirectory.path, 'downloads'),
+        ).resolveSymbolicLinks();
+        final target = await File(localPath).resolveSymbolicLinks();
+        if (!p.isWithin(root, target)) {
+          throw StateError('La descarga está fuera de la carpeta de Aurora.');
+        }
+        if (currentTrack?.id == job.track.id && !_usingRemote) {
+          _resumePosition = audio.position;
+          ++_playGeneration;
+          await audio.stop();
+          _loadedTrackId = null;
+          _controls?.updateTrack(null);
+        }
+        await File(target).delete();
+      }
+      final remembered = tracks
+          .where((track) => track.id == job.track.id)
+          .firstOrNull;
+      if (remembered != null) {
+        final updated = remembered.copyWith(clearLocalPath: true);
+        tracks = tracks
+            .map((track) => track.id == updated.id ? updated : track)
+            .toList();
+        queue = queue
+            .map((track) => track.id == updated.id ? updated : track)
+            .toList();
+        searchResults = searchResults
+            .map((track) => track.id == updated.id ? updated : track)
+            .toList();
+        recentTracks = recentTracks
+            .map((track) => track.id == updated.id ? updated : track)
+            .toList();
+        await database.saveTrack(updated);
+      }
+      await database.deleteDownload(job.id);
+      downloads.removeWhere((item) => item.id == job.id);
+      _notify();
+    } catch (exception) {
+      _report(exception);
+    }
+  }
+
+  void setVolume(double value) {
+    audio.setVolume(value.clamp(0, 1));
+    unawaited(preferences.setDouble('volume', value.clamp(0, 1)));
+    _notify();
+  }
+
+  void setEqualizerEnabled(bool value) {
+    eqEnabled = value;
+    audio.setEqualizer(value, eqGains);
+    unawaited(preferences.setBool('eqEnabled', value));
+    _notify();
+  }
+
+  void setEqGain(int index, double value) {
+    if (index < 0 || index >= eqGains.length) return;
+    eqGains[index] = value.clamp(-12, 12);
+    audio.setEqualizer(eqEnabled, eqGains);
+    unawaited(
+      preferences.setStringList(
+        'eqGains',
+        eqGains.map((v) => v.toString()).toList(),
+      ),
+    );
+    _notify();
+  }
+
+  void applyEqPreset(String name) {
+    eqGains = switch (name) {
+      'Graves' => [6, 3, 0, -1, -2, -2, -2, 0],
+      'Vocal' => [-3, 2, 4, 2, -1, -2, -2, 0],
+      'Rock' => [4, 1, -2, 1, 3, 2, 1, 0],
+      _ => List.filled(8, 0),
+    };
+    audio.setEqualizer(eqEnabled, eqGains);
+    unawaited(
+      preferences.setStringList(
+        'eqGains',
+        eqGains.map((v) => v.toString()).toList(),
+      ),
+    );
+    _notify();
+  }
+
+  void setThemeMode(ThemeMode value) {
+    themeMode = value;
+    unawaited(preferences.setString('themeMode', value.name));
+    _notify();
+  }
+
+  void setAdaptiveColors(bool value) {
+    adaptiveColors = value;
+    unawaited(preferences.setBool('adaptiveColors', value));
+    if (currentTrack != null) {
+      unawaited(_updateAccent(currentTrack!));
+    } else {
+      accentColor = const Color(0xffe8b568);
+    }
+    _notify();
+  }
+
+  void setReducedMotion(bool value) {
+    reducedMotion = value;
+    unawaited(preferences.setBool('reducedMotion', value));
+    _notify();
+  }
+
+  void setSleepTimer(Duration? duration) {
+    _sleepTimer?.cancel();
+    _sleepEnd = duration == null ? null : DateTime.now().add(duration);
+    if (duration != null) {
+      _sleepTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (sleepRemaining == Duration.zero) {
+          timer.cancel();
+          _sleepEnd = null;
+          unawaited(audio.pause());
+        }
+        _notify();
+      });
+    }
+    _notify();
+  }
+
+  Future<void> _updateAccent(Track track) async {
+    const fallback = Color(0xffe8b568);
+    if (!adaptiveColors || track.artworkUrl == null) {
+      accentColor = fallback;
+      _notify();
+      return;
+    }
+    final key = 'palette_${track.id}';
+    final cached = preferences.getInt(key);
+    if (cached != null) {
+      accentColor = Color(cached);
+      _notify();
+      return;
+    }
+    ui.Codec? codec;
+    ui.Image? image;
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+    try {
+      final uri = Uri.parse(track.artworkUrl!);
+      if (uri.scheme != 'https') return;
+      final request = await client.getUrl(uri);
+      final response = await request.close().timeout(
+        const Duration(seconds: 5),
+      );
+      if (response.statusCode != 200 ||
+          response.contentLength > 2 * 1024 * 1024) {
+        return;
+      }
+      final builder = BytesBuilder(copy: false);
+      await for (final bytes in response.timeout(const Duration(seconds: 5))) {
+        builder.add(bytes);
+        if (builder.length > 2 * 1024 * 1024) return;
+      }
+      codec = await ui.instantiateImageCodec(
+        builder.takeBytes(),
+        targetWidth: 32,
+        targetHeight: 32,
+      );
+      image = (await codec.getNextFrame()).image;
+      final pixels = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      if (pixels == null) return;
+      final buckets = <int, int>{};
+      final bytes = pixels.buffer.asUint8List();
+      for (var i = 0; i + 3 < bytes.length; i += 4) {
+        final color = HSLColor.fromColor(
+          Color.fromARGB(255, bytes[i], bytes[i + 1], bytes[i + 2]),
+        );
+        if (color.saturation < 0.25 ||
+            color.lightness < 0.12 ||
+            color.lightness > 0.9) {
+          continue;
+        }
+        final bucket = (color.hue / 15).floor();
+        buckets[bucket] = (buckets[bucket] ?? 0) + 1;
+      }
+      var selected = fallback;
+      if (buckets.isNotEmpty) {
+        final best = buckets.entries
+            .reduce((a, b) => a.value >= b.value ? a : b)
+            .key;
+        selected = HSLColor.fromAHSL(
+          1,
+          best * 15.0 + 7.5,
+          0.65,
+          0.65,
+        ).toColor();
+      }
+      await preferences.setInt(key, selected.toARGB32());
+      if (currentTrack?.id == track.id && adaptiveColors && !_disposed) {
+        accentColor = selected;
+        _notify();
+      }
+    } catch (_) {
+      if (currentTrack?.id == track.id) {
+        accentColor = fallback;
+        _notify();
+      }
+    } finally {
+      image?.dispose();
+      codec?.dispose();
+      client.close(force: true);
+    }
+  }
+
+  Future<void> importYouTubeSession() async {
+    if (sessionBusy) return;
+    try {
+      final files = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['txt'],
+        dialogTitle: 'Importar cookies.txt de tu sesión de YouTube',
+      );
+      if (files.isEmpty || files.first.path == null || _disposed) return;
+      await configureYouTubeSession(File(files.first.path!));
+    } catch (exception) {
+      _report(exception);
+    }
+  }
+
+  Future<void> configureYouTubeSession(File selected) async {
+    if (sessionBusy || _disposed) return;
+    sessionBusy = true;
+    _notify();
+    File? copy;
+    try {
+      if (await selected.length() > 1024 * 1024) {
+        throw ArgumentError(
+          'El archivo de sesión debe ocupar como máximo 1 MiB.',
+        );
+      }
+      final bytes = await selected.readAsBytes();
+      if (bytes.isEmpty || bytes.length > 1024 * 1024) {
+        throw ArgumentError(
+          'El archivo de sesión debe ocupar como máximo 1 MiB.',
+        );
+      }
+      final directory = Directory(p.join(supportDirectory.path, 'session'));
+      await directory.create(recursive: true);
+      final root = await supportDirectory.resolveSymbolicLinks();
+      final target = await directory.resolveSymbolicLinks();
+      if (!p.isWithin(root, target)) {
+        throw StateError('La carpeta de sesión está fuera de Aurora.');
+      }
+      copy = File(
+        p.join(target, 'youtube-${DateTime.now().microsecondsSinceEpoch}.txt'),
+      );
+      await copy.writeAsBytes(bytes, flush: true);
+      final previous = source.cookieFile;
+      await source.configureCookieFile(copy.path);
+      copy = null;
+      if (previous != selected.absolute.path) {
+        await _deleteSessionFile(previous);
+      }
+      error = null;
+      diagnostics =
+          'Sesión de YouTube importada. Puedes volver a intentar la búsqueda.';
+    } catch (exception) {
+      if (copy != null && await copy.exists()) await copy.delete();
+      _report(exception);
+    } finally {
+      sessionBusy = false;
+      _notify();
+    }
+  }
+
+  Future<void> clearYouTubeSession() async {
+    if (sessionBusy || _disposed) return;
+    sessionBusy = true;
+    _notify();
+    try {
+      final previous = source.cookieFile;
+      await source.configureCookieFile(null);
+      await _deleteSessionFile(previous);
+      diagnostics = 'Sesión de YouTube eliminada de Aurora.';
+      _notify();
+    } catch (exception) {
+      _report(exception);
+    } finally {
+      sessionBusy = false;
+      _notify();
+    }
+  }
+
+  Future<void> _deleteSessionFile(String? path) async {
+    if (path == null) return;
+    final file = File(path);
+    if (await FileSystemEntity.type(path, followLinks: false) !=
+        FileSystemEntityType.file) {
+      return;
+    }
+    final root = await supportDirectory.resolveSymbolicLinks();
+    final directory = p.join(root, 'session');
+    final target = await file.resolveSymbolicLinks();
+    if (p.isWithin(directory, target)) await File(target).delete();
+  }
+
+  Future<void> configureTools() async {
+    if (!Platform.isWindows) {
+      await runDiagnostics();
+      return;
+    }
+    try {
+      final directory = await FilePicker.getDirectoryPath(
+        dialogTitle:
+            'Carpeta con yt-dlp.exe, ffmpeg.exe, ffprobe.exe y deno.exe',
+      );
+      if (directory == null) return;
+      await source.configureToolDirectory(directory);
+      await preferences.setString('toolDirectory', directory);
+      await runDiagnostics();
+    } catch (exception) {
+      _report(exception);
+    }
+  }
+
+  Future<void> runDiagnostics() async {
+    diagnosing = true;
+    _notify();
+    try {
+      diagnostics = await source.diagnose();
+    } catch (exception) {
+      diagnostics = exception.toString();
+    } finally {
+      diagnosing = false;
+      _notify();
+    }
+  }
+
+  Future<void> clearCache() async {
+    try {
+      if (_processingDownloads) {
+        throw StateError(
+          'Espera a que terminen las descargas antes de limpiar la caché.',
+        );
+      }
+      final directory = Directory(p.join(supportDirectory.path, 'cache'));
+      if (await directory.exists()) {
+        final root = await supportDirectory.resolveSymbolicLinks();
+        final target = await directory.resolveSymbolicLinks();
+        if (!p.isWithin(root, target)) {
+          throw StateError('La caché está fuera de la carpeta de Aurora.');
+        }
+        await Directory(target).delete(recursive: true);
+      }
+      final downloadsDirectory = Directory(
+        p.join(supportDirectory.path, 'downloads'),
+      );
+      if (await downloadsDirectory.exists()) {
+        final root = await downloadsDirectory.resolveSymbolicLinks();
+        await for (final entry in downloadsDirectory.list(followLinks: false)) {
+          if (entry is! Directory ||
+              !p.basename(entry.path).startsWith('.aurora-')) {
+            continue;
+          }
+          final target = await entry.resolveSymbolicLinks();
+          if (p.isWithin(root, target)) {
+            await Directory(target).delete(recursive: true);
+          }
+        }
+      }
+      for (final key
+          in preferences
+              .getKeys()
+              .where((key) => key.startsWith('palette_'))
+              .toList()) {
+        await preferences.remove(key);
+      }
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+      diagnostics =
+          'Caché temporal eliminada. Tu biblioteca y descargas se conservaron.';
+      _notify();
+    } catch (exception) {
+      _report(exception);
+    }
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    ++_playGeneration;
+    ++_searchGeneration;
+    _sleepTimer?.cancel();
+    unawaited(_completedSubscription?.cancel());
+    audio.removeListener(_audioChanged);
+    unawaited(_saveQueue());
+    if (_controls != null) unawaited(_controls!.dispose());
+    audio.dispose();
+    source.dispose();
+    unawaited(_closeDatabase());
+    super.dispose();
+  }
+
+  Future<void> _closeDatabase() async {
+    try {
+      await _downloadWorker;
+    } finally {
+      try {
+        await database.close();
+      } finally {
+        _closed.complete();
+      }
+    }
+  }
+}
