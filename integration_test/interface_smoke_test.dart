@@ -6,6 +6,8 @@ import 'package:aurora_music/core/models.dart';
 import 'package:aurora_music/main.dart';
 import 'package:aurora_music/ui/lyrics_panel.dart';
 import 'package:aurora_music/lyrics/lyrics_service.dart';
+import 'package:aurora_music/import/spotify_import.dart';
+import 'package:aurora_music/ui/spotify_import_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,6 +15,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
 import '../test/support/fakes.dart';
+
+class _FixtureSource extends FakeSource {
+  @override
+  bool get supportsPlaybackCache => true;
+}
 
 class _FixtureLyrics extends LyricsService {
   @override
@@ -76,6 +83,7 @@ void main() {
     addTearDown(() => server.close(force: true));
     final controller = await tester.runAsync(
       () => createTestController(
+        source: _FixtureSource(),
         tracks: [
           Track(
             id: 'fixture-a',
@@ -190,6 +198,27 @@ void main() {
     await tester.tap(find.byTooltip('Biblioteca').first);
     await tester.pumpAndSettle();
     await capture('aurora-redesign-mobile-library');
+    expect(find.text('Importar de Spotify'), findsOneWidget);
+    final preview = SpotifyImportDialog.show(
+      tester.element(find.byType(Scaffold).first),
+      result: const SpotifyImportResult(
+        playlists: [
+          SpotifyImportPlaylist(
+            name: 'Música para el camino',
+            tracks: [
+              SpotifyImportTrack(title: 'Otra orilla', artist: 'Estudio'),
+            ],
+          ),
+        ],
+        skipped: 0,
+      ),
+      onImport: c.importSpotifyPlaylists,
+    );
+    await tester.pumpAndSettle();
+    await capture('aurora-102-mobile-spotify-import');
+    await tester.tap(find.text('Cancelar'));
+    await tester.pumpAndSettle();
+    await preview;
     await tester.binding.setSurfaceSize(const Size(1440, 900));
 
     await tester.pumpWidget(const SizedBox.shrink());
