@@ -73,6 +73,7 @@ class AppController extends ChangeNotifier {
   bool shuffle = false;
   RepeatMode repeat = RepeatMode.off;
   bool eqEnabled = false;
+  bool experimentalProgressivePlayback = false;
   List<double> eqGains = List.filled(8, 0);
   bool adaptiveColors = true;
   String accentPalette = 'automatic';
@@ -416,6 +417,14 @@ class AppController extends ChangeNotifier {
       adaptiveColors = accentPalette == 'automatic';
       accentColor = accentPaletteColors[accentPalette] ?? accentColor;
       reducedMotion = preferences.getBool('reducedMotion') ?? false;
+      experimentalProgressivePlayback =
+          source.supportsExperimentalProgressivePlayback &&
+          (preferences.getBool('experimentalProgressivePlayback') ?? false);
+      if (source.supportsExperimentalProgressivePlayback) {
+        source.setExperimentalProgressivePlayback(
+          experimentalProgressivePlayback,
+        );
+      }
       themeMode = ThemeMode.values.firstWhere(
         (mode) => mode.name == preferences.getString('themeMode'),
         orElse: () => ThemeMode.dark,
@@ -1639,6 +1648,17 @@ class AppController extends ChangeNotifier {
     eqEnabled = value;
     audio.setEqualizer(value, eqGains);
     unawaited(preferences.setBool('eqEnabled', value));
+    _notify();
+  }
+
+  void setExperimentalProgressivePlayback(bool value) {
+    if (!source.supportsExperimentalProgressivePlayback ||
+        experimentalProgressivePlayback == value) {
+      return;
+    }
+    experimentalProgressivePlayback = value;
+    source.setExperimentalProgressivePlayback(value);
+    unawaited(preferences.setBool('experimentalProgressivePlayback', value));
     _notify();
   }
 
