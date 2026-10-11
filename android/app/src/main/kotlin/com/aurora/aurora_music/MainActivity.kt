@@ -1,9 +1,11 @@
 package com.aurora.aurora_music
 
 import android.net.Uri
+import android.media.MediaMetadataRetriever
 import android.os.Handler
 import android.os.Looper
 import android.system.Os
+import android.system.OsConstants
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import com.yausername.ffmpeg.FFmpeg
@@ -81,10 +83,15 @@ class MainActivity : AudioServiceActivity() {
             if (call.method == "cancel") {
                 val cancelledJob = call.argument<String>("jobId")
                 if (cancelledJob == null) { result.error("SOURCE_ERROR", "Identificador requerido", null); return@setMethodCallHandler }
-                cancelledDownloads.add(cancelledJob)
+                val alias = cancelledJob.removePrefix("resolve:")
+                if (alias != cancelledJob) {
+                    cancelledDownloads.add(cancelledJob)
+                    jobs.keys.filter { it.startsWith("resolve-$alias-") }.forEach { cancelledDownloads.add(it) }
+                } else cancelledDownloads.add(cancelledJob)
                 controls.execute {
                     try {
-                        jobs[cancelledJob]?.let { YoutubeDL.destroyProcessById(it) }
+                        val matching = if (alias != cancelledJob) jobs.filterKeys { it.startsWith("resolve-$alias-") } else mapOf(cancelledJob to jobs[cancelledJob])
+                        matching.values.filterNotNull().forEach { YoutubeDL.destroyProcessById(it) }
                         main.post { result.success(null) }
                     } catch(error: Exception) { main.post { result.error("SOURCE_ERROR", redact(error.message), null) } }
                 }
@@ -92,6 +99,12 @@ class MainActivity : AudioServiceActivity() {
             }
             val work = Runnable {
                 try {
+                    val job = call.argument<String>("jobId")
+                    if (call.method == "cacheAudio") {
+                        requireNotNull(job) { "Identificador requerido" }
+                        val videoId = requireNotNull(call.argument<String>("videoId"))
+                        check(!cancelledDownloads.remove(job) && !cancelledDownloads.remove("resolve:$videoId")) { "Descarga cancelada" }
+                    }
                     initialize()
                     val target = call.argument<String>("target") ?: ""
                     val answer: Any? = when (call.method) {
@@ -112,6 +125,47 @@ class MainActivity : AudioServiceActivity() {
                             val watchdog = timeouts.schedule(Runnable { YoutubeDL.destroyProcessById(internalId) }, 90, TimeUnit.SECONDS)
                             try { YoutubeDL.execute(request, internalId).out }
                             finally { watchdog.cancel(false) }
+                        }
+                        "cacheAudio" -> {
+                            validateYouTube(target)
+                            val videoId = requireNotNull(call.argument<String>("videoId"))
+                            require(videoId.matches(Regex("[A-Za-z0-9_-]{11}"))) { "Identificador de video inv\u00e1lido" }
+                            val uri = Uri.parse(target)
+                            val targetId = if (uri.host == "youtu.be") uri.lastPathSegment else uri.getQueryParameter("v")
+                            require(targetId == videoId) { "El identificador de video no coincide con el enlace" }
+                            val support = filesDir.canonicalFile
+                            val directory = File(requireNotNull(call.argument<String>("directory"))).canonicalFile
+                            require(directory.toPath().startsWith(support.toPath()) && directory.isDirectory) { "Destino de cach\u00e9 fuera del almacenamiento privado" }
+                            val jobId = requireNotNull(job)
+                            check(!cancelledDownloads.contains(jobId)) { "Descarga cancelada" }
+                            val internalId = UUID.randomUUID().toString()
+                            require(jobs.putIfAbsent(jobId, internalId) == null) { "Descarga duplicada" }
+                            try {
+                                val request = request(target, call.argument<String>("cookieFile"))
+                                request.addOption("--no-playlist")
+                                request.addOption("-f", "bestaudio/best")
+                                request.addOption("--max-filesize", "512M")
+                                request.addOption("-o", File(directory, "audio.%(ext)s").absolutePath)
+                                YoutubeDL.execute(request, internalId) { progress, _, _ ->
+                                    if (cancelledDownloads.contains(jobId)) YoutubeDL.destroyProcessById(internalId)
+                                    main.post { source.invokeMethod("progress", mapOf("jobId" to jobId, "progress" to (progress / 100.0).coerceIn(0.0, 1.0))) }
+                                }
+                                check(!cancelledDownloads.contains(jobId)) { "Descarga cancelada" }
+                                val outputs = directory.listFiles()?.filter {
+                                    it.name.matches(Regex("audio\\.[A-Za-z0-9]{1,8}")) &&
+                                        isRegularFileNoFollow(it) && it.canonicalFile.parentFile == directory
+                                }.orEmpty()
+                                require(outputs.size == 1 && outputs.single().length() in 1..(512L * 1024 * 1024)) { "Descarga de audio incompleta o inv\u00e1lida" }
+                                val duration = audioDuration(outputs.single())
+                                check(!cancelledDownloads.contains(jobId)) { "Descarga cancelada" }
+                                duration.toString()
+                            } finally { jobs.remove(jobId); cancelledDownloads.remove(jobId) }
+                        }
+                        "probeAudio" -> {
+                            val support = filesDir.canonicalFile
+                            val file = File(requireNotNull(call.argument<String>("path"))).canonicalFile
+                            require(file.toPath().startsWith(support.toPath()) && isRegularFileNoFollow(file) && file.length() in 1..(512L * 1024 * 1024)) { "Archivo de audio fuera de la cach\u00e9 privada" }
+                            audioDuration(file).toString()
                         }
                         "download" -> {
                             validateYouTube(target)
@@ -236,6 +290,18 @@ class MainActivity : AudioServiceActivity() {
         val uri = Uri.parse(value)
         require(uri.scheme == "https" && uri.host in setOf("youtube.com","www.youtube.com","music.youtube.com","m.youtube.com","youtu.be") && uri.userInfo == null && (uri.port == -1 || uri.port == 443)) { "Usa un enlace HTTPS de YouTube" }
     }
+    private fun audioDuration(file: File): Long {
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(file.absolutePath)
+            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            require(duration > 0) { "El audio no contiene una duraci\u00f3n v\u00e1lida" }
+            return duration
+        } finally { retriever.release() }
+    }
+    private fun isRegularFileNoFollow(file: File): Boolean = try {
+        OsConstants.S_ISREG(Os.lstat(file.absolutePath).st_mode)
+    } catch (_: Exception) { false }
     private fun redact(message: String?): String = (message ?: "Error de audio").replace(Regex("https?://[^\\s<>\\\"']+")) { match ->
         try { Uri.parse(match.value).buildUpon().clearQuery().fragment(null).build().toString() }
         catch (_: Exception) { "[URL]" }

@@ -10,6 +10,160 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   test(
+    'Android cache hits validated audio and publishes only complete matching files',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final source = YtDlpSource(
+        await SharedPreferences.getInstance(),
+        androidOverride: true,
+        audioDuration: (_) async => const Duration(minutes: 1),
+      );
+      final support = await Directory.systemTemp.createTemp(
+        'aurora-android-cache-',
+      );
+      const pathProvider = MethodChannel('plugins.flutter.io/path_provider');
+      const native = MethodChannel('aurora/source');
+      var downloads = 0;
+      TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
+        ..setMockMethodCallHandler(pathProvider, (call) async => support.path)
+        ..setMockMethodCallHandler(native, (call) async {
+          if (call.method == 'cacheAudio') {
+            downloads++;
+            if (downloads == 1) {
+              final directory = Directory(
+                call.arguments['directory'] as String,
+              );
+              await File(
+                '${directory.path}/audio.webm',
+              ).writeAsBytes([1, 2, 3]);
+              return '10000';
+            }
+            return '60000';
+          }
+          return null;
+        });
+      try {
+        final cache = Directory('${support.path}/yt-dlp-audio');
+        await cache.create();
+        final cached = File('${cache.path}/abcdefghijk.audio');
+        await cached.writeAsBytes([1, 2]);
+        final hit = await source.resolve(
+          const Track(
+            id: 'sp:stable-spotify-id',
+            title: 'Imported',
+            artist: 'Artist',
+            duration: Duration(minutes: 1),
+            pageUrl: 'https://youtu.be/abcdefghijk',
+          ),
+        );
+        expect(hit.input, p.normalize(cached.path));
+        expect(downloads, 0);
+
+        final sourceWithMismatch = YtDlpSource(
+          await SharedPreferences.getInstance(),
+          androidOverride: true,
+          audioDuration: (_) async => const Duration(seconds: 10),
+        );
+        try {
+          await expectLater(
+            sourceWithMismatch.resolve(
+              const Track(
+                id: 'sp:stable-spotify-id',
+                title: 'Imported',
+                artist: 'Artist',
+                duration: Duration(minutes: 1),
+                pageUrl: 'https://youtu.be/abcdefghijk',
+              ),
+            ),
+            throwsA(isA<StateError>()),
+          );
+          expect(await cached.exists(), isFalse);
+          expect(downloads, 1);
+          await expectLater(
+            sourceWithMismatch.resolve(
+              const Track(
+                id: 'yt:lmnopqrstuv',
+                title: 'Partial',
+                artist: 'Artist',
+                duration: Duration(minutes: 1),
+                pageUrl: 'https://youtu.be/lmnopqrstuv',
+              ),
+            ),
+            throwsA(isA<StateError>()),
+          );
+          expect(downloads, 2);
+          expect(await source.playbackCacheInfo(), (bytes: 0, files: 0));
+        } finally {
+          sourceWithMismatch.dispose();
+        }
+      } finally {
+        TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
+          ..setMockMethodCallHandler(pathProvider, null)
+          ..setMockMethodCallHandler(native, null);
+        source.dispose();
+        await support.delete(recursive: true);
+      }
+    },
+  );
+  test(
+    'Android cache rejects partial output, cancels probing by resolve alias, and protects playing audio on clear',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final probeStarted = Completer<void>();
+      final probeResult = Completer<Duration?>();
+      final source = YtDlpSource(
+        await SharedPreferences.getInstance(),
+        androidOverride: true,
+        audioDuration: (_) {
+          probeStarted.complete();
+          return probeResult.future;
+        },
+      );
+      final support = await Directory.systemTemp.createTemp(
+        'aurora-android-cache-',
+      );
+      const pathProvider = MethodChannel('plugins.flutter.io/path_provider');
+      const native = MethodChannel('aurora/source');
+      TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
+        ..setMockMethodCallHandler(pathProvider, (call) async => support.path)
+        ..setMockMethodCallHandler(native, (call) async => null);
+      try {
+        final cache = Directory('${support.path}/yt-dlp-audio');
+        await cache.create();
+        final protected = File('${cache.path}/abcdefghijk.audio');
+        final removable = File('${cache.path}/lmnopqrstuv.audio');
+        await protected.writeAsBytes([1, 2, 3]);
+        await removable.writeAsBytes([4, 5]);
+        final resolving = source.resolve(
+          const Track(
+            id: 'sp:spotify-id',
+            title: 'Imported',
+            artist: 'Artist',
+            duration: Duration(minutes: 1),
+            pageUrl: 'https://youtu.be/abcdefghijk',
+          ),
+        );
+        await probeStarted.future;
+        await source.cancel('resolve:abcdefghijk');
+        probeResult.complete(const Duration(minutes: 1));
+        await expectLater(resolving, throwsA(isA<StateError>()));
+        expect(
+          await source.clearPlaybackCache(protectedPath: protected.path),
+          2,
+        );
+        expect(await protected.exists(), isTrue);
+        expect(await removable.exists(), isFalse);
+      } finally {
+        if (!probeResult.isCompleted) probeResult.complete(null);
+        TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
+          ..setMockMethodCallHandler(pathProvider, null)
+          ..setMockMethodCallHandler(native, null);
+        source.dispose();
+        await support.delete(recursive: true);
+      }
+    },
+  );
+  test(
     'Active source operations prevent session changes and release the guard on error',
     () async {
       SharedPreferences.setMockInitialValues({});
