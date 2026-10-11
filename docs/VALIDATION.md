@@ -96,6 +96,17 @@ La búsqueda se envía solo con Enter o la flecha. La prueba de interfaz comprue
 
 ## Matriz de dispositivos pendiente
 
+## Cambios y comprobaciones de 1.0.2+3
+
+- `flutter analyze`: sin incidencias; `flutter test`: 107 pruebas aprobadas. Incluyen reintentos automáticos sin una segunda notificación manual, pausa durante resolución y espera, conservación de posición/aparición de la cola, duración redondeada y rechazo de truncamientos reales.
+- Windows, canción reportada `__qvPGatwus` (Ado): el acceso directo FFmpeg devolvió HTTP 403 en la prueba inicial, mientras yt-dlp descargó 2 942 234 bytes y ffprobe midió 187.981 s. La prueba nativa silenciosa reprodujo toda la canción hasta una única finalización natural; después verificó saltos rápidos y que una pausa durante un salto prevalezca. No se afirma que el 403 inicial demuestre la causa exacta del corte observado a 02:05.
+- Caché Windows: publicación tras finalizar yt-dlp y validar audio/duración, rutas privadas restringidas, límite de 512 MB, limpieza automática y manual que protege el archivo cargado. Pruebas cubren duración incompleta, cancelación durante ffprobe, archivos ajenos, enlaces y conservación de reproducción/biblioteca. Una comprobación nativa adicional reprodujo y buscó el EOF usando un ID estable de una canción importada de Spotify.
+- Spotify: JSON de playlists y CSV, selección/cancelación, orden y repeticiones, persistencia de metadatos, elección explícita de YouTube y errores de guardado. Diálogos probados a 320 dp con texto al 200 %. La importación no utiliza la API de Spotify y no transfiere audio, credenciales ni historial de escucha.
+- Interfaz nativa Windows: navegación, biblioteca con Me gusta/listas, temas, vinilo, descargas, cola, letras y vista previa Spotify a 1440×900 y 390×844. Capturas con datos de prueba; paleta Morado inspeccionada visualmente. La selección manual de paleta prevalece sobre extracciones de portada pendientes.
+- Evidencias locales: `build/aurora-102-final-unit.log`, `build/aurora-102-final-analyze.log`, `build/aurora-102-ado-full-native.log`, `build/aurora-102-native-imported-cache.log`, `build/aurora-102-native-truncation-pause.log` y `build/aurora-102-final-ui-native.log`.
+
+La matriz física de auriculares y teléfonos sigue pendiente. Las comprobaciones de paquetes release se registran al terminar su compilación; no se deducen de pruebas con audio simulado.
+
 ### Distribución sincronizada 1.0.1+2
 
 Android ARM64: `dist/actualizado/Aurora-Android-arm64-release.apk`; manifest 1.0.1, código 2, `debuggable=false`, firma privada v2, 265 ELF alineados a 16 KB y hash del recurso yt-dlp verificado dentro del APK. Windows: `dist/actualizado/Aurora-Windows-20261011-155409-b1fdc9cc.zip`; ejecutable 1.0.1+2, motor Flutter release verificado y arranque independiente aprobado. Ambos se compilaron secuencialmente desde el mismo código y usan yt-dlp 2026.08.19. Sus SHA-256 acompañan los paquetes. Logs finales: `build/android-final-synchronized-build.log`, `build/android-final-synchronized-signature.log`, `build/android-final-synchronized-alignment.log`, `build/windows-final-synchronized-build.log` y `build/windows-final-synchronized-package.log`.
