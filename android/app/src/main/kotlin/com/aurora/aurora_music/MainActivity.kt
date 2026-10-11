@@ -1,6 +1,8 @@
 package com.aurora.aurora_music
 
 import android.net.Uri
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.os.Handler
 import android.os.Looper
@@ -23,6 +25,8 @@ import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.TimeoutException
+import java.util.concurrent.FutureTask
 
 class MainActivity : AudioServiceActivity() {
     private val sourceWorkers = ThreadPoolExecutor(2, 2, 0, TimeUnit.MILLISECONDS, ArrayBlockingQueue<Runnable>(8))
@@ -33,6 +37,7 @@ class MainActivity : AudioServiceActivity() {
     private val main = Handler(Looper.getMainLooper())
     private val jobs = ConcurrentHashMap<String, String>()
     private val cancelledDownloads = ConcurrentHashMap.newKeySet<String>()
+    private val timedOutDownloads = ConcurrentHashMap.newKeySet<String>()
     private val pcm = ConcurrentHashMap<String, Process>()
     private val pcmErrors = ConcurrentHashMap<String, StringBuilder>()
     private var initialized = false
@@ -140,6 +145,10 @@ class MainActivity : AudioServiceActivity() {
                             check(!cancelledDownloads.contains(jobId)) { "Descarga cancelada" }
                             val internalId = UUID.randomUUID().toString()
                             require(jobs.putIfAbsent(jobId, internalId) == null) { "Descarga duplicada" }
+                            val watchdog = timeouts.schedule(Runnable {
+                                timedOutDownloads.add(jobId)
+                                try { YoutubeDL.destroyProcessById(internalId) } catch (_: Exception) { }
+                            }, 30, TimeUnit.MINUTES)
                             try {
                                 val request = request(target, call.argument<String>("cookieFile"))
                                 request.addOption("--no-playlist")
@@ -150,6 +159,7 @@ class MainActivity : AudioServiceActivity() {
                                     if (cancelledDownloads.contains(jobId)) YoutubeDL.destroyProcessById(internalId)
                                     main.post { source.invokeMethod("progress", mapOf("jobId" to jobId, "progress" to (progress / 100.0).coerceIn(0.0, 1.0))) }
                                 }
+                                check(!timedOutDownloads.contains(jobId)) { "La descarga de audio superó 30 minutos" }
                                 check(!cancelledDownloads.contains(jobId)) { "Descarga cancelada" }
                                 val outputs = directory.listFiles()?.filter {
                                     it.name.matches(Regex("audio\\.[A-Za-z0-9]{1,8}")) &&
@@ -157,9 +167,15 @@ class MainActivity : AudioServiceActivity() {
                                 }.orEmpty()
                                 require(outputs.size == 1 && outputs.single().length() in 1..(512L * 1024 * 1024)) { "Descarga de audio incompleta o inv\u00e1lida" }
                                 val duration = audioDuration(outputs.single())
+                                check(!timedOutDownloads.contains(jobId)) { "La descarga de audio superó 30 minutos" }
                                 check(!cancelledDownloads.contains(jobId)) { "Descarga cancelada" }
                                 duration.toString()
-                            } finally { jobs.remove(jobId); cancelledDownloads.remove(jobId) }
+                            } finally {
+                                watchdog.cancel(false)
+                                jobs.remove(jobId)
+                                cancelledDownloads.remove(jobId)
+                                timedOutDownloads.remove(jobId)
+                            }
                         }
                         "probeAudio" -> {
                             val support = filesDir.canonicalFile
@@ -291,13 +307,69 @@ class MainActivity : AudioServiceActivity() {
         require(uri.scheme == "https" && uri.host in setOf("youtube.com","www.youtube.com","music.youtube.com","m.youtube.com","youtu.be") && uri.userInfo == null && (uri.port == -1 || uri.port == 443)) { "Usa un enlace HTTPS de YouTube" }
     }
     private fun audioDuration(file: File): Long {
-        val retriever = MediaMetadataRetriever()
-        try {
-            retriever.setDataSource(file.absolutePath)
-            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-            require(duration > 0) { "El audio no contiene una duraci\u00f3n v\u00e1lida" }
-            return duration
-        } finally { retriever.release() }
+        val hasAudioTrack = try {
+            val extractor = MediaExtractor()
+            try {
+                extractor.setDataSource(file.absolutePath)
+                (0 until extractor.trackCount).any { index ->
+                    extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
+                }
+            } finally { extractor.release() }
+        } catch (_: Exception) { false }
+        if (hasAudioTrack) {
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(file.absolutePath)
+                val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                if (duration > 0) return duration
+            } catch (_: Exception) {
+                // Fall back to the bundled ffprobe for formats Android's media APIs cannot inspect.
+            } finally { retriever.release() }
+        }
+        return ffprobeAudioDuration(file)
+    }
+    private fun ffprobeAudioDuration(file: File): Long {
+        val ffprobe = File(applicationInfo.nativeLibraryDir, "libffprobe.so")
+        if (!ffprobe.isFile) throw IOException("No se encuentra el ffprobe integrado")
+        val packages = File(noBackupFilesDir, "youtubedl-android/packages")
+        val builder = ProcessBuilder(
+            ffprobe.absolutePath, "-v", "error", "-select_streams", "a:0",
+            "-show_entries", "stream=codec_type:format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", file.absolutePath,
+        ).redirectErrorStream(true)
+        builder.environment()["LD_LIBRARY_PATH"] = "${packages.absolutePath}/ffmpeg/usr/lib:${packages.absolutePath}/python/usr/lib"
+        val process = builder.start()
+        val output = FutureTask {
+            process.inputStream.bufferedReader().use { it.readText() }
+        }
+        Thread(output, "aurora-ffprobe-output").apply { isDaemon = true; start() }
+        val text = try {
+            output.get(30, TimeUnit.SECONDS)
+        } catch (_: TimeoutException) {
+            process.destroyForcibly()
+            output.cancel(true)
+            throw IOException("ffprobe tardó demasiado en validar el audio")
+        } catch (error: Exception) {
+            process.destroyForcibly()
+            output.cancel(true)
+            throw error
+        }
+        if (!process.waitFor(2, TimeUnit.SECONDS)) {
+            process.destroyForcibly()
+            throw IOException("ffprobe tardó demasiado en validar el audio")
+        }
+        if (process.exitValue() != 0) {
+            throw IOException("ffprobe no pudo validar el audio")
+        }
+        val values = text.lineSequence().map(String::trim).filter(String::isNotEmpty).toList()
+        if (values.size < 2 || values.first() != "audio") {
+            throw IOException("El archivo no contiene una pista de audio")
+        }
+        val seconds = values.last().toDoubleOrNull()
+        if (seconds == null || !seconds.isFinite() || seconds <= 0) {
+            throw IOException("El audio no contiene una duración válida")
+        }
+        return (seconds * 1000).toLong()
     }
     private fun isRegularFileNoFollow(file: File): Boolean = try {
         OsConstants.S_ISREG(Os.lstat(file.absolutePath).st_mode)

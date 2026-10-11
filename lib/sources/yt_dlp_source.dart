@@ -985,8 +985,9 @@ class YtDlpSource extends SourceBackend {
     if (_isAndroid) {
       if (jobId.startsWith('resolve:')) {
         final videoId = jobId.substring('resolve:'.length);
-        for (final activeId in _resolveJobs[videoId] ?? const <String>{}) {
-          _cancelled.add(activeId);
+        final activeIds = (_resolveJobs[videoId] ?? const <String>{}).toList();
+        _cancelled.addAll(activeIds);
+        for (final activeId in activeIds) {
           await _channel.invokeMethod('cancel', {'jobId': activeId});
         }
       } else {

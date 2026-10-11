@@ -106,6 +106,71 @@ void main() {
     },
   );
   test(
+    'Android resolve alias cancellation snapshots concurrent jobs before awaiting native cancellation',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final bothProbing = Completer<void>();
+      final probeResult = Completer<Duration?>();
+      var probeCount = 0;
+      final source = YtDlpSource(
+        await SharedPreferences.getInstance(),
+        androidOverride: true,
+        audioDuration: (_) {
+          if (++probeCount == 2) bothProbing.complete();
+          return probeResult.future;
+        },
+      );
+      final support = await Directory.systemTemp.createTemp(
+        'aurora-android-cancel-',
+      );
+      const pathProvider = MethodChannel('plugins.flutter.io/path_provider');
+      const native = MethodChannel('aurora/source');
+      final completedResolves = <Future<void>>[];
+      TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
+        ..setMockMethodCallHandler(pathProvider, (call) async => support.path)
+        ..setMockMethodCallHandler(native, (call) async {
+          if (call.method == 'cancel') {
+            if (!probeResult.isCompleted) {
+              probeResult.complete(const Duration(minutes: 1));
+            }
+            await Future.wait(completedResolves);
+          }
+          return null;
+        });
+      try {
+        final cache = Directory('${support.path}/yt-dlp-audio');
+        await cache.create();
+        await File('${cache.path}/abcdefghijk.audio').writeAsBytes([1]);
+        const track = Track(
+          id: 'sp:shared-import',
+          title: 'Imported',
+          artist: 'Artist',
+          duration: Duration(minutes: 1),
+          pageUrl: 'https://youtu.be/abcdefghijk',
+        );
+        final resolves = [source.resolve(track), source.resolve(track)];
+        completedResolves.addAll(
+          resolves.map((future) async {
+            try {
+              await future;
+            } catch (_) {}
+          }),
+        );
+        await bothProbing.future;
+        await source.cancel('resolve:abcdefghijk');
+        await Future.wait(completedResolves);
+        expect(probeCount, 2);
+      } finally {
+        if (!probeResult.isCompleted) probeResult.complete(null);
+        TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
+          ..setMockMethodCallHandler(pathProvider, null)
+          ..setMockMethodCallHandler(native, null);
+        source.dispose();
+        await support.delete(recursive: true);
+      }
+    },
+  );
+  test(
     'Android cache rejects partial output, cancels probing by resolve alias, and protects playing audio on clear',
     () async {
       SharedPreferences.setMockInitialValues({});
