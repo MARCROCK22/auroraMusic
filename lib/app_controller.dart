@@ -849,7 +849,7 @@ class AppController extends ChangeNotifier {
       );
       playbackCacheMessage = removed == 0
           ? 'No hay archivos temporales que limpiar. La canción actual se conserva.'
-          : 'Caché limpiada: $removed archivos temporales. La canción actual se conserva.';
+          : 'Caché limpiada: ${(removed / (1024 * 1024)).toStringAsFixed(1)} MB liberados. La canción actual se conserva.';
     } catch (exception) {
       _report(exception);
     } finally {

@@ -659,7 +659,7 @@ class YtDlpSource extends SourceBackend {
     await cache.create(recursive: true);
     final cachePath = await cache.resolveSymbolicLinks();
     if (!p.isWithin(supportPath, cachePath)) {
-      throw StateError('The audio cache directory is not safe.');
+      throw StateError('La carpeta de audio en caché no es segura.');
     }
     return cache;
   }

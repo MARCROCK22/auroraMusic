@@ -5,6 +5,8 @@ abstract class SourceBackend {
   bool get supportsPlaybackCache => false;
   Future<({int bytes, int files})> playbackCacheInfo() async =>
       (bytes: 0, files: 0);
+
+  /// Returns bytes removed while preserving the loaded audio at [protectedPath].
   Future<int> clearPlaybackCache({String? protectedPath}) async => 0;
   Future<List<Track>> search(String query, {int limit = 20});
   Future<List<Track>> importPlaylist(Uri url);
