@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:aurora_music/sources/yt_dlp_source.dart';
 import 'package:aurora_music/core/models.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -179,6 +182,259 @@ void main() {
         source.dispose();
       }
     },
+  );
+  test(
+    'Windows cache info and clear touch only owned files and preserve loaded audio',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final source = YtDlpSource(await SharedPreferences.getInstance());
+      final support = await Directory.systemTemp.createTemp(
+        'aurora-cache-test-',
+      );
+      const pathProvider = MethodChannel('plugins.flutter.io/path_provider');
+      TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
+          .setMockMethodCallHandler(pathProvider, (call) async => support.path);
+      try {
+        final cache = Directory('${support.path}/yt-dlp-audio');
+        await cache.create();
+        final playing = File('${cache.path}/abcdefghijk.audio');
+        final removable = File('${cache.path}/lmnopqrstuv.audio');
+        final foreign = File('${cache.path}/library-song.mp3');
+        final outside = File('${support.parent.path}/outside.audio');
+        await playing.writeAsBytes([1, 2, 3]);
+        await removable.writeAsBytes([4, 5, 6, 7]);
+        await File('${cache.path}/not_a_video!.audio').writeAsBytes([8, 9]);
+        await foreign.writeAsBytes([10, 11]);
+        await outside.writeAsBytes([12, 13]);
+
+        expect(source.supportsPlaybackCache, isTrue);
+        expect(await source.playbackCacheInfo(), (bytes: 7, files: 2));
+        expect(await source.clearPlaybackCache(protectedPath: playing.path), 4);
+        expect(await playing.exists(), isTrue);
+        expect(await removable.exists(), isFalse);
+        expect(await foreign.exists(), isTrue);
+        expect(await File('${cache.path}/not_a_video!.audio').exists(), isTrue);
+        expect(await outside.exists(), isTrue);
+        expect(await source.playbackCacheInfo(), (bytes: 3, files: 1));
+        await outside.delete();
+      } finally {
+        TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
+            .setMockMethodCallHandler(pathProvider, null);
+        source.dispose();
+        await support.delete(recursive: true);
+      }
+    },
+    skip: !Platform.isWindows,
+  );
+  test(
+    'Windows cache clear refuses to race an active resolve',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'toolDirectory': r'C:\aurora-test-tools',
+      });
+      final probeStarted = Completer<void>();
+      final probeResult = Completer<Duration?>();
+      final source = YtDlpSource(
+        await SharedPreferences.getInstance(),
+        audioDuration: (_) {
+          probeStarted.complete();
+          return probeResult.future;
+        },
+      );
+      final support = await Directory.systemTemp.createTemp(
+        'aurora-cache-test-',
+      );
+      const pathProvider = MethodChannel('plugins.flutter.io/path_provider');
+      TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
+          .setMockMethodCallHandler(pathProvider, (call) async => support.path);
+      try {
+        final cache = Directory('${support.path}/yt-dlp-audio');
+        await cache.create();
+        await File('${cache.path}/abcdefghijk.audio').writeAsBytes([1, 2, 3]);
+        final resolving = source.resolve(
+          const Track(
+            id: 'sp:spotify-track-id',
+            title: 'Imported track',
+            artist: 'Spotify',
+            duration: Duration(minutes: 1),
+            pageUrl: 'https://youtu.be/abcdefghijk',
+          ),
+        );
+        await probeStarted.future;
+        await expectLater(
+          source.clearPlaybackCache(),
+          throwsA(isA<StateError>()),
+        );
+        probeResult.complete(const Duration(minutes: 1));
+        await resolving;
+      } finally {
+        if (!probeResult.isCompleted) probeResult.complete(null);
+        TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
+            .setMockMethodCallHandler(pathProvider, null);
+        source.dispose();
+        await support.delete(recursive: true);
+      }
+    },
+    skip: !Platform.isWindows,
+  );
+  test(
+    'Windows audio cache derives Spotify IDs from safe YouTube page URLs',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'toolDirectory': r'C:\aurora-test-tools',
+      });
+      final source = YtDlpSource(
+        await SharedPreferences.getInstance(),
+        audioDuration: (_) async => const Duration(minutes: 1),
+      );
+      final support = await Directory.systemTemp.createTemp(
+        'aurora-cache-test-',
+      );
+      const pathProvider = MethodChannel('plugins.flutter.io/path_provider');
+      TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
+          .setMockMethodCallHandler(pathProvider, (call) async => support.path);
+      try {
+        final cache = Directory('${support.path}/yt-dlp-audio');
+        await cache.create();
+        final cached = File('${cache.path}/abcdefghijk.audio');
+        await cached.writeAsBytes([1, 2, 3]);
+        final result = await source.resolve(
+          const Track(
+            id: 'sp:spotify-track-id',
+            title: 'Imported track',
+            artist: 'Spotify',
+            duration: Duration(minutes: 1),
+            pageUrl: 'https://www.youtube.com/watch?v=abcdefghijk',
+          ),
+        );
+        expect(result.input, p.normalize(cached.path));
+        expect(result.duration, const Duration(minutes: 1));
+
+        await expectLater(
+          source.resolve(
+            const Track(
+              id: 'yt:zyxwvutsrqp',
+              title: 'Mismatched video',
+              artist: 'YouTube',
+              pageUrl: 'https://www.youtube.com/watch?v=abcdefghijk',
+            ),
+          ),
+          throwsArgumentError,
+        );
+      } finally {
+        TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
+            .setMockMethodCallHandler(pathProvider, null);
+        source.dispose();
+        await support.delete(recursive: true);
+      }
+    },
+    skip: !Platform.isWindows,
+  );
+  test(
+    'Windows cache drops an existing file when its duration is truncated',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'toolDirectory': r'C:\aurora-test-tools',
+      });
+      final source = YtDlpSource(
+        await SharedPreferences.getInstance(),
+        audioDuration: (_) async => const Duration(seconds: 10),
+      );
+      final support = await Directory.systemTemp.createTemp(
+        'aurora-cache-test-',
+      );
+      const pathProvider = MethodChannel('plugins.flutter.io/path_provider');
+      TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
+          .setMockMethodCallHandler(pathProvider, (call) async => support.path);
+      try {
+        final cache = Directory('${support.path}/yt-dlp-audio');
+        await cache.create();
+        final cached = File('${cache.path}/abcdefghijk.audio');
+        await cached.writeAsBytes([1, 2, 3]);
+        await expectLater(
+          source.resolve(
+            const Track(
+              id: 'sp:spotify-track-id',
+              title: 'Imported track',
+              artist: 'Spotify',
+              duration: Duration(minutes: 1),
+              pageUrl: 'https://youtu.be/abcdefghijk',
+            ),
+          ),
+          throwsA(
+            isA<StateError>().having(
+              (error) => error.message,
+              'message',
+              contains('yt-dlp.exe'),
+            ),
+          ),
+        );
+        expect(await cached.exists(), isFalse);
+      } finally {
+        TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
+            .setMockMethodCallHandler(pathProvider, null);
+        source.dispose();
+        await support.delete(recursive: true);
+      }
+    },
+    skip: !Platform.isWindows,
+  );
+  test(
+    'Windows cache resolve cancellation remains active while probing duration',
+    () async {
+      SharedPreferences.setMockInitialValues({
+        'toolDirectory': r'C:\aurora-test-tools',
+      });
+      final probeStarted = Completer<void>();
+      final probeResult = Completer<Duration?>();
+      final source = YtDlpSource(
+        await SharedPreferences.getInstance(),
+        audioDuration: (_) {
+          probeStarted.complete();
+          return probeResult.future;
+        },
+      );
+      final support = await Directory.systemTemp.createTemp(
+        'aurora-cache-test-',
+      );
+      const pathProvider = MethodChannel('plugins.flutter.io/path_provider');
+      TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
+          .setMockMethodCallHandler(pathProvider, (call) async => support.path);
+      try {
+        final cache = Directory('${support.path}/yt-dlp-audio');
+        await cache.create();
+        await File('${cache.path}/abcdefghijk.audio').writeAsBytes([1, 2, 3]);
+        final resolving = source.resolve(
+          const Track(
+            id: 'sp:spotify-track-id',
+            title: 'Imported track',
+            artist: 'Spotify',
+            duration: Duration(minutes: 1),
+            pageUrl: 'https://youtu.be/abcdefghijk',
+          ),
+        );
+        await probeStarted.future;
+        await source.cancel('resolve:abcdefghijk');
+        probeResult.complete(const Duration(minutes: 1));
+        await expectLater(
+          resolving,
+          throwsA(
+            isA<StateError>().having(
+              (error) => error.message,
+              'message',
+              contains('cancelada'),
+            ),
+          ),
+        );
+      } finally {
+        if (!probeResult.isCompleted) probeResult.complete(null);
+        TestWidgetsFlutterBinding.ensureInitialized().defaultBinaryMessenger
+            .setMockMethodCallHandler(pathProvider, null);
+        source.dispose();
+        await support.delete(recursive: true);
+      }
+    },
+    skip: !Platform.isWindows,
   );
   test(
     'Windows audio cache rejects IDs that could escape its private directory',

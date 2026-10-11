@@ -2,6 +2,10 @@ import 'dart:io';
 import 'models.dart';
 
 abstract class SourceBackend {
+  bool get supportsPlaybackCache => false;
+  Future<({int bytes, int files})> playbackCacheInfo() async =>
+      (bytes: 0, files: 0);
+  Future<int> clearPlaybackCache({String? protectedPath}) async => 0;
   Future<List<Track>> search(String query, {int limit = 20});
   Future<List<Track>> importPlaylist(Uri url);
   Future<ResolvedAudio> resolve(Track track);

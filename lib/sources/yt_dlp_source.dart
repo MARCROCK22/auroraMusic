@@ -9,7 +9,10 @@ import '../core/models.dart';
 import '../core/source_backend.dart';
 
 class YtDlpSource extends SourceBackend {
-  YtDlpSource(this._preferences) {
+  YtDlpSource(
+    this._preferences, {
+    Future<Duration?> Function(File)? audioDuration,
+  }) : _audioDurationOverride = audioDuration {
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'progress') {
         final args = call.arguments as Map;
@@ -18,6 +21,7 @@ class YtDlpSource extends SourceBackend {
     });
   }
   final SharedPreferences _preferences;
+  final Future<Duration?> Function(File)? _audioDurationOverride;
   static const _channel = MethodChannel('aurora/source');
   final Map<String, Process> _jobs = {};
   final Map<String, Set<String>> _resolveJobs = {};
@@ -25,6 +29,7 @@ class YtDlpSource extends SourceBackend {
   final Set<String> _cancelled = {};
   final Map<String, void Function(double)> _progress = {};
   int _activeOperations = 0;
+  bool _clearingCache = false;
   bool _changingCookie = false;
   @override
   String? get cookieFile => _preferences.getString('cookieFile');
@@ -52,6 +57,9 @@ class YtDlpSource extends SourceBackend {
   Future<T> _operation<T>(Future<T> Function() execute) async {
     if (_changingCookie) {
       throw StateError('Espera a que termine el cambio de sesión.');
+    }
+    if (_clearingCache) {
+      throw StateError('Espera a que termine la limpieza de la caché.');
     }
     _activeOperations++;
     try {
@@ -144,7 +152,7 @@ class YtDlpSource extends SourceBackend {
     '--no-warnings',
   ];
   static const _maxCachedAudioBytes = 512 * 1024 * 1024;
-  static const _maxAudioFileBytes = 64 * 1024 * 1024;
+  static const _maxAudioFileBytes = _maxCachedAudioBytes;
   static final _videoIdPattern = RegExp(r'^[A-Za-z0-9_-]{11}$');
 
   static String redactError(String message) =>
@@ -284,7 +292,7 @@ class YtDlpSource extends SourceBackend {
     ], runInShell: false);
     final id = jobId ?? 'operation-${DateTime.now().microsecondsSinceEpoch}';
     _jobs[id] = process;
-    _startingJobs.remove(id);
+    if (!id.startsWith('resolve-')) _startingJobs.remove(id);
     if (_cancelled.contains(id)) {
       await _killTree(process);
     }
@@ -464,24 +472,186 @@ class YtDlpSource extends SourceBackend {
     Track track,
     String target,
   ) => _operation(() async {
-    final videoId = track.id.startsWith('yt:') ? track.id.substring(3) : '';
-    if (!_videoIdPattern.hasMatch(videoId)) {
-      throw ArgumentError('El identificador del video no es válido.');
-    }
     final uri = Uri.parse(target);
     final targetId = uri.host == 'youtu.be'
         ? (uri.pathSegments.isEmpty ? null : uri.pathSegments.first)
         : uri.queryParameters['v'];
-    if (targetId != videoId) {
+    final isYouTubeId = track.id.startsWith('yt:');
+    final videoId = isYouTubeId ? track.id.substring(3) : targetId ?? '';
+    if (!_videoIdPattern.hasMatch(videoId)) {
+      throw ArgumentError('El identificador del video no es v\u00e1lido.');
+    }
+    if (isYouTubeId && targetId != videoId) {
       throw ArgumentError(
         'El identificador del video no coincide con el enlace.',
       );
     }
-    if (toolDirectory == null) {
-      throw StateError(
-        'Selecciona la carpeta de yt-dlp, FFmpeg y Deno en Ajustes.',
+
+    final jobId = 'resolve-$videoId-${DateTime.now().microsecondsSinceEpoch}';
+    _resolveJobs.putIfAbsent(videoId, () => <String>{}).add(jobId);
+    _startingJobs.add(jobId);
+    try {
+      if (toolDirectory == null) {
+        throw StateError(
+          'Selecciona la carpeta de yt-dlp, FFmpeg y Deno en Ajustes.',
+        );
+      }
+      final cache = await _audioCacheDirectory();
+      final cachePath = await cache.resolveSymbolicLinks();
+
+      final cached = File(p.join(cachePath, '$videoId.audio'));
+      final cachedDuration = await _cachedAudioDuration(
+        cached,
+        expectedDuration: track.duration,
       );
+      _throwIfResolveCancelled(jobId);
+      if (cachedDuration != null) {
+        await cached.setLastModified(DateTime.now());
+        await _pruneAudioCache(cache, protect: cached);
+        _throwIfResolveCancelled(jobId);
+        return ResolvedAudio(input: cached.path, duration: cachedDuration);
+      }
+      final cachedType = await FileSystemEntity.type(
+        cached.path,
+        followLinks: false,
+      );
+      if (cachedType != FileSystemEntityType.notFound) {
+        if (cachedType != FileSystemEntityType.file) {
+          throw StateError('El archivo de audio en cach\u00e9 no es seguro.');
+        }
+        await cached.delete();
+      }
+
+      await _pruneAudioCache(cache);
+      final staging = await cache.createTemp('.aurora-yt-$videoId-');
+      try {
+        await _run([
+          '--no-playlist',
+          '-f',
+          'bestaudio/best',
+          '--max-filesize',
+          '${_maxAudioFileBytes ~/ (1024 * 1024)}M',
+          '--newline',
+          '--progress-template',
+          'download:AURORA_PROGRESS:%(progress._percent_str)s',
+          '-o',
+          p.join(staging.path, 'audio.%(ext)s'),
+          '--',
+          target,
+        ], jobId: jobId);
+        final outputs = await staging
+            .list(followLinks: false)
+            .where(
+              (entity) =>
+                  entity is File &&
+                  RegExp(
+                    r'^audio\.[A-Za-z0-9]{1,8}$',
+                  ).hasMatch(p.basename(entity.path)),
+            )
+            .toList();
+        if (outputs.length != 1 || outputs.single is! File) {
+          throw StateError(
+            'La descarga no produjo un \u00fanico archivo de audio.',
+          );
+        }
+        final downloaded = outputs.single as File;
+        final length = await downloaded.length();
+        final duration = length <= _maxAudioFileBytes
+            ? await _audioDuration(downloaded)
+            : null;
+        if (length == 0 || duration == null) {
+          throw StateError(
+            'La descarga de audio est\u00e1 incompleta o no es v\u00e1lida.',
+          );
+        }
+        _throwIfResolveCancelled(jobId);
+        if (!_durationMatches(duration, track.duration)) {
+          throw StateError(
+            'La duraci\u00f3n del audio descargado no coincide con el video.',
+          );
+        }
+        if (await cached.exists()) {
+          final existingDuration = await _cachedAudioDuration(
+            cached,
+            expectedDuration: track.duration,
+          );
+          _throwIfResolveCancelled(jobId);
+          if (existingDuration != null) {
+            await cached.setLastModified(DateTime.now());
+            _throwIfResolveCancelled(jobId);
+            await _pruneAudioCache(cache, protect: cached);
+            _throwIfResolveCancelled(jobId);
+            return ResolvedAudio(
+              input: cached.path,
+              duration: existingDuration,
+            );
+          }
+          final type = await FileSystemEntity.type(
+            cached.path,
+            followLinks: false,
+          );
+          if (type == FileSystemEntityType.file) await cached.delete();
+          if (type != FileSystemEntityType.notFound &&
+              type != FileSystemEntityType.file) {
+            throw StateError('El archivo de audio en cach\u00e9 no es seguro.');
+          }
+        }
+        _throwIfResolveCancelled(jobId);
+        try {
+          await downloaded.rename(cached.path);
+        } on FileSystemException {
+          final existingDuration = await _cachedAudioDuration(
+            cached,
+            expectedDuration: track.duration,
+          );
+          _throwIfResolveCancelled(jobId);
+          if (existingDuration == null) rethrow;
+          await cached.setLastModified(DateTime.now());
+          await _pruneAudioCache(cache, protect: cached);
+          _throwIfResolveCancelled(jobId);
+          return ResolvedAudio(input: cached.path, duration: existingDuration);
+        }
+        _throwIfResolveCancelled(jobId);
+        await _pruneAudioCache(cache, protect: cached);
+        _throwIfResolveCancelled(jobId);
+        return ResolvedAudio(input: cached.path, duration: duration);
+      } finally {
+        if (await staging.exists()) await staging.delete(recursive: true);
+      }
+    } finally {
+      _startingJobs.remove(jobId);
+      final jobs = _resolveJobs[videoId];
+      jobs?.remove(jobId);
+      if (jobs?.isEmpty ?? false) _resolveJobs.remove(videoId);
+      _cancelled.remove(jobId);
     }
+  });
+
+  static bool _durationMatches(Duration actual, Duration expected) =>
+      expected <= Duration.zero ||
+      (actual.inMilliseconds - expected.inMilliseconds).abs() <=
+          (expected.inMilliseconds * 0.02).clamp(5000, 10000);
+
+  void _throwIfResolveCancelled(String jobId) {
+    if (_cancelled.remove(jobId)) throw StateError('Descarga cancelada.');
+  }
+
+  Future<Duration?> _cachedAudioDuration(
+    File file, {
+    Duration expectedDuration = Duration.zero,
+  }) async {
+    if (await FileSystemEntity.type(file.path, followLinks: false) !=
+        FileSystemEntityType.file) {
+      return null;
+    }
+    if (await file.length() > _maxAudioFileBytes) return null;
+    final duration = await _audioDuration(file);
+    return duration != null && _durationMatches(duration, expectedDuration)
+        ? duration
+        : null;
+  }
+
+  Future<Directory> _audioCacheDirectory() async {
     final support = await getApplicationSupportDirectory();
     await support.create(recursive: true);
     final supportPath = await support.resolveSymbolicLinks();
@@ -489,124 +659,78 @@ class YtDlpSource extends SourceBackend {
     await cache.create(recursive: true);
     final cachePath = await cache.resolveSymbolicLinks();
     if (!p.isWithin(supportPath, cachePath)) {
-      throw StateError('La carpeta de audio en caché no es segura.');
+      throw StateError('The audio cache directory is not safe.');
     }
+    return cache;
+  }
 
-    final cached = File(p.join(cachePath, '$videoId.audio'));
-    final cachedDuration = await _cachedAudioDuration(cached);
-    if (cachedDuration != null) {
-      await cached.setLastModified(DateTime.now());
-      await _pruneAudioCache(cache);
-      return ResolvedAudio(input: cached.path, duration: cachedDuration);
-    }
-    final cachedType = await FileSystemEntity.type(
-      cached.path,
-      followLinks: false,
-    );
-    if (cachedType != FileSystemEntityType.notFound) {
-      if (cachedType != FileSystemEntityType.file) {
-        throw StateError('El archivo de audio en caché no es seguro.');
+  @override
+  bool get supportsPlaybackCache => Platform.isWindows;
+
+  @override
+  Future<({int bytes, int files})> playbackCacheInfo() async {
+    if (!Platform.isWindows) return (bytes: 0, files: 0);
+    final cache = await _audioCacheDirectory();
+    var bytes = 0;
+    var files = 0;
+    await for (final entity in cache.list(followLinks: false)) {
+      if (entity is! File ||
+          !RegExp(
+            r'^[A-Za-z0-9_-]{11}\.audio$',
+          ).hasMatch(p.basename(entity.path)) ||
+          await FileSystemEntity.type(entity.path, followLinks: false) !=
+              FileSystemEntityType.file) {
+        continue;
       }
-      await cached.delete();
+      bytes += await entity.length();
+      files++;
     }
+    return (bytes: bytes, files: files);
+  }
 
-    await _pruneAudioCache(cache);
-    final staging = await cache.createTemp('.aurora-yt-$videoId-');
-    final jobId = 'resolve-$videoId-${DateTime.now().microsecondsSinceEpoch}';
-    _resolveJobs.putIfAbsent(videoId, () => <String>{}).add(jobId);
-    _startingJobs.add(jobId);
+  @override
+  Future<int> clearPlaybackCache({String? protectedPath}) async {
+    if (!Platform.isWindows) return 0;
+    if (_clearingCache || _activeOperations > 0) {
+      throw StateError('Espera a que terminen las operaciones de audio.');
+    }
+    _clearingCache = true;
     try {
-      await _run([
-        '--no-playlist',
-        '-f',
-        'bestaudio/best',
-        '--max-filesize',
-        '${_maxAudioFileBytes ~/ (1024 * 1024)}M',
-        '--newline',
-        '--progress-template',
-        'download:AURORA_PROGRESS:%(progress._percent_str)s',
-        '-o',
-        p.join(staging.path, 'audio.%(ext)s'),
-        '--',
-        target,
-      ], jobId: jobId);
-      final outputs = await staging
-          .list(followLinks: false)
-          .where(
-            (entity) =>
-                entity is File &&
-                RegExp(
-                  r'^audio\.[A-Za-z0-9]{1,8}$',
-                ).hasMatch(p.basename(entity.path)),
-          )
-          .toList();
-      if (outputs.length != 1 || outputs.single is! File) {
-        throw StateError('La descarga no produjo un único archivo de audio.');
-      }
-      final downloaded = outputs.single as File;
-      final length = await downloaded.length();
-      final duration = length <= _maxAudioFileBytes
-          ? await _audioDuration(downloaded)
-          : null;
-      if (length == 0 || duration == null) {
-        throw StateError(
-          'La descarga de audio está incompleta o no es válida.',
-        );
-      }
-      if (track.duration > Duration.zero &&
-          (duration.inMilliseconds - track.duration.inMilliseconds).abs() >
-              (track.duration.inMilliseconds * 0.02).clamp(5000, 10000)) {
-        throw StateError(
-          'La duración del audio descargado no coincide con el video.',
-        );
-      }
-      if (await cached.exists()) {
-        final existingDuration = await _cachedAudioDuration(cached);
-        if (existingDuration != null) {
-          await cached.setLastModified(DateTime.now());
-          await _pruneAudioCache(cache);
-          return ResolvedAudio(input: cached.path, duration: existingDuration);
+      final cache = await _audioCacheDirectory();
+      final cachePath = await cache.resolveSymbolicLinks();
+      final protected = protectedPath == null
+          ? null
+          : p.normalize(File(protectedPath).absolute.path);
+      var bytesRemoved = 0;
+      await for (final entity in cache.list(followLinks: false)) {
+        if (entity is! File ||
+            !p.isWithin(cachePath, p.normalize(entity.absolute.path)) ||
+            !RegExp(
+              r'^[A-Za-z0-9_-]{11}\.audio$',
+            ).hasMatch(p.basename(entity.path)) ||
+            await FileSystemEntity.type(entity.path, followLinks: false) !=
+                FileSystemEntityType.file ||
+            (protected != null &&
+                p.equals(p.normalize(entity.absolute.path), protected))) {
+          continue;
         }
-        final type = await FileSystemEntity.type(
-          cached.path,
-          followLinks: false,
-        );
-        if (type == FileSystemEntityType.file) await cached.delete();
-        if (type != FileSystemEntityType.notFound &&
-            type != FileSystemEntityType.file) {
-          throw StateError('El archivo de audio en caché no es seguro.');
+        final length = await entity.length();
+        try {
+          await entity.delete();
+          bytesRemoved += length;
+        } on FileSystemException {
+          // The player may still have the file open.
         }
       }
-      try {
-        await downloaded.rename(cached.path);
-      } on FileSystemException {
-        final existingDuration = await _cachedAudioDuration(cached);
-        if (existingDuration == null) rethrow;
-        await cached.setLastModified(DateTime.now());
-        await _pruneAudioCache(cache);
-        return ResolvedAudio(input: cached.path, duration: existingDuration);
-      }
-      await _pruneAudioCache(cache);
-      return ResolvedAudio(input: cached.path, duration: duration);
+      return bytesRemoved;
     } finally {
-      _startingJobs.remove(jobId);
-      final jobs = _resolveJobs[videoId];
-      jobs?.remove(jobId);
-      if (jobs?.isEmpty ?? false) _resolveJobs.remove(videoId);
-      if (await staging.exists()) await staging.delete(recursive: true);
+      _clearingCache = false;
     }
-  });
-
-  Future<Duration?> _cachedAudioDuration(File file) async {
-    if (await FileSystemEntity.type(file.path, followLinks: false) !=
-        FileSystemEntityType.file) {
-      return null;
-    }
-    if (await file.length() > _maxAudioFileBytes) return null;
-    return _audioDuration(file);
   }
 
   Future<Duration?> _audioDuration(File file) async {
+    final override = _audioDurationOverride;
+    if (override != null) return override(file);
     final directory = toolDirectory;
     if (directory == null) return null;
     final ffprobe = File(p.join(directory, 'ffprobe.exe'));
@@ -630,7 +754,7 @@ class YtDlpSource extends SourceBackend {
     return Duration(milliseconds: (seconds * 1000).round());
   }
 
-  Future<void> _pruneAudioCache(Directory cache) async {
+  Future<void> _pruneAudioCache(Directory cache, {File? protect}) async {
     final files = <File>[];
     await for (final entity in cache.list(followLinks: false)) {
       if (entity is File &&
@@ -649,6 +773,7 @@ class YtDlpSource extends SourceBackend {
     }
     for (final file in files) {
       if (total <= _maxCachedAudioBytes) break;
+      if (protect != null && p.equals(file.path, protect.path)) continue;
       final size = await file.length();
       try {
         await file.delete();
