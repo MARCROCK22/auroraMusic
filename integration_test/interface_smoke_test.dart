@@ -111,6 +111,13 @@ void main() {
       ),
     );
     final c = controller!;
+    await tester.runAsync(() async {
+      await c.createPlaylist('Noches de octubre');
+      await c.addToPlaylist(c.playlists.first, c.tracks.first);
+      await c.createPlaylist('Para caminar');
+      await c.addToPlaylist(c.playlists.first, c.tracks.last);
+      await c.toggleFavorite(c.tracks.first);
+    });
     final container = ProviderContainer(
       overrides: [controllerProvider.overrideWith((ref) => c)],
     );
@@ -163,6 +170,12 @@ void main() {
       await tester.pumpAndSettle();
       await capture('aurora-redesign-${entry.value}');
     }
+    c.setAccentPalette('purple');
+    await tester.pumpAndSettle();
+    await capture('aurora-102-settings-purple');
+    await tester.tap(find.byTooltip('Inicio').first);
+    await tester.pumpAndSettle();
+    await capture('aurora-102-home-purple');
     await tester.tap(find.byTooltip('Descargas locales').first);
     await tester.pumpAndSettle();
     expect(find.text('Cambiar carpeta'), findsOneWidget);
