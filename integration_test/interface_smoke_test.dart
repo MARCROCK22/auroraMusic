@@ -222,20 +222,43 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1440, 900));
 
     await tester.pumpWidget(const SizedBox.shrink());
+    await c.audio.play();
+    var lyricsClosed = false;
     await tester.pumpWidget(
       RepaintBoundary(
         key: key,
         child: MaterialApp(
           theme: auroraTheme(Brightness.dark, const Color(0xffe86927)),
           home: Scaffold(
-            body: LyricsPanel(controller: c, service: _FixtureLyrics()),
+            body: LyricsPanel(
+              controller: c,
+              service: _FixtureLyrics(),
+              onClose: () => lyricsClosed = true,
+            ),
           ),
         ),
       ),
     );
     await tester.pumpAndSettle();
     expect(find.text('La música nos acompaña'), findsOneWidget);
+    await tester.tap(find.text('Y seguimos escuchando'));
+    await tester.pumpAndSettle();
+    expect(c.audio.position, const Duration(seconds: 4));
+    expect(c.audio.isPlaying, isTrue);
+    await tester.tap(find.text('Una luz sobre el camino'));
+    await tester.pumpAndSettle();
+    expect(c.audio.position, Duration.zero);
+    expect(c.audio.isPlaying, isTrue);
+    await tester.drag(find.byType(Slider).last, const Offset(-60, 0));
+    await tester.pumpAndSettle();
+    expect(c.audio.volume, lessThan(.75));
     await capture('aurora-redesign-lyrics');
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    await tester.pumpAndSettle();
+    await capture('aurora-103-mobile-lyrics');
+    await tester.tap(find.byTooltip('Cerrar letras'));
+    await tester.pumpAndSettle();
+    expect(lyricsClosed, isTrue);
     await tester.pumpWidget(const SizedBox.shrink());
     container.dispose();
     await tester.runAsync(() async {
