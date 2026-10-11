@@ -205,9 +205,16 @@ void main() {
   testWidgets('200 percent text remains usable on a narrow screen', (
     tester,
   ) async {
+    await tester.runAsync(
+      () => controller.toggleFavorite(
+        controller.tracks.firstWhere((track) => track.id == 'one'),
+      ),
+    );
     await mount(tester, const Size(320, 800), scale: 2);
     expect(tester.takeException(), isNull);
     await tester.tap(find.byIcon(Icons.library_music_outlined).last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Me gusta'));
     await tester.pumpAndSettle();
     expect(
       find.text(
@@ -462,12 +469,7 @@ void main() {
     await mount(tester, const Size(320, 800), scale: 2);
     await tester.tap(find.byIcon(Icons.library_music_outlined).last);
     await tester.pumpAndSettle();
-    await Scrollable.ensureVisible(
-      tester.element(find.widgetWithText(ChoiceChip, 'Listas')),
-      alignment: .5,
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(ChoiceChip, 'Listas'));
+    await tester.ensureVisible(find.text('Nombre anterior'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Nombre anterior'));
     await tester.pumpAndSettle();

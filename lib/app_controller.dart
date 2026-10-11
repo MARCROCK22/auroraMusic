@@ -896,9 +896,9 @@ class AppController extends ChangeNotifier {
         final absolutePath = p.normalize(p.absolute(file.path));
         final expectedName = '${_safeDownloadId(job.track.id)}.mp3';
         final target = await file.resolveSymbolicLinks();
-        if (p.dirname(absolutePath) != root ||
+        if (!p.equals(p.dirname(absolutePath), root) ||
             p.basename(absolutePath) != expectedName ||
-            p.dirname(target) != root ||
+            !p.equals(p.dirname(target), root) ||
             p.basename(target) != expectedName) {
           throw StateError('La descarga está fuera de la carpeta de Aurora.');
         }

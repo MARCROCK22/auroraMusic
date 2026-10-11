@@ -906,58 +906,62 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                 .toList();
       return Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                TextButton.icon(
-                  onPressed: () => setState(() {
-                    _playlist = null;
-                    _likesSelected = false;
-                  }),
-                  icon: const Icon(Icons.arrow_back),
-                  label: const Text('Todas las listas'),
+          Flexible(
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    TextButton.icon(
+                      onPressed: () => setState(() {
+                        _playlist = null;
+                        _likesSelected = false;
+                      }),
+                      icon: const Icon(Icons.arrow_back),
+                      label: const Text('Todas las listas'),
+                    ),
+                    if (_likesSelected)
+                      Text(
+                        'Me gusta',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    FilledButton.icon(
+                      onPressed: items.isEmpty
+                          ? null
+                          : () => c.playTrack(items.first, context: items),
+                      icon: const Icon(Icons.play_arrow),
+                      label: const Text('Reproducir'),
+                    ),
+                    if (playlist != null) ...[
+                      OutlinedButton(
+                        onPressed: () async {
+                          final name = await _askText(
+                            'Renombrar lista',
+                            'Nombre',
+                            initial: playlist.name,
+                          );
+                          if (name != null) c.renamePlaylist(playlist, name);
+                        },
+                        child: const Text('Renombrar'),
+                      ),
+                      TextButton(
+                        onPressed: () async {
+                          if (await _confirm(
+                            'Eliminar lista',
+                            'Se eliminará «${playlist.name}». Tus archivos permanecerán en la biblioteca.',
+                          )) {
+                            c.deletePlaylist(playlist);
+                            setState(() => _playlist = null);
+                          }
+                        },
+                        child: const Text('Eliminar'),
+                      ),
+                    ],
+                  ],
                 ),
-                if (_likesSelected)
-                  Text(
-                    'Me gusta',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                FilledButton.icon(
-                  onPressed: items.isEmpty
-                      ? null
-                      : () => c.playTrack(items.first, context: items),
-                  icon: const Icon(Icons.play_arrow),
-                  label: const Text('Reproducir'),
-                ),
-                if (playlist != null) ...[
-                  OutlinedButton(
-                    onPressed: () async {
-                      final name = await _askText(
-                        'Renombrar lista',
-                        'Nombre',
-                        initial: playlist.name,
-                      );
-                      if (name != null) c.renamePlaylist(playlist, name);
-                    },
-                    child: const Text('Renombrar'),
-                  ),
-                  TextButton(
-                    onPressed: () async {
-                      if (await _confirm(
-                        'Eliminar lista',
-                        'Se eliminará «${playlist.name}». Tus archivos permanecerán en la biblioteca.',
-                      )) {
-                        c.deletePlaylist(playlist);
-                        setState(() => _playlist = null);
-                      }
-                    },
-                    child: const Text('Eliminar'),
-                  ),
-                ],
-              ],
+              ),
             ),
           ),
           Expanded(

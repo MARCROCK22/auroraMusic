@@ -242,6 +242,31 @@ void main() {
     },
   );
 
+  test(
+    'Windows download deletion accepts equivalent drive casing',
+    () async {
+      final controller = await createTestController();
+      addTearDown(() => closeTestController(controller));
+      await controller.downloadTrack(first);
+      while (controller.downloads.single.status != DownloadStatus.completed) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      final job = controller.downloads.single;
+      final original = File(job.localPath!);
+      final path = original.absolute.path;
+      expect(path[1], ':');
+      final drive = path[0] == path[0].toUpperCase()
+          ? path[0].toLowerCase()
+          : path[0].toUpperCase();
+      job.localPath = '$drive${path.substring(1)}';
+      await controller.removeDownload(job);
+      expect(controller.error, isNull);
+      expect(await original.exists(), isFalse);
+      expect(controller.downloads, isEmpty);
+    },
+    skip: !Platform.isWindows,
+  );
+
   test('download deletion rejects files outside app storage', () async {
     final controller = await createTestController();
     addTearDown(() => closeTestController(controller));
