@@ -469,7 +469,16 @@ void main() {
     await mount(tester, const Size(320, 800), scale: 2);
     await tester.tap(find.byIcon(Icons.library_music_outlined).last);
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Nombre anterior'));
+    await tester.scrollUntilVisible(
+      find.text('Nombre anterior'),
+      120,
+      scrollable: find
+          .descendant(
+            of: find.byType(ListView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Nombre anterior'));
     await tester.pumpAndSettle();
