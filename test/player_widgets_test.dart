@@ -17,6 +17,16 @@ class _QuietLyrics extends LyricsService {
       const LyricsResult(LyricsKind.notFound);
 }
 
+class _TrackingAudio extends FakeAudio {
+  final seeks = <Duration>[];
+
+  @override
+  Future<void> seek(Duration value) async {
+    seeks.add(value);
+    await super.seek(value);
+  }
+}
+
 void main() {
   const previous = Track(
     id: 'previous',
@@ -45,11 +55,11 @@ void main() {
 
   group('player widgets', () {
     late AppController controller;
-    late FakeAudio audio;
+    late _TrackingAudio audio;
     late _QuietLyrics lyrics;
 
     setUp(() async {
-      audio = FakeAudio();
+      audio = _TrackingAudio();
       controller = await createTestController(audio: audio);
       controller.queue = [previous, current, duplicateA, duplicateB];
       controller.queueIndex = 1;
@@ -113,7 +123,12 @@ void main() {
 
       expect(audio.position, const Duration(seconds: 135));
       expect(audio.isPlaying, isFalse);
-      expect(controller.queue, [previous, current, duplicateA, duplicateB]);
+      expect(controller.queue.map((track) => track.id), [
+        'previous',
+        'current',
+        'duplicate',
+        'duplicate',
+      ]);
       expect(controller.queueIndex, 1);
       expect(tester.takeException(), isNull);
     });
@@ -126,19 +141,52 @@ void main() {
       final disc = find.byKey(const ValueKey('vinyl-disc'));
       final rect = tester.getRect(disc);
       final gesture = await tester.startGesture(rect.center);
-      await gesture.moveBy(Offset(-rect.width * .1, 0));
-      await gesture.moveBy(Offset(-rect.width * .1, 0));
+      await gesture.moveBy(const Offset(-20, 0));
+      await gesture.moveBy(const Offset(-20, 0));
       expect(audio.position, const Duration(seconds: 90));
+      expect(audio.seeks, isEmpty);
       await gesture.up();
       await tester.pump();
       await tester.runAsync(
         () async => Future<void>.delayed(const Duration(milliseconds: 10)),
       );
 
-      expect(audio.position, const Duration(seconds: 54));
+      final expectedTarget = Duration(
+        milliseconds: (90000 - 40 * audio.duration.inMilliseconds / rect.width)
+            .round(),
+      );
+      expect(audio.seeks, hasLength(1));
+      expect(audio.position, expectedTarget);
+      expect(audio.position, lessThan(const Duration(seconds: 90)));
+      expect(audio.seeks, [expectedTarget]);
       expect(audio.isPlaying, isFalse);
-      expect(controller.queue, [previous, current, duplicateA, duplicateB]);
+      expect(controller.queue.map((track) => track.id), [
+        'previous',
+        'current',
+        'duplicate',
+        'duplicate',
+      ]);
       expect(controller.queueIndex, 1);
+
+      await audio.play();
+      final playingStart = audio.position;
+      final playingGesture = await tester.startGesture(rect.center);
+      await playingGesture.moveBy(const Offset(-20, 0));
+      await playingGesture.moveBy(const Offset(-20, 0));
+      await playingGesture.up();
+      await tester.pump();
+      await tester.runAsync(
+        () async => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+      final playingTarget = Duration(
+        milliseconds:
+            (playingStart.inMilliseconds -
+                    40 * audio.duration.inMilliseconds / rect.width)
+                .round(),
+      );
+      expect(audio.position, playingTarget);
+      expect(audio.seeks, [expectedTarget, playingTarget]);
+      expect(audio.isPlaying, isTrue);
       expect(tester.takeException(), isNull);
     });
 

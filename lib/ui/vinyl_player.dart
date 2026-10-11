@@ -22,6 +22,8 @@ class _VinylPlayerState extends State<VinylPlayer>
   bool _foreground = true;
   Duration? _dragStartPosition;
   Duration? _dragTarget;
+  double? _dragStartX;
+  double? _pointerX;
 
   @override
   void initState() {
@@ -67,6 +69,22 @@ class _VinylPlayerState extends State<VinylPlayer>
     } else {
       _rotation.stop();
     }
+  }
+
+  void _updateDragTarget(double artSize, Duration duration) {
+    final start = _dragStartPosition;
+    final startX = _dragStartX;
+    final pointerX = _pointerX;
+    if (start == null || startX == null || pointerX == null || artSize <= 0) {
+      return;
+    }
+    _dragTarget = Duration(
+      milliseconds:
+          (start.inMilliseconds +
+                  (pointerX - startX) * duration.inMilliseconds / artSize)
+              .round()
+              .clamp(0, duration.inMilliseconds),
+    );
   }
 
   @override
@@ -132,85 +150,82 @@ class _VinylPlayerState extends State<VinylPlayer>
                       }
                     : null,
                 onHorizontalDragUpdate: duration > Duration.zero
-                    ? (details) {
-                        final start = _dragStartPosition;
-                        if (start == null || artSize <= 0) return;
-                        _dragTarget = Duration(
-                          milliseconds:
-                              (start.inMilliseconds +
-                                      details.delta.dx *
-                                          duration.inMilliseconds /
-                                          artSize)
-                                  .round()
-                                  .clamp(0, duration.inMilliseconds),
-                        );
-                      }
+                    ? (_) => _updateDragTarget(artSize, duration)
                     : null,
                 onHorizontalDragEnd: duration > Duration.zero
                     ? (_) {
                         final target = _dragTarget;
                         _dragStartPosition = null;
                         _dragTarget = null;
+                        _dragStartX = null;
+                        _pointerX = null;
                         if (target != null) c.seek(target);
                       }
                     : null,
-                child: AnimatedBuilder(
-                  animation: _rotation,
-                  builder: (context, child) => Transform.rotate(
-                    angle: _rotation.value * math.pi * 2,
-                    child: child,
-                  ),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    alignment: Alignment.center,
-                    children: [
-                      Positioned.fill(
-                        child: DecoratedBox(
-                          key: const ValueKey('vinyl-disc'),
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Color(0xff171514),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black54,
-                                blurRadius: 26,
-                                offset: Offset(0, 12),
-                              ),
-                            ],
-                          ),
-                          child: CustomPaint(painter: _GroovesPainter()),
-                        ),
-                      ),
-                      Align(
-                        alignment: Alignment.center,
-                        child: Container(
-                          key: const ValueKey('vinyl-label'),
-                          width: artSize * .38,
-                          height: artSize * .38,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: color.surfaceContainerHighest,
-                            border: Border.all(color: Colors.white24),
-                          ),
-                          clipBehavior: Clip.antiAlias,
-                          child: track == null
-                              ? const Icon(Icons.music_note, size: 46)
-                              : _Artwork(track: track),
-                        ),
-                      ),
-                      Align(
-                        alignment: Alignment.center,
-                        child: Container(
-                          key: const ValueKey('vinyl-hole'),
-                          width: 9,
-                          height: 9,
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.black,
+                child: Listener(
+                  onPointerDown: (event) {
+                    _dragStartX = event.position.dx;
+                    _pointerX = event.position.dx;
+                  },
+                  onPointerMove: (event) => _pointerX = event.position.dx,
+                  child: AnimatedBuilder(
+                    animation: _rotation,
+                    builder: (context, child) => Transform.rotate(
+                      angle: _rotation.value * math.pi * 2,
+                      child: child,
+                    ),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      alignment: Alignment.center,
+                      children: [
+                        Positioned.fill(
+                          child: DecoratedBox(
+                            key: const ValueKey('vinyl-disc'),
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Color(0xff171514),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black54,
+                                  blurRadius: 26,
+                                  offset: Offset(0, 12),
+                                ),
+                              ],
+                            ),
+                            child: CustomPaint(painter: _GroovesPainter()),
                           ),
                         ),
-                      ),
-                    ],
+                        Align(
+                          alignment: Alignment.center,
+                          child: Container(
+                            key: const ValueKey('vinyl-label'),
+                            width: artSize * .38,
+                            height: artSize * .38,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: color.surfaceContainerHighest,
+                              border: Border.all(color: Colors.white24),
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: track == null
+                                ? const Icon(Icons.music_note, size: 46)
+                                : _Artwork(track: track),
+                          ),
+                        ),
+                        Align(
+                          alignment: Alignment.center,
+                          child: Container(
+                            key: const ValueKey('vinyl-hole'),
+                            width: 9,
+                            height: 9,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.black,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
