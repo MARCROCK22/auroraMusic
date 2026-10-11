@@ -509,6 +509,10 @@ class MusicAudio extends AudioBackend {
       if (_handle != null) _engine.setVolume(_handle!, _volume);
       return;
     }
+    final targetPreamp = equalizerPreamp(gainsDb);
+    // Lower first when adding boost or activating boosted bands.
+    _preamp = math.min(_preamp, targetPreamp);
+    if (_handle != null) _engine.setVolume(_handle!, _volume * _preamp);
     if (!eq.isActive) eq.activate();
     final bands = [
       eq.band1,
@@ -523,10 +527,7 @@ class MusicAudio extends AudioBackend {
     for (var i = 0; i < bands.length; i++) {
       bands[i].value = equalizerGain(i < gainsDb.length ? gainsDb[i] : 0);
     }
-    final boost = gainsDb
-        .take(8)
-        .fold(0.0, (peak, gain) => math.max(peak, gain));
-    _preamp = 1 / equalizerGain(boost);
+    _preamp = targetPreamp;
     if (_handle != null) _engine.setVolume(_handle!, _volume * _preamp);
   }
 

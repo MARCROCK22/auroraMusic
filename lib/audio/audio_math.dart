@@ -3,6 +3,11 @@ import 'dart:math' as math;
 double equalizerGain(double db) =>
     math.pow(10, db.clamp(-12, 12) / 20).toDouble();
 
+double equalizerPreamp(List<double> gainsDb) {
+  final boost = gainsDb.take(8).fold(0.0, (peak, gain) => math.max(peak, gain));
+  return boost > 0 ? 0.9 / equalizerGain(boost) : 1;
+}
+
 /// Input-scoped HTTPS options; Schannel checks the Windows certificate store.
 List<String> ffmpegHttpsOptions(String input) =>
     Uri.tryParse(input)?.scheme == 'https'
