@@ -127,7 +127,10 @@ val prepareAndroidYtDlp by tasks.registering(Exec::class) {
     commandLine("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.absolutePath)
 }
 
-tasks.named("preBuild").configure { dependsOn(prepareAndroidYtDlp) }
+tasks.named("preBuild").configure {
+    dependsOn(prepareAndroidYtDlp)
+    dependsOn(rootProject.tasks.named("patchFlutterSoloud"))
+}
 
 dependencies {
     implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
