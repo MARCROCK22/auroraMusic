@@ -18,9 +18,6 @@ subprojects {
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
-subprojects {
-    project.evaluationDependsOn(":app")
-}
 
 val patchFlutterSoloud by tasks.registering {
     doLast {
@@ -43,6 +40,10 @@ val patchFlutterSoloud by tasks.registering {
             else -> error("Unexpected flutter_soloud 3.5.4 Player::init source; refusing an unsafe patch")
         }
     }
+}
+
+subprojects {
+    project.evaluationDependsOn(":app")
 }
 
 gradle.projectsEvaluated {
