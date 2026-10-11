@@ -158,6 +158,59 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('liked-only library can still discover by its strongest artist', (
+    tester,
+  ) async {
+    await controller.toggleFavorite(controller.tracks[0]);
+    await controller.toggleFavorite(controller.tracks[1]);
+    final source = controller.source as FakeSource;
+    source.searchMatches = const [
+      Track(
+        id: 'liked-discovery',
+        title: 'New pick',
+        artist: 'Aurora',
+        pageUrl: 'https://youtu.be/liked-discovery',
+      ),
+    ];
+    await mount(tester, const Size(800, 900));
+
+    expect(controller.recommendations, isEmpty);
+    expect(controller.canDiscoverRecommendations, isTrue);
+    await tester.drag(find.byType(ListView).first, const Offset(0, -1000));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Descubrir en YouTube'));
+    await tester.pumpAndSettle();
+
+    expect(source.searchQueries, ['Aurora songs']);
+    expect(find.text('New pick'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'DJ controls start and stop recommendation without pausing audio',
+    (tester) async {
+      await controller.playTrack(controller.tracks.first);
+      final currentId = controller.currentTrack?.id;
+      final audioLoads = audio.loadCount;
+      await mount(tester, const Size(800, 900));
+      await tester.drag(find.byType(ListView).first, const Offset(0, -1000));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Iniciar DJ personal · sin voz'));
+      await tester.pumpAndSettle();
+
+      expect(controller.personalDjActive, isTrue);
+      expect(controller.audio.isPlaying, isTrue);
+      expect(controller.currentTrack?.id, currentId);
+      expect(audio.loadCount, audioLoads);
+      await tester.tap(find.text('Detener DJ personal · sin voz'));
+      await tester.pumpAndSettle();
+
+      expect(controller.personalDjActive, isFalse);
+      expect(controller.audio.isPlaying, isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets(
     'YouTube discovery runs only on request and stays outside library',
     (tester) async {
@@ -172,7 +225,8 @@ void main() {
         ),
       ];
       expect(source.searchQueries, isEmpty);
-      await tester.ensureVisible(find.text('Descubrir en YouTube'));
+      await tester.drag(find.byType(ListView).first, const Offset(0, -1000));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Descubrir en YouTube'));
       await tester.pumpAndSettle();
 

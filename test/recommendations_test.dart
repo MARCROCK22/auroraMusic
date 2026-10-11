@@ -39,6 +39,47 @@ void main() {
     );
   });
 
+  test('canonical YouTube URLs deduplicate tracks with different IDs', () {
+    expect(
+      recommendationTracksMatch(
+        const Track(
+          id: 'spotify-stable-id',
+          title: 'Matched song',
+          artist: 'North',
+          pageUrl: 'https://youtu.be/abcdefghijk',
+        ),
+        const Track(
+          id: 'youtube-result-id',
+          title: 'Same song',
+          artist: 'North',
+          pageUrl:
+              'https://www.youtube.com/watch?v=abcdefghijk&t=30&feature=share',
+        ),
+      ),
+      isTrue,
+    );
+  });
+
+  test('canonical Spotify page URLs ignore sharing parameters', () {
+    expect(
+      recommendationTracksMatch(
+        const Track(
+          id: 'spotify-one',
+          title: 'Track',
+          artist: 'Artist',
+          pageUrl: 'https://open.spotify.com/track/abc?si=first',
+        ),
+        const Track(
+          id: 'spotify-two',
+          title: 'Track',
+          artist: 'Artist',
+          pageUrl: 'https://open.spotify.com/track/abc/?si=second',
+        ),
+      ),
+      isTrue,
+    );
+  });
+
   test(
     'playlist inclusion and recency are explained; artist diversity holds',
     () {
@@ -70,6 +111,20 @@ void main() {
 
     expect(result.first.track.artist, 'South');
     expect(result.first.reason, 'Por tu escucha reciente de South');
+  });
+
+  test('tracks with no known affinity use an honest library reason', () {
+    final result = recommendTracks(
+      library: library,
+      favoriteIds: {'liked'},
+      playlists: const [],
+      history: [],
+    );
+
+    expect(
+      result.singleWhere((item) => item.track.id == 'south').reason,
+      'De tu biblioteca',
+    );
   });
 
   test('cold start is stable and skips unplayable pending Spotify tracks', () {

@@ -7,6 +7,56 @@ class TrackRecommendation {
   final String reason;
 }
 
+Set<String> recommendationTrackKeys(Track track) {
+  final keys = {'id:${track.id}'};
+  final uri = Uri.tryParse(track.pageUrl ?? '');
+  if (uri == null || uri.host.isEmpty) return keys;
+  final host = uri.host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+  final videoId = host == 'youtu.be'
+      ? uri.pathSegments.firstOrNull
+      : (host == 'youtube.com' || host == 'music.youtube.com') &&
+            uri.path == '/watch'
+      ? uri.queryParameters['v']
+      : (host == 'youtube.com' || host == 'music.youtube.com') &&
+            uri.pathSegments.length >= 2 &&
+            const {'shorts', 'embed', 'live'}.contains(uri.pathSegments.first)
+      ? uri.pathSegments[1]
+      : null;
+  if (videoId != null && videoId.isNotEmpty) {
+    keys.add('youtube:$videoId');
+  } else if (host == 'open.spotify.com' || host == 'spotify.com') {
+    final path = uri.path.replaceFirst(RegExp(r'/$'), '');
+    keys.add('page:$host$path');
+  } else {
+    final query = uri.queryParametersAll
+      ..removeWhere((key, _) {
+        final lower = key.toLowerCase();
+        return lower == 'si' ||
+            lower == 'feature' ||
+            lower == 'ref' ||
+            lower == 'fbclid' ||
+            lower == 'gclid' ||
+            lower.startsWith('utm_');
+      });
+    final path = uri.path.replaceFirst(RegExp(r'/$'), '');
+    final queryString = (query.keys.toList()..sort())
+        .map((key) {
+          final values = query[key]!..sort();
+          return values.map((value) => '$key=$value').join('&');
+        })
+        .join('&');
+    keys.add(
+      'page:${uri.scheme.toLowerCase()}://$host$path'
+      '${queryString.isEmpty ? '' : '?$queryString'}',
+    );
+  }
+  return keys;
+}
+
+bool recommendationTracksMatch(Track a, Track b) => recommendationTrackKeys(
+  a,
+).intersection(recommendationTrackKeys(b)).isNotEmpty;
+
 String? strongestTasteArtist({
   required List<Track> library,
   required Set<String> favoriteIds,
@@ -149,7 +199,9 @@ List<TrackRecommendation> recommendTracks({
             ? 'Está en tus listas'
             : recency.containsKey(artistKey(track))
             ? 'Por tu escucha reciente de ${track.artist}'
-            : 'Por tus listas y gustos',
+            : (artistAffinity[artistKey(track)] ?? 0) > 0
+            ? 'Por afinidad con tus gustos'
+            : 'De tu biblioteca',
       ),
   ];
 }

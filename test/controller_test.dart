@@ -25,6 +25,24 @@ const third = Track(
   pageUrl: 'https://youtu.be/wxyz1234567',
 );
 
+Future<void> _waitFor(bool Function() condition) async {
+  for (var attempt = 0; attempt < 100; attempt++) {
+    if (condition()) return;
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+  expect(condition(), isTrue);
+}
+
+List<Track> _djLibrary([int count = 8]) => [
+  for (var i = 0; i < count; i++)
+    Track(
+      id: 'dj-$i',
+      title: 'DJ $i',
+      artist: 'Artist $i',
+      pageUrl: 'https://youtu.be/dj-$i',
+    ),
+];
+
 void main() {
   test(
     'session import copies privately, replaces and clears without deleting the original',
@@ -132,6 +150,12 @@ void main() {
           artist: 'Artista',
           pageUrl: 'https://youtu.be/new-one',
         ),
+        const Track(
+          id: 'url-copy',
+          title: 'Mismo video con otro ID',
+          artist: 'Artista',
+          pageUrl: 'https://www.youtube.com/watch?v=new-one&feature=share',
+        ),
         const Track(id: 'unplayable', title: 'Sin enlace', artist: 'Artista'),
         const Track(
           id: 'pending',
@@ -169,6 +193,28 @@ void main() {
             .toSet(),
         {'one', 'two', 'three'},
       );
+
+      source.searchMatches = [
+        for (var i = 9; i <= 14; i++)
+          Track(
+            id: 'refresh-$i',
+            title: 'Refresco $i',
+            artist: 'Otra',
+            pageUrl: 'https://youtu.be/refresh-$i',
+          ),
+      ];
+      await controller.discoverRecommendations();
+      expect(
+        controller.discoveredRecommendations.map((track) => track.id).toSet(),
+        {
+          'refresh-9',
+          'refresh-10',
+          'refresh-11',
+          'refresh-12',
+          'refresh-13',
+          'refresh-14',
+        },
+      );
     },
   );
 
@@ -202,6 +248,258 @@ void main() {
     expect(controller.error, isNull);
     expect(controller.searching, isFalse);
   });
+
+  test(
+    'stale discovery results are discarded after favorite taste changes',
+    () async {
+      final source = FakeSource()..pendingSearch = Completer<List<Track>>();
+      final controller = await createTestController(
+        tracks: [first, second, third],
+        source: source,
+      );
+      addTearDown(() => closeTestController(controller));
+      final discovery = controller.discoverRecommendations();
+      await _waitFor(() => source.searchQueries.isNotEmpty);
+      await controller.toggleFavorite(first);
+      source.pendingSearch!.complete([
+        third.copyWith(pageUrl: 'https://youtu.be/fresh'),
+      ]);
+      await discovery;
+
+      expect(controller.discoveredRecommendations, isEmpty);
+      expect(controller.discoveringRecommendations, isFalse);
+    },
+  );
+
+  test(
+    'personal DJ refills its queue before the current track finishes',
+    () async {
+      final tracks = _djLibrary();
+      final controller = await createTestController(tracks: tracks);
+      addTearDown(() => closeTestController(controller));
+      await controller.toggleFavorite(tracks.first);
+      controller.repeat = RepeatMode.all;
+      controller.shuffle = true;
+      await controller.startPersonalDj();
+      final initialQueue = List.of(controller.queue);
+      expect(controller.personalDjActive, isTrue);
+      expect(controller.queue.length, 6);
+
+      for (var completion = 0; completion < 4; completion++) {
+        final before = controller.currentTrack?.id;
+        (controller.audio as FakeAudio).position = controller.audio.duration;
+        (controller.audio as FakeAudio).completions.add(null);
+        await _waitFor(() => controller.currentTrack?.id != before);
+      }
+      await _waitFor(() => controller.queue.length > initialQueue.length);
+
+      expect(controller.queue.length, 7);
+      expect(controller.repeat, RepeatMode.all);
+      expect(controller.shuffle, isTrue);
+      expect(controller.audio.isPlaying, isTrue);
+    },
+  );
+
+  test(
+    'starting DJ on a paused track queues recommendations without resuming',
+    () async {
+      final tracks = _djLibrary();
+      final controller = await createTestController(tracks: tracks);
+      addTearDown(() => closeTestController(controller));
+      await controller.playTrack(tracks[0]);
+      await controller.pausePlayback();
+      final currentId = controller.currentTrack?.id;
+      final audio = controller.audio as FakeAudio;
+      final loaded = audio.loadCount;
+
+      await controller.startPersonalDj();
+
+      expect(controller.personalDjActive, isTrue);
+      expect(controller.currentTrack?.id, currentId);
+      expect(controller.audio.isPlaying, isFalse);
+      expect(audio.loadCount, loaded);
+      expect(controller.queueIndex, 0);
+    },
+  );
+
+  test(
+    'pausing during a DJ refill keeps it paused after results arrive',
+    () async {
+      final source = FakeSource()..pendingSearch = Completer<List<Track>>();
+      final controller = await createTestController(
+        tracks: [first, second, third],
+        source: source,
+      );
+      addTearDown(() => closeTestController(controller));
+      await controller.toggleFavorite(first);
+      await controller.startPersonalDj(includeDiscovery: true);
+      await _waitFor(() => source.searchQueries.isNotEmpty);
+      await controller.pausePlayback();
+      source.pendingSearch!.complete([
+        const Track(
+          id: 'dj-found',
+          title: 'Found',
+          artist: 'Artista',
+          pageUrl: 'https://youtu.be/dj-found',
+        ),
+      ]);
+      await _waitFor(
+        () => controller.queue.any((track) => track.id == 'dj-found'),
+      );
+
+      expect(controller.personalDjActive, isTrue);
+      expect(controller.audio.isPlaying, isFalse);
+      expect(controller.currentTrack?.id, isNotNull);
+    },
+  );
+
+  test(
+    'pause during completion waiting for refill cannot advance or resume',
+    () async {
+      final source = FakeSource()..pendingSearch = Completer<List<Track>>();
+      final controller = await createTestController(
+        tracks: [first, second, third],
+        source: source,
+      );
+      addTearDown(() => closeTestController(controller));
+      await controller.toggleFavorite(first);
+      await controller.startPersonalDj(includeDiscovery: true);
+      await _waitFor(() => source.searchQueries.isNotEmpty);
+      await controller.next();
+      final currentId = controller.currentTrack?.id;
+      final audio = controller.audio as FakeAudio;
+      audio.position = audio.duration;
+      audio.completions.add(null);
+      await controller.pausePlayback();
+      source.pendingSearch!.complete([
+        const Track(
+          id: 'dj-waiting',
+          title: 'Waiting result',
+          artist: 'Artista',
+          pageUrl: 'https://youtu.be/dj-waiting',
+        ),
+      ]);
+      await _waitFor(
+        () => controller.queue.any((track) => track.id == 'dj-waiting'),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      expect(controller.currentTrack?.id, currentId);
+      expect(controller.audio.isPlaying, isFalse);
+      expect(controller.queueIndex, 1);
+    },
+  );
+
+  test(
+    'stopping DJ during a refill preserves current playback and ignores results',
+    () async {
+      final source = FakeSource()..pendingSearch = Completer<List<Track>>();
+      final controller = await createTestController(
+        tracks: [first, second, third],
+        source: source,
+      );
+      addTearDown(() => closeTestController(controller));
+      await controller.toggleFavorite(first);
+      await controller.startPersonalDj(includeDiscovery: true);
+      await _waitFor(() => source.searchQueries.isNotEmpty);
+      final queueBefore = List.of(controller.queue);
+      final currentBefore = controller.currentTrack?.id;
+      controller.stopPersonalDj();
+      source.pendingSearch!.complete([
+        const Track(
+          id: 'dj-found',
+          title: 'Found',
+          artist: 'Artista',
+          pageUrl: 'https://youtu.be/dj-found',
+        ),
+      ]);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(controller.personalDjActive, isFalse);
+      expect(controller.audio.isPlaying, isTrue);
+      expect(controller.currentTrack?.id, currentBefore);
+      expect(
+        controller.queue.map((track) => track.id),
+        queueBefore.map((track) => track.id),
+      );
+    },
+  );
+
+  test('DJ search errors are contained', () async {
+    final source = FakeSource()..searchError = StateError('offline');
+    final controller = await createTestController(
+      tracks: [first, second, third],
+      source: source,
+    );
+    addTearDown(() => closeTestController(controller));
+    await controller.toggleFavorite(first);
+    await controller.startPersonalDj(includeDiscovery: true);
+    await _waitFor(() => controller.personalDjError != null);
+    expect(controller.audio.isPlaying, isTrue);
+    expect(controller.error, isNull);
+  });
+
+  test('DJ caps discovery at two searches per session', () async {
+    final source = FakeSource()
+      ..searchMatches = [
+        for (var i = 0; i < 6; i++)
+          Track(
+            id: 'remote-$i',
+            title: 'Remote $i',
+            artist: 'Remote artist $i',
+            pageUrl: 'https://youtu.be/remote-$i',
+          ),
+      ];
+    final tracks = _djLibrary();
+    final controller = await createTestController(
+      tracks: tracks,
+      source: source,
+    );
+    addTearDown(() => closeTestController(controller));
+    await controller.toggleFavorite(tracks.first);
+    await controller.startPersonalDj(includeDiscovery: true);
+    final audio = controller.audio as FakeAudio;
+
+    for (var completion = 0; completion < 12; completion++) {
+      if (!controller.audio.isPlaying) break;
+      final loadCount = audio.loadCount;
+      audio.position = audio.duration;
+      audio.completions.add(null);
+      await _waitFor(
+        () => audio.loadCount > loadCount || !controller.audio.isPlaying,
+      );
+    }
+
+    expect(source.searchQueries, hasLength(2));
+    expect(source.searchLimits, everyElement(12));
+  });
+
+  test('empty library has no DJ or discovery action', () async {
+    final empty = await createTestController();
+    addTearDown(() => closeTestController(empty));
+    await empty.startPersonalDj();
+    await empty.discoverRecommendations();
+    expect(empty.audio.isPlaying, isFalse);
+    expect((empty.source as FakeSource).searchQueries, isEmpty);
+  });
+
+  test(
+    'early completion after seeking or a truncated stream does not advance',
+    () async {
+      final controller = await createTestController(tracks: [first, second]);
+      addTearDown(() => closeTestController(controller));
+      await controller.playTrack(first, context: [first, second]);
+      final audio = controller.audio as FakeAudio;
+      audio.position = const Duration(seconds: 30);
+      audio.completions.add(null);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(controller.currentTrack?.id, first.id);
+
+      audio.position = audio.duration;
+      audio.completions.add(null);
+      await _waitFor(() => controller.currentTrack?.id == second.id);
+    },
+  );
 
   test('older extraction cannot replace a newer selected track', () async {
     final source = FakeSource();

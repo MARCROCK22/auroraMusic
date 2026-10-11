@@ -601,10 +601,55 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
               ),
             ),
           ),
+        SwitchListTile.adaptive(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+          title: const Text('Incluir novedades de YouTube'),
+          subtitle: const Text(
+            'Hasta 2 búsquedas y 24 temas distintos por sesión.',
+          ),
+          value: c.personalDjIncludeDiscovery,
+          onChanged: c.setPersonalDjIncludeDiscovery,
+        ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: FilledButton.icon(
+            onPressed: c.personalDjActive
+                ? c.stopPersonalDj
+                : c.canStartPersonalDj
+                ? () => c.startPersonalDj(
+                    includeDiscovery: c.personalDjIncludeDiscovery,
+                  )
+                : null,
+            icon: Icon(
+              c.personalDjActive
+                  ? Icons.stop_circle_outlined
+                  : Icons.play_circle,
+            ),
+            label: Text(
+              c.personalDjActive
+                  ? 'Detener DJ personal · sin voz'
+                  : 'Iniciar DJ personal · sin voz',
+            ),
+          ),
+        ),
+        if (c.personalDjActive)
+          const Padding(
+            padding: EdgeInsets.only(top: 6, left: 8),
+            child: Text('El tema actual seguirá hasta terminar.'),
+          ),
+        if (c.personalDjError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'El DJ seguirá con tu biblioteca: ${c.personalDjError}',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
-            onPressed: c.discoveringRecommendations || recommendations.isEmpty
+            onPressed:
+                c.discoveringRecommendations || !c.canDiscoverRecommendations
                 ? null
                 : c.discoverRecommendations,
             icon: c.discoveringRecommendations
