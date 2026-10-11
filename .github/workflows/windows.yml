@@ -43,7 +43,7 @@ jobs:
         run: ./scripts/setup_tools.ps1
 
       - name: Build Windows release
-        run: flutter build windows --release
+        run: flutter build windows --release --no-pub
 
       - name: Package Windows installer archive
         shell: pwsh
