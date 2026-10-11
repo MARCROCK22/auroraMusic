@@ -90,6 +90,10 @@ android {
             if (!splitAbis) ndk.abiFilters += selectedAbis
         }
         release {
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             // An unsigned release is intentional until a private key is supplied.
             val keyFile = rootProject.file("key.properties")
             if (keyFile.exists()) {
@@ -110,8 +114,20 @@ android {
         }
     }
     sourceSets.getByName("main").assets.srcDir(rootProject.file("../tools/android/licenses"))
+    sourceSets.getByName("main").res.srcDir(rootProject.file("../tools/android/yt-dlp-res"))
     if (rebuiltFfmpeg.exists()) sourceSets.getByName("main").jniLibs.srcDir(rebuiltJni)
 }
+
+val prepareAndroidYtDlp by tasks.registering(Exec::class) {
+    val script = rootProject.file("../scripts/setup_android_ytdlp.ps1")
+    inputs.file(rootProject.file("../scripts/android_ytdlp.lock.json"))
+    inputs.file(script)
+    outputs.file(rootProject.file("../tools/android/yt-dlp-res/raw/ytdlp"))
+    outputs.dir(rootProject.file("../tools/android/licenses"))
+    commandLine("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.absolutePath)
+}
+
+tasks.named("preBuild").configure { dependsOn(prepareAndroidYtDlp) }
 
 dependencies {
     implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")

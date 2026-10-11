@@ -1,0 +1,60 @@
+name: Windows release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.38.8
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze Dart code
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Prepare Windows plugin junctions
+        shell: pwsh
+        run: ./scripts/prepare_windows_plugins.ps1
+
+      - name: Download and verify pinned Windows tools
+        shell: pwsh
+        run: ./scripts/setup_tools.ps1
+
+      - name: Build Windows release
+        run: flutter build windows --release
+
+      - name: Package Windows installer archive
+        shell: pwsh
+        run: ./scripts/package_windows.ps1 -OutputDirectory dist/ci
+
+      - name: Upload Windows archive and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aurora-Windows
+          path: |
+            dist/ci/Aurora-Windows.zip
+            dist/ci/Aurora-Windows.zip.sha256
+          if-no-files-found: error
+          compression-level: 0

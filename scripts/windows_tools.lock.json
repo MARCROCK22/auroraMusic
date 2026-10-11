@@ -14,10 +14,10 @@
                   "repository":  "yt-dlp/yt-dlp"
               },
     "ffmpeg":  {
-                   "sha256":  "fb71a8ae1cfa93b714cf044e50918cd2fc8d67583e71ebe1d32a1c5be2ca2e8c",
-                   "url":  "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
-                   "name":  "ffmpeg-master-latest-win64-gpl.zip",
-                   "version":  "latest",
+                   "sha256":  "13cc318a840c22f204cbfef0c6dc6465da3db83ff7f87e467a61e2100a9b06de",
+                   "url":  "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-10-09-19-22/ffmpeg-N-127264-gf5d4fd186c-win64-gpl.zip",
+                   "name":  "ffmpeg-N-127264-gf5d4fd186c-win64-gpl.zip",
+                   "version":  "autobuild-2026-10-09-19-22",
                    "repository":  "yt-dlp/FFmpeg-Builds"
                }
 }

@@ -31,6 +31,7 @@ class MusicAudio extends AudioBackend {
   bool _streaming = false, _ended = false, _visualization = true;
   Duration _position = Duration.zero, _duration = Duration.zero;
   Duration _offset = Duration.zero;
+  int _decodedFrames = 0;
   double _volume = 0.8;
   double _preamp = 1;
   @override
@@ -92,6 +93,7 @@ class MusicAudio extends AudioBackend {
       _offset = start;
       _position = start;
       _duration = source.duration;
+      _decodedFrames = 0;
       _ended = false;
       lastError = null;
       final scheme = Uri.tryParse(source.input)?.scheme;
@@ -308,6 +310,7 @@ class MusicAudio extends AudioBackend {
               math.min(offset + 65536, aligned),
             ),
           );
+          _decodedFrames += math.min(65536, aligned - offset) ~/ 8;
         }
         remainder = Uint8List.fromList(combined.sublist(aligned));
       }
@@ -328,7 +331,43 @@ class MusicAudio extends AudioBackend {
     if (_disposed || _sound == null || _handle == null) return;
     try {
       if (!_engine.getIsValidVoiceHandle(_handle!)) {
-        if (_playing && (!_streaming || _ended)) {
+        if (_playing && _streaming && _ended && !_buffering) {
+          final decoded = Duration(
+            microseconds: _decodedFrames * 1000000 ~/ 48000,
+          );
+          final consumed = _engine.getStreamTimeConsumed(_sound!);
+          if (!isCompleteAudioStream(
+            isPlaying: _playing,
+            isBuffering: _buffering,
+            cleanEof: _ended,
+            decoded: decoded,
+            consumed: consumed,
+            expected: _duration > _offset ? _duration - _offset : Duration.zero,
+          )) {
+            debugPrint(
+              'Aurora EOF: decoded=${decoded.inMicroseconds}, '
+              'consumed=${consumed.inMicroseconds}, '
+              'duration=${_duration.inMicroseconds}, offset=${_offset.inMicroseconds}',
+            );
+            lastError = 'El audio terminó antes de completar la reproducción.';
+            _playing = false;
+            _buffering = false;
+            final generation = _generation;
+            unawaited(
+              _serialize(() async {
+                if (generation == _generation) await _release();
+              }),
+            );
+            notifyListeners();
+            return;
+          }
+          _position = _offset + consumed;
+          _playing = false;
+          _buffering = false;
+          _spectrum.value = List.filled(48, 0);
+          notifyListeners();
+          _completed.add(null);
+        } else if (_playing && !_streaming) {
           _playing = false;
           _buffering = false;
           if (_duration > Duration.zero) _position = _duration;

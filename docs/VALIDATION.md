@@ -41,7 +41,7 @@ Usa un video público permitido para probar extracción, reproducción y descarg
 | Audio Android | WAV y PCM FFmpeg aprobados: pausa, seek, FFT, EQ, cancelación y EOF. Excepción de cierre del worker corregida y comprobada. |
 | Reproducción continua Windows | Ejecutable release independiente: 30 minutos aprobados, 1801 s de reloj consumido, crecimiento máximo de memoria de 909312 bytes. Log `build/native_audio_soak_release_30min.jsonl`, evento final `complete`. |
 | YouTube Windows (2026-10-11) | Búsqueda por texto y extracción CLI aprobadas sin sesión. Prueba nativa aprobada con `jNQXAC9IVRw`: metadatos, extracción HTTPS, reproducción real, descarga MP3, reproducción local y seek. El bloqueo 429 observado el día anterior no se reprodujo hoy; el resultado no garantiza disponibilidad de todos los videos o redes. |
-| Paquetes del rediseño | Windows release: `dist/redisenado/Aurora-Windows.zip`, herramientas/licencias incluidas; hash del motor release verificado y ejecutable independiente activo tras cinco segundos de arranque. Android ARM64: `dist/redisenado/Aurora-Android-arm64-debug.apk`, firma de desarrollo. Ambos tienen archivos SHA-256. Las comprobaciones online y de audio de las filas anteriores corresponden a la validación previa del motor, conservado en este rediseño. |
+| Paquetes del rediseño | Windows release: `dist/redisenado/Aurora-Windows.zip`, herramientas/licencias incluidas; hash del motor release verificado y ejecutable independiente activo tras cinco segundos de arranque. Android ARM64 release: `dist/redisenado/Aurora-Android-arm64-release.apk`, firma privada de Aurora verificada con apksigner, `debuggable=false`, 65417188 bytes. Ambos tienen archivos SHA-256. Las comprobaciones online y de audio de las filas anteriores corresponden a la validación previa del motor, conservado en este rediseño. |
 | Alineación Android | ZIP de 16 KB y 265 ELF ARM64, incluyendo dependencias archivadas Python/FFmpeg: aprobados. WebP recompilado y avisos de licencia presentes en APK. |
 
 La inspección de dependencias detectó cinco ELF WebP de 4 KB dentro del archivo FFmpeg original. `scripts/rebuild_android_webp.ps1` recompila esas bibliotecas desde código oficial con NDK 28 y verifica sus símbolos/SONAME; `scripts/verify_android_alignment.ps1` revisa tanto las bibliotecas visibles del APK como las dependencias archivadas de Python/FFmpeg. La comprobación estática y la ejecución en un dispositivo de 16 KB son verificaciones diferentes.
@@ -67,9 +67,40 @@ Las capturas `build/screenshots/aurora-redesign-*.png` utilizan audio simulado y
 portadas geométricas originales para comparar el diseño sin datos personales;
 la prueba de arranque utiliza SQLite y el motor de audio nativos.
 
+La compilación Android release y sus comprobaciones quedan en
+`build/android-release-build.log`, `build/android-release-signature.log`,
+`build/android-release-debuggable.log` y `build/android-release-alignment.log`.
+No se comprobó este APK release en un teléfono físico.
+
+Para repetirla con la configuración de firma local existente:
+
+```powershell
+flutter build apk --release --target-platform android-arm64
+```
+
+Conserva una copia privada de la clave y sus credenciales fuera del repositorio.
+No uses `--no-pub` después de pruebas de integración: la regeneración del
+registro de plugins debe excluir las dependencias de desarrollo del release.
+
 La búsqueda se envía solo con Enter o la flecha. La prueba de interfaz comprueba que escribir y repetir Enter durante una consulta pendiente no duplique solicitudes. La importación de sesión es voluntaria: valida Netscape y cookies de YouTube, conserva el original, protege cambios durante operaciones activas y no expone valores en errores. No se probó con credenciales reales de un usuario.
 
+## Correcciones de reproducción y búsqueda (2026-10-11)
+
+- `flutter test`: 68 pruebas aprobadas; `flutter analyze`: sin incidencias. Incluye redondeo float32 del contador nativo y rechazo de audio incompleto.
+- `integration_test/stream_recovery_test.dart` en Windows: cuatro pruebas nativas aprobadas. Audio HTTP de 130 s todavía activo después de 122 s, una sola finalización al llegar al EOF; respuesta truncada con duración declarada mayor y pausa sin avanzar la cola.
+- `integration_test/stream_online_continuity_test.dart`: YouTube HTTPS real (`M7lc1UVf-VE`) reprodujo 130 s sin errores ni finalización anticipada. Activar con `AURORA_ONLINE_SMOKE=true`, `AURORA_TOOLS` y `AURORA_SAMPLE_URL`.
+- Android release x86_64: cierre reproducido al buscar «musica» en API 36.1. R8 había optimizado clases ZIP de Commons Compress utilizadas mediante reflexión. Reglas específicas conservan sus constructores; los errores de enlace se devuelven al canal Flutter.
+- APK release corregido: búsquedas «musica», «piano» y enlace directo devolvieron resultados; mismo proceso vivo y ningún error fatal. Un 403 posterior se resolvió en la prueba actualizando el yt-dlp empaquetado a 2026.08.19 con EJS 0.8.0. Se verificó la actualización sobre una instalación existente: reproducción de 157 s, misma canción y duración de 22:24, sin error. Evidencias: `build/android-online-release-continuity-ui.xml` y `build/android-updated-ytdlp-runtime.log`. La ejecución fue en emulador x86_64; los teléfonos físicos siguen pendientes.
+- Windows: el video reportado (`dkjCa1uhh_A`) pasó 130 s de reproducción silenciosa. Una segunda prueba partió de 45.994 s, reprodujo otros 130 s y verificó una sola finalización tras buscar los últimos tres segundos. No se reprodujo el corte concreto del usuario; el margen del contador no se considera su causa demostrada.
+- Evidencias: `build/runtime-final-unit-tests.log`, `build/runtime-final-analyze.log`, `build/stream-recovery-native.log`, `build/stream-online-continuity-native.log`, `build/stream-user-resume-eof-native.log`, `build/android-search-crash.log`, `build/android-search-fixed.log` y `build/android-search-fixed-ui.xml`.
+
 ## Matriz de dispositivos pendiente
+
+### Distribución sincronizada 1.0.1+2
+
+Android ARM64: `dist/actualizado/Aurora-Android-arm64-release.apk`; manifest 1.0.1, código 2, `debuggable=false`, firma privada v2, 265 ELF alineados a 16 KB y hash del recurso yt-dlp verificado dentro del APK. Windows: `dist/actualizado/Aurora-Windows-20261011-155409-b1fdc9cc.zip`; ejecutable 1.0.1+2, motor Flutter release verificado y arranque independiente aprobado. Ambos se compilaron secuencialmente desde el mismo código y usan yt-dlp 2026.08.19. Sus SHA-256 acompañan los paquetes. Logs finales: `build/android-final-synchronized-build.log`, `build/android-final-synchronized-signature.log`, `build/android-final-synchronized-alignment.log`, `build/windows-final-synchronized-build.log` y `build/windows-final-synchronized-package.log`.
+
+### Comprobaciones físicas
 
 En un teléfono real y en Windows, comprobar con un archivo local y una fuente online disponible:
 

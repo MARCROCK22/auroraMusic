@@ -3,6 +3,7 @@ package com.aurora.aurora_music
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.system.Os
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import com.yausername.ffmpeg.FFmpeg
@@ -10,7 +11,9 @@ import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -35,6 +38,7 @@ class MainActivity : AudioServiceActivity() {
     @Synchronized private fun initialize() {
         if (initialized) return
         try {
+            installBundledYtDlp()
             YoutubeDL.init(applicationContext)
             FFmpeg.init(applicationContext)
         } catch (error: Exception) {
@@ -44,6 +48,32 @@ class MainActivity : AudioServiceActivity() {
         }
         initialized = true
     }
+
+    private fun installBundledYtDlp() {
+        val payload = resources.openRawResource(R.raw.ytdlp).use { it.readBytes() }
+        val expectedHash = "1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6"
+        if (sha256(payload) != expectedHash) throw IOException("Bundled yt-dlp integrity check failed")
+
+        val directory = File(noBackupFilesDir, "youtubedl-android/yt-dlp")
+        val target = File(directory, "yt-dlp")
+        if (target.isFile && target.inputStream().use { sha256(it.readBytes()) } == expectedHash) return
+        if (!directory.exists() && !directory.mkdirs()) throw IOException("Unable to prepare yt-dlp directory")
+
+        val temporary = File.createTempFile(".yt-dlp-", ".tmp", directory)
+        try {
+            FileOutputStream(temporary).use { stream ->
+                stream.write(payload)
+                stream.fd.sync()
+            }
+            Os.rename(temporary.absolutePath, target.absolutePath)
+        } catch (error: Exception) {
+            temporary.delete()
+            throw IOException("Unable to install bundled yt-dlp", error)
+        }
+    }
+
+    private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
+        .digest(bytes).joinToString("") { "%02x".format(it.toInt() and 0xff) }
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
         val source = MethodChannel(engine.dartExecutor.binaryMessenger, "aurora/source")
@@ -113,6 +143,7 @@ class MainActivity : AudioServiceActivity() {
                     }
                     main.post { result.success(answer) }
                 } catch (error: Exception) { main.post { result.error("SOURCE_ERROR", redact(error.message), null) } }
+                catch (error: LinkageError) { main.post { result.error("SOURCE_ERROR", redact(error.message), null) } }
             }
             try { sourceWorkers.execute(work) }
             catch (_: RejectedExecutionException) { result.error("SOURCE_BUSY", "La fuente está ocupada. Inténtalo nuevamente.", null) }
@@ -181,6 +212,7 @@ class MainActivity : AudioServiceActivity() {
                     }
                     main.post { result.success(answer) }
                 } catch(error: Exception) { main.post { result.error("PCM_ERROR",redact(error.message),null) } }
+                catch(error: LinkageError) { main.post { result.error("PCM_ERROR",redact(error.message),null) } }
             }
         }
     }

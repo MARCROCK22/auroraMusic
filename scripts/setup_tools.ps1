@@ -44,7 +44,7 @@ $pins = Get-Content -LiteralPath $pinsFile -Raw | ConvertFrom-Json
 # Explicit versions (including latest) update only the requested tool.
 if ($YtDlpVersion) { $pins.ytdlp = Get-PinnedAsset 'yt-dlp/yt-dlp' $YtDlpVersion '^yt-dlp\.exe$' }
 if ($DenoVersion) { $pins.deno = Get-PinnedAsset 'denoland/deno' $DenoVersion '^deno-x86_64-pc-windows-msvc\.zip$' }
-if ($FfmpegVersion) { $pins.ffmpeg = Get-PinnedAsset 'yt-dlp/FFmpeg-Builds' $FfmpegVersion '^ffmpeg-master-latest-win64-gpl\.zip$' }
+if ($FfmpegVersion) { $pins.ffmpeg = Get-PinnedAsset 'yt-dlp/FFmpeg-Builds' $FfmpegVersion '^ffmpeg-(master-latest|N-\d+-g[0-9a-f]+)-win64-gpl\.zip$' }
 $pins | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $lockPath -Encoding utf8
 
 $staging = Join-Path $ToolDirectory ('.staging-' + [guid]::NewGuid().ToString('N'))

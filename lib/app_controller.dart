@@ -193,10 +193,7 @@ class AppController extends ChangeNotifier {
         _usingRemote &&
         !_recovering &&
         _expiryRetries == 0 &&
-        RegExp(
-          r'403|410|Forbidden|expired',
-          caseSensitive: false,
-        ).hasMatch(audioError)) {
+        _isRecoverableStreamError(audioError)) {
       unawaited(_recoverExpiredStream());
     }
     if (audio.isPlaying &&
@@ -206,6 +203,11 @@ class AppController extends ChangeNotifier {
     }
     _notify();
   }
+
+  bool _isRecoverableStreamError(String message) => RegExp(
+    r'403|410|Forbidden|expired|termin[oó] antes de completar|premature\s+(?:eof|end)|timed?\s*out|timeout|socketexception|httpexception|connection\s+(?:reset|closed|aborted)|broken\s+pipe|unexpected\s+eof',
+    caseSensitive: false,
+  ).hasMatch(message);
 
   void _notify() {
     if (!_disposed) notifyListeners();
@@ -379,7 +381,13 @@ class AppController extends ChangeNotifier {
 
   Future<void> resumePlayback() async {
     if (currentTrack == null) return;
-    if (_loadedTrackId != currentTrack!.id) {
+    if (_loadedTrackId != currentTrack!.id || audio.lastError != null) {
+      if (audio.lastError != null) {
+        _resumePosition = audio.position > Duration.zero
+            ? audio.position
+            : _resumePosition;
+        _expiryRetries = 0;
+      }
       await _playCurrent();
       return;
     }
@@ -394,10 +402,19 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _recoverExpiredStream() async {
+    final trackId = currentTrack?.id;
+    final occurrence = queueIndex;
+    final generation = _playGeneration;
+    if (trackId == null || generation == 0) return;
     _recovering = true;
     _expiryRetries++;
     _resumePosition = audio.position;
     try {
+      if (generation != _playGeneration ||
+          occurrence != queueIndex ||
+          currentTrack?.id != trackId) {
+        return;
+      }
       await _playCurrent();
     } finally {
       _recovering = false;

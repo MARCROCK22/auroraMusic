@@ -16,6 +16,25 @@ String redactAudioError(Object error) => '$error'
       '[cabecera privada]',
     );
 
+bool isCompleteAudioStream({
+  required bool isPlaying,
+  required bool isBuffering,
+  required bool cleanEof,
+  required Duration decoded,
+  required Duration consumed,
+  required Duration expected,
+}) =>
+    isPlaying &&
+    !isBuffering &&
+    cleanEof &&
+    decoded > Duration.zero &&
+    // The native mixer reports consumed time as float32. Allow one 1024-frame
+    // mix block at 48 kHz (about 21.34 ms) for conversion rounding and block
+    // granularity; larger unconsumed tails still prevent completion.
+    consumed + const Duration(microseconds: 21334) >= decoded &&
+    (expected <= Duration.zero ||
+        decoded + const Duration(seconds: 1) >= expected);
+
 /// Log-frequency display bars from the native mixer's first 256 FFT bins.
 List<double> spectrumBars(List<double> fft) {
   if (fft.length < 256) return List.filled(48, 0);
