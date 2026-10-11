@@ -65,6 +65,14 @@ Para reducir cortes de las URLs temporales de YouTube, Aurora descarga primero e
 
 Los reintentos de reproducción son limitados, conservan la canción y posición, y se cancelan al pausar, detener o cambiar de canción. No evitan restricciones de YouTube ni hacen accesibles videos privados o eliminados.
 
+### Importar playlists de Spotify gratis
+
+1. Obtén el JSON de playlists con la [descarga de tus datos de Spotify](https://support.spotify.com/article/understanding-your-data/) o un CSV de canciones. Aurora admite columnas como `Track Name`, `Artist Name(s)`, `Album Name` y `Track URI`; si el CSV no tiene `PlaylistName`, usa el nombre del archivo.
+2. Abre **Biblioteca → Importar de Spotify → Elegir archivo**, revisa las listas y pulsa **Importar**. Cancelar la vista previa no cambia la biblioteca.
+3. Abre la lista y toca una canción pendiente para elegir su versión de YouTube. **Guardar** la vincula sin reproducir; **Guardar y reproducir** inicia el audio elegido.
+
+Todo el archivo se procesa localmente, sin claves de API ni pagos. Se conservan los nombres, artistas, álbumes, referencias Spotify, orden y repeticiones. No se transfieren audio descargado de Spotify, credenciales ni estadísticas de escucha. El límite por archivo es 20 MB y 20 000 canciones; podcasts y archivos locales de Spotify se omiten con un aviso.
+
 ### Cuando YouTube limita solicitudes
 
 Un HTTP 429 o una petición de verificar la sesión proviene de YouTube. Abre YouTube en tu navegador, inicia sesión y completa cualquier verificación que aparezca. Espera antes de repetir búsquedas. Aurora envía la búsqueda con Enter o la flecha, sin consultar mientras escribes ni duplicar una consulta pendiente.

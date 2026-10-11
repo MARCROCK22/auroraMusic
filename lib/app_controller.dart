@@ -351,6 +351,10 @@ class AppController extends ChangeNotifier {
         try {
           await audio.stop();
         } catch (_) {}
+        if (generation != _playGeneration || _disposed) return;
+        _loadedTrackId = null;
+        _loadedAudioInput = null;
+        _usingRemote = false;
         _report(
           StateError(
             'Esta canción de Spotify aún no tiene una coincidencia. '
@@ -358,8 +362,10 @@ class AppController extends ChangeNotifier {
           ),
         );
       } finally {
-        busy = false;
-        _notify();
+        if (generation == _playGeneration) {
+          busy = false;
+          _notify();
+        }
       }
       return;
     }
