@@ -19,6 +19,16 @@ const _track = Track(
   pageUrl: 'https://example.test/fixture-track',
 );
 
+class _CountingAudio extends FakeAudio {
+  final seeks = <Duration>[];
+
+  @override
+  Future<void> seek(Duration value) async {
+    seeks.add(value);
+    await super.seek(value);
+  }
+}
+
 class _ResponseClient extends Fake implements HttpClient {
   _ResponseClient(this.status, this.payload, this.onUri);
 
@@ -213,7 +223,7 @@ void main() {
     late _DeferredLyrics service;
 
     setUp(() async {
-      audio = FakeAudio();
+      audio = _CountingAudio();
       controller = await createTestController(audio: audio);
       service = _DeferredLyrics();
     });
@@ -329,6 +339,11 @@ void main() {
         );
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 250));
+        expect(
+          find.text('Toca un verso para ir a ese momento'),
+          findsOneWidget,
+        );
+        expect(find.text('0:08'), findsOneWidget);
 
         audio.isPlaying = true;
         audio.position = const Duration(seconds: 12);
@@ -381,7 +396,11 @@ void main() {
         await tester.pump();
         await tester.pump();
 
-        expect(find.byTooltip('Cerrar letras'), findsOneWidget);
+        expect(find.text('Volver'), findsOneWidget);
+        expect(
+          find.text('Estas letras no tienen marcas de tiempo.'),
+          findsOneWidget,
+        );
         expect(find.byTooltip('Reproducir'), findsOneWidget);
         expect(
           find.bySemanticsLabel('Posición de reproducción'),
@@ -397,21 +416,91 @@ void main() {
         expect(audio.isPlaying, isFalse);
 
         final progressSlider = find.byType(Slider).first;
+        final countingAudio = audio as _CountingAudio;
+        countingAudio.seeks.clear();
         await tester.drag(progressSlider, const Offset(45, 0));
         await tester.pump();
         expect(audio.position, greaterThan(Duration.zero));
         expect(audio.isPlaying, isFalse);
+        expect(countingAudio.seeks, hasLength(1));
 
         final volumeSlider = find.byType(Slider).last;
         await tester.drag(volumeSlider, const Offset(-40, 0));
         await tester.pump();
         expect(audio.volume, lessThan(.75));
 
-        await tester.tap(find.byTooltip('Cerrar letras'));
+        await tester.tap(find.text('Volver'));
         expect(closed, isTrue);
         expect(tester.takeException(), isNull);
       },
     );
+
+    testWidgets('progress drag previews then commits only on release', (
+      tester,
+    ) async {
+      await mount(tester);
+      controller.queue = [_track];
+      controller.queueIndex = 0;
+      controller.notifyListeners();
+      await controller.togglePlayback();
+      await tester.pump();
+      final countingAudio = audio as _CountingAudio;
+      countingAudio.seeks.clear();
+
+      final slider = find.byType(Slider).first;
+      await tester.drag(slider, const Offset(90, 0));
+      await tester.pump();
+      expect(countingAudio.seeks, hasLength(1));
+      expect(audio.position, greaterThan(Duration.zero));
+      expect(audio.isPlaying, isTrue);
+    });
+
+    testWidgets('track change discards an unfinished progress preview', (
+      tester,
+    ) async {
+      await mount(tester);
+      const nextTrack = Track(
+        id: 'next-fixture',
+        artist: 'Fixture Artist',
+        title: 'Next Fixture Song',
+        duration: Duration(seconds: 180),
+        pageUrl: 'https://example.test/next-fixture',
+      );
+      controller.queue = [_track, nextTrack];
+      controller.queueIndex = 0;
+      controller.notifyListeners();
+      await controller.togglePlayback();
+      await tester.pump();
+      final countingAudio = audio as _CountingAudio;
+      countingAudio.seeks.clear();
+
+      final slider = find.byType(Slider).first;
+      final center = tester.getCenter(slider);
+      final gesture = await tester.startGesture(center);
+      for (var step = 1; step <= 5; step++) {
+        await gesture.moveTo(
+          center + Offset(step * 18, 0),
+          timeStamp: Duration(milliseconds: step * 20),
+        );
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(countingAudio.seeks, isEmpty);
+      expect(audio.position, Duration.zero);
+      expect(tester.widget<Slider>(slider).value, greaterThan(0));
+
+      controller.queueIndex = 1;
+      controller.notifyListeners();
+      await tester.pump();
+      await gesture.up();
+      await tester.pump();
+
+      expect(countingAudio.seeks, isEmpty);
+      expect(
+        tester.widget<Slider>(slider).value,
+        audio.position.inMilliseconds,
+      );
+      expect(tester.takeException(), isNull);
+    });
 
     testWidgets(
       'discards stale track result and handles narrow enlarged text',
