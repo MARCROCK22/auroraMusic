@@ -12,7 +12,9 @@ class YtDlpSource extends SourceBackend {
   YtDlpSource(
     this._preferences, {
     Future<Duration?> Function(File)? audioDuration,
+    bool? androidOverride,
   }) : _audioDurationOverride = audioDuration {
+    _androidOverride = androidOverride;
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'progress') {
         final args = call.arguments as Map;
@@ -22,6 +24,8 @@ class YtDlpSource extends SourceBackend {
   }
   final SharedPreferences _preferences;
   final Future<Duration?> Function(File)? _audioDurationOverride;
+  late final bool? _androidOverride;
+  bool get _isAndroid => _androidOverride ?? Platform.isAndroid;
   static const _channel = MethodChannel('aurora/source');
   final Map<String, Process> _jobs = {};
   final Map<String, Set<String>> _resolveJobs = {};
@@ -187,7 +191,13 @@ class YtDlpSource extends SourceBackend {
   }
 
   Future<String> _native(String method, Map<String, Object?> arguments) async {
-    if (const {'search', 'playlist', 'resolve', 'download'}.contains(method)) {
+    if (const {
+      'search',
+      'playlist',
+      'resolve',
+      'download',
+      'cacheAudio',
+    }.contains(method)) {
       return _operation(() => _invokeNative(method, arguments));
     }
     return _invokeNative(method, arguments);
@@ -199,7 +209,13 @@ class YtDlpSource extends SourceBackend {
   ) async {
     final cookie = cookieFile;
     if (cookie != null &&
-        const {'search', 'playlist', 'resolve', 'download'}.contains(method)) {
+        const {
+          'search',
+          'playlist',
+          'resolve',
+          'download',
+          'cacheAudio',
+        }.contains(method)) {
       arguments = {
         ...arguments,
         'cookieFile': await _validateCookieFile(cookie),
@@ -439,9 +455,10 @@ class YtDlpSource extends SourceBackend {
       );
     }
     final target = validateYouTube(track.pageUrl ?? '').toString();
-    if (Platform.isWindows) {
+    if (Platform.isWindows && !_isAndroid) {
       return _resolveWindowsAudio(track, target);
     }
+    if (_isAndroid) return _resolveAndroidAudio(track, target);
     final raw = Platform.isAndroid
         ? await _native('resolve', {'target': target})
         : await _run([
@@ -627,6 +644,114 @@ class YtDlpSource extends SourceBackend {
     }
   });
 
+  Future<ResolvedAudio> _resolveAndroidAudio(
+    Track track,
+    String target,
+  ) => _operation(() async {
+    final uri = Uri.parse(target);
+    final targetId = uri.host == 'youtu.be'
+        ? (uri.pathSegments.isEmpty ? null : uri.pathSegments.first)
+        : uri.queryParameters['v'];
+    final isYouTubeId = track.id.startsWith('yt:');
+    final videoId = isYouTubeId ? track.id.substring(3) : targetId ?? '';
+    if (!_videoIdPattern.hasMatch(videoId)) {
+      throw ArgumentError('El identificador del video no es v\u00e1lido.');
+    }
+    if (isYouTubeId && targetId != videoId) {
+      throw ArgumentError(
+        'El identificador del video no coincide con el enlace.',
+      );
+    }
+    final jobId = 'resolve-$videoId-${DateTime.now().microsecondsSinceEpoch}';
+    _resolveJobs.putIfAbsent(videoId, () => <String>{}).add(jobId);
+    _startingJobs.add(jobId);
+    try {
+      final cache = await _audioCacheDirectory();
+      final cachePath = await cache.resolveSymbolicLinks();
+      final cached = File(p.join(cachePath, '$videoId.audio'));
+      final cachedDuration = await _cachedAudioDuration(
+        cached,
+        expectedDuration: track.duration,
+      );
+      _throwIfResolveCancelled(jobId);
+      if (cachedDuration != null) {
+        await cached.setLastModified(DateTime.now());
+        await _pruneAudioCache(cache, protect: cached);
+        _throwIfResolveCancelled(jobId);
+        return ResolvedAudio(input: cached.path, duration: cachedDuration);
+      }
+      final cachedType = await FileSystemEntity.type(
+        cached.path,
+        followLinks: false,
+      );
+      if (cachedType != FileSystemEntityType.notFound) {
+        if (cachedType != FileSystemEntityType.file) {
+          throw StateError('El archivo de audio en cach\u00e9 no es seguro.');
+        }
+        await cached.delete();
+      }
+      await _pruneAudioCache(cache);
+      final staging = await cache.createTemp('.aurora-yt-$videoId-');
+      try {
+        final durationMs = int.tryParse(
+          await _native('cacheAudio', {
+            'target': target,
+            'videoId': videoId,
+            'directory': staging.path,
+            'jobId': jobId,
+          }),
+        );
+        if (durationMs == null || durationMs <= 0) {
+          throw StateError(
+            'La descarga de audio est\u00e1 incompleta o no es v\u00e1lida.',
+          );
+        }
+        final outputs = await staging
+            .list(followLinks: false)
+            .where(
+              (entity) =>
+                  entity is File &&
+                  RegExp(
+                    r'^audio\.[A-Za-z0-9]{1,8}$',
+                  ).hasMatch(p.basename(entity.path)),
+            )
+            .toList();
+        if (outputs.length != 1 || outputs.single is! File) {
+          throw StateError(
+            'La descarga no produjo un \u00fanico archivo de audio.',
+          );
+        }
+        final downloaded = outputs.single as File;
+        if (await downloaded.length() == 0 ||
+            await downloaded.length() > _maxAudioFileBytes) {
+          throw StateError(
+            'La descarga de audio est\u00e1 incompleta o no es v\u00e1lida.',
+          );
+        }
+        final duration = Duration(milliseconds: durationMs);
+        _throwIfResolveCancelled(jobId);
+        if (!_durationMatches(duration, track.duration)) {
+          throw StateError(
+            'La duraci\u00f3n del audio descargado no coincide con el video.',
+          );
+        }
+        await downloaded.rename(cached.path);
+        _throwIfResolveCancelled(jobId);
+        await _pruneAudioCache(cache, protect: cached);
+        _throwIfResolveCancelled(jobId);
+        return ResolvedAudio(input: cached.path, duration: duration);
+      } finally {
+        if (await staging.exists()) await staging.delete(recursive: true);
+      }
+    } finally {
+      _startingJobs.remove(jobId);
+      final jobs = _resolveJobs[videoId];
+      jobs?.remove(jobId);
+      if (jobs?.isEmpty ?? false) _resolveJobs.remove(videoId);
+      _cancelled.remove(jobId);
+    }
+  });
+
   static bool _durationMatches(Duration actual, Duration expected) =>
       expected <= Duration.zero ||
       (actual.inMilliseconds - expected.inMilliseconds).abs() <=
@@ -665,11 +790,11 @@ class YtDlpSource extends SourceBackend {
   }
 
   @override
-  bool get supportsPlaybackCache => Platform.isWindows;
+  bool get supportsPlaybackCache => Platform.isWindows || _isAndroid;
 
   @override
   Future<({int bytes, int files})> playbackCacheInfo() async {
-    if (!Platform.isWindows) return (bytes: 0, files: 0);
+    if (!supportsPlaybackCache) return (bytes: 0, files: 0);
     final cache = await _audioCacheDirectory();
     var bytes = 0;
     var files = 0;
@@ -690,7 +815,7 @@ class YtDlpSource extends SourceBackend {
 
   @override
   Future<int> clearPlaybackCache({String? protectedPath}) async {
-    if (!Platform.isWindows) return 0;
+    if (!supportsPlaybackCache) return 0;
     if (_clearingCache || _activeOperations > 0) {
       throw StateError('Espera a que terminen las operaciones de audio.');
     }
@@ -731,6 +856,18 @@ class YtDlpSource extends SourceBackend {
   Future<Duration?> _audioDuration(File file) async {
     final override = _audioDurationOverride;
     if (override != null) return override(file);
+    if (_isAndroid) {
+      try {
+        final duration = int.tryParse(
+          await _native('probeAudio', {'path': file.absolute.path}),
+        );
+        return duration == null || duration <= 0
+            ? null
+            : Duration(milliseconds: duration);
+      } on StateError {
+        return null;
+      }
+    }
     final directory = toolDirectory;
     if (directory == null) return null;
     final ffprobe = File(p.join(directory, 'ffprobe.exe'));
@@ -845,8 +982,16 @@ class YtDlpSource extends SourceBackend {
 
   @override
   Future<void> cancel(String jobId) async {
-    if (Platform.isAndroid) {
-      await _channel.invokeMethod('cancel', {'jobId': jobId});
+    if (_isAndroid) {
+      if (jobId.startsWith('resolve:')) {
+        final videoId = jobId.substring('resolve:'.length);
+        for (final activeId in _resolveJobs[videoId] ?? const <String>{}) {
+          _cancelled.add(activeId);
+          await _channel.invokeMethod('cancel', {'jobId': activeId});
+        }
+      } else {
+        await _channel.invokeMethod('cancel', {'jobId': jobId});
+      }
       return;
     }
     if (jobId.startsWith('resolve:')) {
