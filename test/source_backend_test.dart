@@ -13,10 +13,7 @@ void main() {
       final source = YtDlpSource(await SharedPreferences.getInstance());
       try {
         final operation = source.diagnose();
-        final operationCheck = expectLater(
-          operation,
-          throwsA(isA<Error>()),
-        );
+        final operationCheck = expectLater(operation, throwsA(isA<Error>()));
         await expectLater(
           source.configureCookieFile(null),
           throwsA(
@@ -163,11 +160,11 @@ void main() {
         await expectLater(
           source.resolve(
             const Track(
-              id: 'yt:abc',
+              id: 'yt:abcdefghijk',
               title: 'Missing download',
               artist: 'YouTube',
               localPath: 'nonexistent-test-audio.mp3',
-              pageUrl: 'https://youtu.be/abc',
+              pageUrl: 'https://youtu.be/abcdefghijk',
             ),
           ),
           throwsA(
@@ -182,6 +179,29 @@ void main() {
         source.dispose();
       }
     },
+  );
+  test(
+    'Windows audio cache rejects IDs that could escape its private directory',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final source = YtDlpSource(await SharedPreferences.getInstance());
+      try {
+        await expectLater(
+          source.resolve(
+            const Track(
+              id: 'yt:../../outside',
+              title: 'Unsafe ID',
+              artist: 'YouTube',
+              pageUrl: 'https://youtube.com/watch?v=abcdefghijk',
+            ),
+          ),
+          throwsArgumentError,
+        );
+      } finally {
+        source.dispose();
+      }
+    },
+    skip: !Platform.isWindows,
   );
   test(
     'YouTube input accepts HTTPS pages and rejects other protocols and hosts',
