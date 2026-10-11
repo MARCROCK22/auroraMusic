@@ -80,6 +80,7 @@ class AppController extends ChangeNotifier {
   Timer? _sleepTimer;
   DateTime? _sleepEnd;
   int _playGeneration = 0;
+  int _recoveryGeneration = 0;
   int _searchGeneration = 0;
   bool _processingDownloads = false;
   Future<void>? _downloadWorker;
@@ -92,6 +93,7 @@ class AppController extends ChangeNotifier {
   final Set<int> _shufflePlayed = {};
   DateTime _lastSnapshot = DateTime.fromMillisecondsSinceEpoch(0);
   bool _recovering = false;
+  bool _playIntent = false;
   bool _usingRemote = false;
   String? _recoveryTrackId;
   String? _recoverableRemoteTrackId;
@@ -176,7 +178,7 @@ class AppController extends ChangeNotifier {
           _controls = MediaControls(
             audio: audio,
             onPlay: resumePlayback,
-            onPause: audio.pause,
+            onPause: pausePlayback,
             onStop: stopPlayback,
             onNext: next,
             onPrevious: previous,
@@ -209,6 +211,7 @@ class AppController extends ChangeNotifier {
     if (audioError != null &&
         _usingRemote &&
         _recoverableRemoteTrackId == currentTrack?.id &&
+        _playIntent &&
         !_recovering &&
         !busy &&
         _expiryRetries < _maxStreamRecoveryAttempts &&
@@ -290,6 +293,7 @@ class AppController extends ChangeNotifier {
       search(_searchQuery, limit: (_searchLimit + 20).clamp(1, 50));
 
   Future<void> playTrack(Track track, {List<Track>? context}) async {
+    _playIntent = true;
     queue = List.of(context?.isNotEmpty == true ? context! : [track]);
     final remembered = {for (final item in tracks) item.id: item};
     queue = queue.map((item) => remembered[item.id] ?? item).toList();
@@ -308,6 +312,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> playQueueAt(int index) async {
     if (index < 0 || index >= queue.length) return;
+    _playIntent = true;
     queueIndex = index;
     _resumePosition = Duration.zero;
     _shuffleHistory.clear();
@@ -317,7 +322,8 @@ class AppController extends ChangeNotifier {
     await _playCurrent();
   }
 
-  Future<void> _playCurrent() async {
+  Future<void> _playCurrent({bool fromRecovery = false}) async {
+    if (!fromRecovery) _cancelRecovery();
     final track = currentTrack;
     if (track == null) return;
     if (_recoveryTrackId != track.id) {
@@ -401,6 +407,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> resumePlayback() async {
     if (currentTrack == null) return;
+    _playIntent = true;
     if (_loadedTrackId != currentTrack!.id || audio.lastError != null) {
       if (audio.lastError != null) {
         _resumePosition = audio.position > Duration.zero
@@ -425,19 +432,28 @@ class AppController extends ChangeNotifier {
     final trackId = currentTrack?.id;
     final occurrence = queueIndex;
     final generation = _playGeneration;
+    final recoveryGeneration = ++_recoveryGeneration;
     final failedError = audio.lastError;
     if (trackId == null || generation == 0) return;
     _recovering = true;
     _expiryRetries++;
     if (audio.position > Duration.zero) _resumePosition = audio.position;
     try {
+      if (_expiryRetries > 1) {
+        await Future<void>.delayed(
+          Duration(milliseconds: 250 * (_expiryRetries - 1)),
+        );
+      }
       if (generation != _playGeneration ||
           occurrence != queueIndex ||
-          currentTrack?.id != trackId) {
+          currentTrack?.id != trackId ||
+          !_playIntent ||
+          _disposed) {
         return;
       }
-      await _playCurrent();
-      if (occurrence == queueIndex &&
+      await _playCurrent(fromRecovery: true);
+      if (_playIntent &&
+          occurrence == queueIndex &&
           currentTrack?.id == trackId &&
           _loadedTrackId == trackId &&
           audio.isPlaying &&
@@ -447,21 +463,37 @@ class AppController extends ChangeNotifier {
         _notify();
       }
     } finally {
-      _recovering = false;
+      if (recoveryGeneration == _recoveryGeneration) _recovering = false;
     }
   }
 
+  void _cancelRecovery() {
+    ++_recoveryGeneration;
+    _recovering = false;
+  }
+
   Future<void> togglePlayback() async {
-    if (audio.isPlaying) {
-      await audio.pause();
+    if (_playIntent && (audio.isPlaying || _recovering)) {
+      await pausePlayback();
       await _saveQueue();
     } else {
       await resumePlayback();
     }
   }
 
+  Future<void> pausePlayback() async {
+    _playIntent = false;
+    _cancelRecovery();
+    ++_playGeneration;
+    busy = false;
+    await audio.pause();
+    _notify();
+  }
+
   Future<void> stopPlayback() async {
     ++_playGeneration;
+    _playIntent = false;
+    _cancelRecovery();
     busy = false;
     _recoverableRemoteTrackId = null;
     await audio.stop();
@@ -493,6 +525,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> next() async {
     if (queue.isEmpty) return;
+    _playIntent = true;
     if (shuffle && queue.length > 1) {
       var candidates = List.generate(
         queue.length,
@@ -532,6 +565,7 @@ class AppController extends ChangeNotifier {
       return;
     }
     if (queue.isEmpty) return;
+    _playIntent = true;
     if (shuffle && _shuffleHistory.isNotEmpty) {
       queueIndex = _shuffleHistory.removeLast();
     } else {
@@ -1134,7 +1168,7 @@ class AppController extends ChangeNotifier {
         if (sleepRemaining == Duration.zero) {
           timer.cancel();
           _sleepEnd = null;
-          unawaited(audio.pause());
+          unawaited(pausePlayback());
         }
         _notify();
       });

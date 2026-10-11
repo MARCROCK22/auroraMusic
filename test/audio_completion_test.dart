@@ -73,7 +73,7 @@ void main() {
     );
   });
 
-  test('a clean EOF rejects any decoded shortfall against known duration', () {
+  test('a clean EOF rejects shortfalls beyond measured duration rounding', () {
     expect(
       isCompleteAudioStream(
         isPlaying: true,
@@ -90,11 +90,25 @@ void main() {
         isPlaying: true,
         isBuffering: false,
         cleanEof: true,
-        decoded: duration - const Duration(milliseconds: 1),
-        consumed: duration - const Duration(milliseconds: 1),
+        decoded: duration - const Duration(milliseconds: 22),
+        consumed: duration - const Duration(milliseconds: 22),
         expected: duration,
       ),
       isFalse,
+    );
+  });
+
+  test('measured source duration rounding stays within one mixer block', () {
+    expect(
+      isCompleteAudioStream(
+        isPlaying: true,
+        isBuffering: false,
+        cleanEof: true,
+        decoded: const Duration(milliseconds: 187981),
+        consumed: const Duration(milliseconds: 187981),
+        expected: const Duration(seconds: 188),
+      ),
+      isTrue,
     );
   });
 

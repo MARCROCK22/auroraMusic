@@ -72,6 +72,7 @@ void main() {
       expect(controller.error, isNull);
       audio.lastError = 'El audio terminó antes de completar la reproducción.';
       audio.notifyListeners();
+      await Future<void>.delayed(const Duration(milliseconds: 300));
       await _settle(controller);
       expect(source.resolved, ['one', 'one', 'one']);
       expect(controller.error, isNull);
@@ -100,6 +101,7 @@ void main() {
 
       audio.lastError = 'SocketException: connection timed out';
       audio.notifyListeners();
+      await Future<void>.delayed(const Duration(milliseconds: 300));
       await _settle(controller);
       expect(source.resolved, ['one', 'one', 'one']);
       expect(audio.position, const Duration(seconds: 24));
@@ -160,5 +162,48 @@ void main() {
     expect(audio.isPlaying, isFalse);
     expect(audio.position, Duration.zero);
     expect(source.resolved, ['one', 'one']);
+  });
+
+  test('pause cancels a refresh while source resolution is pending', () async {
+    final source = FakeSource();
+    final pending = Completer<ResolvedAudio>();
+    final audio = FakeAudio();
+    final controller = await createTestController(source: source, audio: audio);
+    addTearDown(() => closeTestController(controller));
+    await controller.playTrack(_first);
+    source.pendingResolves['one'] = pending;
+    audio.position = const Duration(seconds: 12);
+    audio.lastError = 'premature EOF';
+    audio.notifyListeners();
+    while (source.resolved.length < 2) {
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+    }
+
+    await controller.togglePlayback();
+    pending.complete(const ResolvedAudio(input: 'https://example.test/one'));
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+
+    expect(audio.isPlaying, isFalse);
+    expect(source.resolved, ['one', 'one']);
+  });
+
+  test('pause cancels the bounded retry backoff', () async {
+    final source = FakeSource();
+    final audio = _FailingAudio();
+    final controller = await createTestController(source: source, audio: audio);
+    addTearDown(() => closeTestController(controller));
+    await controller.playTrack(_first);
+    audio.failNextLoad = true;
+    audio.lastError = 'SocketException: connection timed out';
+    audio.notifyListeners();
+    await _settle(controller);
+
+    audio.lastError = 'SocketException: connection timed out';
+    audio.notifyListeners();
+    await controller.togglePlayback();
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+
+    expect(source.resolved, ['one', 'one']);
+    expect(audio.isPlaying, isFalse);
   });
 }
