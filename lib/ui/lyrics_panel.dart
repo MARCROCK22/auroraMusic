@@ -318,7 +318,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
     final enabled = controller.currentTrack != null;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 8, 4, 4),
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

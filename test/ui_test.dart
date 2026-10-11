@@ -16,11 +16,14 @@ void main() {
   late AppController controller;
   late ProviderContainer container;
   late _TrackingAudio audio;
+  late _ProgressiveSource source;
 
   setUp(() async {
     audio = _TrackingAudio();
+    source = _ProgressiveSource();
     controller = await createTestController(
       audio: audio,
+      source: source,
       tracks: const [
         Track(
           id: 'one',
@@ -186,6 +189,54 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('experimental playback setting is visible and responds', (
+    tester,
+  ) async {
+    await mount(tester, const Size(800, 900));
+    await tester.tap(find.byIcon(Icons.tune).last);
+    await tester.pumpAndSettle();
+    final switchFinder = find.ancestor(
+      of: find.text('Descargar mientras se reproduce').last,
+      matching: find.byType(SwitchListTile),
+    );
+    expect(tester.widget<SwitchListTile>(switchFinder).value, isFalse);
+    expect(tester.widget<SwitchListTile>(switchFinder).onChanged, isNotNull);
+    await tester.tap(find.text('Descargar mientras se reproduce').last);
+    await tester.pumpAndSettle();
+
+    expect(controller.experimentalProgressivePlayback, isTrue);
+    expect(source.applied, isTrue);
+    expect(
+      controller.preferences.getBool('experimentalProgressivePlayback'),
+      isTrue,
+    );
+    expect(tester.widget<SwitchListTile>(switchFinder).value, isTrue);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('experimental playback setting explains unsupported sources', (
+    tester,
+  ) async {
+    source.supported = false;
+    await mount(tester, const Size(800, 900));
+    await tester.tap(find.byIcon(Icons.tune).last);
+    await tester.pumpAndSettle();
+    final switchTile = tester.widget<SwitchListTile>(
+      find.ancestor(
+        of: find.text('Descargar mientras se reproduce').last,
+        matching: find.byType(SwitchListTile),
+      ),
+    );
+
+    expect(switchTile.value, isFalse);
+    expect(switchTile.onChanged, isNull);
+    expect(
+      find.text('No disponible para esta fuente o plataforma.'),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets(
     'DJ controls start and stop recommendation without pausing audio',
     (tester) async {
@@ -260,8 +311,8 @@ void main() {
     }
     await tester.tap(find.byTooltip('Letras').first);
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Cerrar letras'), findsOneWidget);
-    await tester.tap(find.byTooltip('Cerrar letras'));
+    expect(find.text('Volver'), findsOneWidget);
+    await tester.tap(find.text('Volver'));
     await tester.pumpAndSettle();
     expect(find.text('Hola de nuevo'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -295,8 +346,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Letras'));
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Cerrar letras'), findsOneWidget);
-    await tester.tap(find.byTooltip('Cerrar letras'));
+    expect(find.text('Volver'), findsOneWidget);
+    await tester.tap(find.text('Volver'));
     await tester.pumpAndSettle();
     expect(find.text('Hola de nuevo'), findsOneWidget);
     await tester.tap(find.byTooltip('Ajustes'));
@@ -649,8 +700,8 @@ void main() {
     await tester.tap(lyricsButton);
     await tester.pump(const Duration(milliseconds: 250));
     expect(find.text('Letras').last, findsOneWidget);
-    expect(find.byTooltip('Cerrar letras'), findsOneWidget);
-    final closeLyrics = find.byTooltip('Cerrar letras');
+    expect(find.text('Volver'), findsOneWidget);
+    final closeLyrics = find.text('Volver');
     await tester.ensureVisible(closeLyrics);
     await tester.tap(closeLyrics);
     await tester.pumpAndSettle();
@@ -697,4 +748,15 @@ class _TrackingAudio extends FakeAudio {
   bool analysisEnabled = true;
   @override
   void setVisualizationEnabled(bool enabled) => analysisEnabled = enabled;
+}
+
+class _ProgressiveSource extends FakeSource {
+  bool supported = true;
+  bool? applied;
+
+  @override
+  bool get supportsExperimentalProgressivePlayback => supported;
+
+  @override
+  void setExperimentalProgressivePlayback(bool enabled) => applied = enabled;
 }

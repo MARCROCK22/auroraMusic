@@ -1595,6 +1595,25 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         ],
       ),
       (
+        title: 'Reproducción experimental',
+        subtitle: 'Descarga mientras se reproduce',
+        children: [
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Descargar mientras se reproduce'),
+            subtitle: Text(
+              c.source.supportsExperimentalProgressivePlayback
+                  ? 'Empieza antes; puede esperar en zonas aún no descargadas o fallar. La descarga completa sigue siendo la opción estable.'
+                  : 'No disponible para esta fuente o plataforma.',
+            ),
+            value: c.experimentalProgressivePlayback,
+            onChanged: c.source.supportsExperimentalProgressivePlayback
+                ? c.setExperimentalProgressivePlayback
+                : null,
+          ),
+        ],
+      ),
+      (
         title: 'Identidad y tema',
         subtitle: 'Ajusta la apariencia de Aurora',
         children: [

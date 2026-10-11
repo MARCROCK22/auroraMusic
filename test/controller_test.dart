@@ -6,6 +6,38 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fakes.dart';
 
+class _ProgressiveSource extends FakeSource {
+  bool supported = true;
+  bool? applied;
+  int setCalls = 0;
+
+  @override
+  bool get supportsExperimentalProgressivePlayback => supported;
+
+  @override
+  void setExperimentalProgressivePlayback(bool enabled) {
+    applied = enabled;
+    setCalls++;
+  }
+}
+
+class _PlaybackTrackingAudio extends FakeAudio {
+  int pauseCalls = 0;
+  int seekCalls = 0;
+
+  @override
+  Future<void> pause() {
+    pauseCalls++;
+    return super.pause();
+  }
+
+  @override
+  Future<void> seek(Duration value) {
+    seekCalls++;
+    return super.seek(value);
+  }
+}
+
 const first = Track(
   id: 'one',
   title: 'Uno',
@@ -44,6 +76,68 @@ List<Track> _djLibrary([int count = 8]) => [
 ];
 
 void main() {
+  test(
+    'experimental progressive playback defaults off and configures source',
+    () async {
+      final source = _ProgressiveSource();
+      final controller = await createTestController(source: source);
+      addTearDown(() => closeTestController(controller));
+
+      expect(controller.experimentalProgressivePlayback, isFalse);
+      expect(
+        controller.preferences.getBool('experimentalProgressivePlayback'),
+        isNull,
+      );
+      expect(source.applied, isFalse);
+      expect(source.setCalls, 1);
+    },
+  );
+
+  test(
+    'saved experimental progressive playback is restored on startup',
+    () async {
+      final source = _ProgressiveSource();
+      final controller = await createTestController(
+        source: source,
+        preferences: const {'experimentalProgressivePlayback': true},
+      );
+      addTearDown(() => closeTestController(controller));
+
+      expect(controller.experimentalProgressivePlayback, isTrue);
+      expect(source.applied, isTrue);
+    },
+  );
+
+  test('changing progressive playback only configures next tracks', () async {
+    final source = _ProgressiveSource();
+    final audio = _PlaybackTrackingAudio();
+    final controller = await createTestController(
+      tracks: [first, second],
+      source: source,
+      audio: audio,
+    );
+    addTearDown(() => closeTestController(controller));
+    await controller.playTrack(first);
+    audio.position = const Duration(seconds: 42);
+    final loads = audio.loadCount;
+    final pauses = audio.pauseCalls;
+    final seeks = audio.seekCalls;
+
+    controller.setExperimentalProgressivePlayback(true);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(
+      controller.preferences.getBool('experimentalProgressivePlayback'),
+      isTrue,
+    );
+    expect(source.applied, isTrue);
+    expect(audio.loadCount, loads);
+    expect(audio.pauseCalls, pauses);
+    expect(audio.seekCalls, seeks);
+    expect(audio.position, const Duration(seconds: 42));
+    expect(audio.isPlaying, isTrue);
+  });
+
   test(
     'session import copies privately, replaces and clears without deleting the original',
     () async {
