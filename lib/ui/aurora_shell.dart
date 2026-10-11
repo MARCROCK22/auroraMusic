@@ -9,6 +9,7 @@ import '../app_controller.dart';
 import '../core/audio_backend.dart';
 import '../core/models.dart';
 import 'lyrics_panel.dart';
+import 'spotify_import_dialog.dart';
 import 'vinyl_player.dart';
 import 'queue_panel.dart';
 
@@ -1018,10 +1019,21 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             children: [
               Align(
                 alignment: Alignment.centerLeft,
-                child: FilledButton.icon(
-                  onPressed: () => _createPlaylist(c),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Crear lista'),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    FilledButton.icon(
+                      onPressed: c.busy ? null : () => _importSpotify(c),
+                      icon: const Icon(Icons.library_add_outlined),
+                      label: const Text('Importar Spotify'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _createPlaylist(c),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Crear lista'),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 16),
@@ -2508,6 +2520,31 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   Future<void> _importPlaylist(AppController c) async {
     final url = await _askText('Importar lista', 'Enlace de la lista');
     if (url != null) c.importPlaylist(url);
+  }
+
+  Future<void> _importSpotify(AppController c) async {
+    c.clearError();
+    final result = await c.pickSpotifyImport();
+    if (!mounted) return;
+    if (result == null) {
+      if (c.error != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(c.error!)));
+        c.clearError();
+      }
+      return;
+    }
+    await SpotifyImportDialog.show(
+      context,
+      result: result,
+      onImport: c.importSpotifyPlaylists,
+    );
+    if (!mounted || c.error == null) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(c.error!)));
+    c.clearError();
   }
 
   Future<String?> _askText(

@@ -14,6 +14,7 @@ import 'audio/media_controls.dart';
 import 'core/audio_backend.dart';
 import 'core/models.dart';
 import 'core/source_backend.dart';
+import 'import/spotify_import.dart';
 import 'library_database.dart';
 
 final controllerProvider = ChangeNotifierProvider<AppController>((ref) {
@@ -810,6 +811,91 @@ class AppController extends ChangeNotifier {
       _notify();
     } catch (exception) {
       _report(exception);
+    }
+  }
+
+  Future<SpotifyImportResult?> pickSpotifyImport() async {
+    try {
+      final selection = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['json', 'csv'],
+      );
+      if (selection.isEmpty) return null;
+      final file = selection.first;
+      final path = file.path;
+      if (path == null) {
+        throw const FormatException(
+          'No se pudo abrir el archivo seleccionado.',
+        );
+      }
+      if (await File(path).length() > maxSpotifyImportBytes) {
+        throw const FormatException('El archivo supera el límite de 20 MB.');
+      }
+      return SpotifyImportParser.parse(
+        await File(path).readAsString(),
+        extension: p.extension(file.name).replaceFirst('.', ''),
+      );
+    } catch (exception) {
+      _report(exception);
+      return null;
+    }
+  }
+
+  Future<void> importSpotifyPlaylists(
+    List<SpotifyImportPlaylist> imported,
+  ) async {
+    if (imported.isEmpty) return;
+    busy = true;
+    _notify();
+    try {
+      final stamp =
+          '${DateTime.now().microsecondsSinceEpoch}_${_random.nextInt(1 << 32)}';
+      var trackNumber = 0;
+      final newTracks = <Track>[];
+      final newPlaylists = <MusicPlaylist>[];
+      for (
+        var playlistNumber = 0;
+        playlistNumber < imported.length;
+        playlistNumber++
+      ) {
+        final playlist = imported[playlistNumber];
+        final trackIds = <String>[];
+        for (final importedTrack in playlist.tracks) {
+          final track = Track(
+            id: 'spotify_${stamp}_${trackNumber++}',
+            title: importedTrack.title,
+            artist: importedTrack.artist,
+            album: importedTrack.album,
+            spotifyUri: importedTrack.uri,
+            spotifyMatchPending: true,
+          );
+          newTracks.add(track);
+          trackIds.add(track.id);
+        }
+        newPlaylists.add(
+          MusicPlaylist(
+            id: 'spotify_list_${stamp}_$playlistNumber',
+            name: playlist.name,
+            trackIds: trackIds,
+          ),
+        );
+      }
+      await database.transaction(() async {
+        for (final track in newTracks) {
+          await database.saveTrack(track);
+        }
+        for (final playlist in newPlaylists) {
+          await database.savePlaylist(playlist);
+        }
+      });
+      tracks.insertAll(0, newTracks);
+      playlists.addAll(newPlaylists);
+      error = null;
+    } catch (exception) {
+      _report(exception);
+    } finally {
+      busy = false;
+      _notify();
     }
   }
 

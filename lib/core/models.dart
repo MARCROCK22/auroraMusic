@@ -11,6 +11,9 @@ class Track {
     this.artworkUrl,
     this.pageUrl,
     this.localPath,
+    this.album,
+    this.spotifyUri,
+    this.spotifyMatchPending = false,
   });
   final String id;
   final String title;
@@ -19,19 +22,29 @@ class Track {
   final String? artworkUrl;
   final String? pageUrl;
   final String? localPath;
+  final String? album;
+  final String? spotifyUri;
+  final bool spotifyMatchPending;
+  bool get isPendingSpotifyMatch => spotifyMatchPending;
   bool get isLocal => localPath != null;
   Track copyWith({
     String? localPath,
     Duration? duration,
     bool clearLocalPath = false,
+    String? pageUrl,
+    String? spotifyUri,
+    bool? spotifyMatchPending,
   }) => Track(
     id: id,
     title: title,
     artist: artist,
     duration: duration ?? this.duration,
     artworkUrl: artworkUrl,
-    pageUrl: pageUrl,
+    pageUrl: pageUrl ?? this.pageUrl,
     localPath: clearLocalPath ? null : localPath ?? this.localPath,
+    album: album,
+    spotifyUri: spotifyUri ?? this.spotifyUri,
+    spotifyMatchPending: spotifyMatchPending ?? this.spotifyMatchPending,
   );
   Map<String, Object?> toJson() => {
     'id': id,
@@ -41,6 +54,9 @@ class Track {
     'artworkUrl': artworkUrl,
     'pageUrl': pageUrl,
     'localPath': localPath,
+    'album': album,
+    'spotifyUri': spotifyUri,
+    'spotifyMatchPending': spotifyMatchPending,
   };
   factory Track.fromJson(Map<String, dynamic> json) => Track(
     id: json['id'] as String,
@@ -52,6 +68,9 @@ class Track {
     artworkUrl: json['artworkUrl'] as String?,
     pageUrl: json['pageUrl'] as String?,
     localPath: json['localPath'] as String?,
+    album: json['album'] as String?,
+    spotifyUri: json['spotifyUri'] as String?,
+    spotifyMatchPending: json['spotifyMatchPending'] as bool? ?? false,
   );
 }
 
