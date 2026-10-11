@@ -109,6 +109,100 @@ void main() {
     expect(controller.searching, isFalse);
   });
 
+  test(
+    'requested discovery is bounded, deduplicated, and library-neutral',
+    () async {
+      final source = FakeSource();
+      final controller = await createTestController(
+        tracks: [first, second, third],
+        source: source,
+      );
+      addTearDown(() => closeTestController(controller));
+      source.searchMatches = [
+        first,
+        const Track(
+          id: 'new-one',
+          title: 'Nuevo uno',
+          artist: 'Artista',
+          pageUrl: 'https://youtu.be/new-one',
+        ),
+        const Track(
+          id: 'new-one',
+          title: 'Duplicado',
+          artist: 'Artista',
+          pageUrl: 'https://youtu.be/new-one',
+        ),
+        const Track(id: 'unplayable', title: 'Sin enlace', artist: 'Artista'),
+        const Track(
+          id: 'pending',
+          title: 'Pendiente',
+          artist: 'Artista',
+          pageUrl: 'https://youtu.be/pending',
+          spotifyMatchPending: true,
+        ),
+        for (var i = 2; i <= 8; i++)
+          Track(
+            id: 'new-$i',
+            title: 'Nuevo $i',
+            artist: 'Artista',
+            pageUrl: 'https://youtu.be/new-$i',
+          ),
+      ];
+
+      await controller.discoverRecommendations();
+
+      expect(source.searchQueries, ['Artista songs']);
+      expect(source.searchLimits, [12]);
+      expect(controller.discoveredRecommendations, hasLength(6));
+      expect(
+        controller.discoveredRecommendations.map((track) => track.id).toSet(),
+        hasLength(6),
+      );
+      expect(controller.tracks.map((track) => track.id).toSet(), {
+        'one',
+        'two',
+        'three',
+      });
+      expect(
+        (await controller.database.readTracks())
+            .map((track) => track.id)
+            .toSet(),
+        {'one', 'two', 'three'},
+      );
+    },
+  );
+
+  test('cancelled discovery ignores its late source result', () async {
+    final source = FakeSource()..pendingSearch = Completer<List<Track>>();
+    final controller = await createTestController(
+      tracks: [first, second],
+      source: source,
+    );
+    addTearDown(() => closeTestController(controller));
+    final discovery = controller.discoverRecommendations();
+    controller.cancelRecommendationDiscovery();
+    source.pendingSearch!.complete([third]);
+    await discovery;
+
+    expect(controller.discoveredRecommendations, isEmpty);
+    expect(controller.discoveringRecommendations, isFalse);
+  });
+
+  test('discovery failure stays separate from the main search error', () async {
+    final source = FakeSource()..searchError = StateError('offline');
+    final controller = await createTestController(
+      tracks: [first, second],
+      source: source,
+    );
+    addTearDown(() => closeTestController(controller));
+
+    await controller.discoverRecommendations();
+
+    expect(controller.recommendationDiscoveryError, contains('offline'));
+    expect(controller.error, isNull);
+    expect(controller.searching, isFalse);
+  });
+
   test('older extraction cannot replace a newer selected track', () async {
     final source = FakeSource();
     source.pendingResolves['one'] = Completer<ResolvedAudio>();
