@@ -82,7 +82,7 @@ float scaledRmsError(const std::vector<float>& actual,
                      float referenceScale) {
   double error = 0;
   unsigned int count = 0;
-  for (unsigned int i = kWarmupFrames; i < actual.size(); ++i) {
+  for (unsigned int i = kWarmupFrames * kChannels; i < actual.size(); ++i) {
     const double delta = actual[i] - reference[i] * referenceScale;
     error += delta * delta;
     ++count;
@@ -109,11 +109,11 @@ Result renderEqTransition(const std::vector<float>& input, bool lowerFirst) {
   if (lowerFirst) engine.setVolume(handle, kEqHeadroom / 4);
   for (unsigned int band = 1; band <= 8; ++band) {
     engine.setFilterParameter(handle, 0, band, 4.0f);
-    engine.mix(result.samples.data() + rendered, 256);
+    engine.mix(result.samples.data() + rendered * kChannels, 256);
     rendered += 256;
   }
   engine.setVolume(handle, kEqHeadroom / 4);
-  engine.mix(result.samples.data() + rendered, kFrames - rendered);
+  engine.mix(result.samples.data() + rendered * kChannels, kFrames - rendered);
   engine.deinit();
 
   for (float sample : result.samples) {
