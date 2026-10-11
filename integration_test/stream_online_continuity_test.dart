@@ -1,4 +1,5 @@
 import 'package:aurora_music/audio/music_audio.dart';
+import 'package:aurora_music/core/models.dart';
 import 'package:aurora_music/sources/yt_dlp_source.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -23,7 +24,17 @@ void main() {
             const String.fromEnvironment('AURORA_SAMPLE_URL'),
             limit: 1,
           );
-          final resolved = await source.resolve(tracks.single);
+          final found = tracks.single;
+          final track = const bool.fromEnvironment('AURORA_AS_IMPORTED_TRACK')
+              ? Track(
+                  id: 'spotify-native-fixture',
+                  title: found.title,
+                  artist: found.artist,
+                  duration: found.duration,
+                  pageUrl: found.pageUrl,
+                )
+              : found;
+          final resolved = await source.resolve(track);
           expect(resolved.duration, greaterThan(const Duration(seconds: 150)));
           await audio.initialize();
           audio.setVolume(0);
@@ -37,13 +48,18 @@ void main() {
           );
           await audio.play();
           const fullTrack = bool.fromEnvironment('AURORA_FULL_TRACK');
+          const minimumPlayback = Duration(
+            seconds: int.fromEnvironment(
+              'AURORA_PLAY_SECONDS',
+              defaultValue: 130,
+            ),
+          );
           final deadline = DateTime.now().add(
             fullTrack
                 ? resolved.duration + const Duration(seconds: 30)
                 : const Duration(seconds: 160),
           );
-          while (audio.position <
-                  initialPosition + const Duration(seconds: 130) ||
+          while (audio.position < initialPosition + minimumPlayback ||
               (fullTrack && completions == 0)) {
             expect(audio.lastError, isNull);
             if (completions == 0) expect(audio.isPlaying, isTrue);

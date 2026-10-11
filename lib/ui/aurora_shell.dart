@@ -1027,7 +1027,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                     FilledButton.icon(
                       onPressed: c.busy ? null : () => _importSpotify(c),
                       icon: const Icon(Icons.library_add_outlined),
-                      label: const Text('Importar Spotify'),
+                      label: const Text('Importar de Spotify'),
                     ),
                     OutlinedButton.icon(
                       onPressed: () => _createPlaylist(c),
@@ -2568,10 +2568,11 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Importar datos de Spotify'),
+        scrollable: true,
         content: const Text(
-          '1. Elige tu archivo Spotify Account Data (JSON) o un CSV de canciones.\n'
-          '2. Revisa las listas seleccionadas y pulsa Importar.\n'
-          '3. En la biblioteca, elige manualmente un resultado de YouTube para cada canción pendiente.',
+          '1. Exporta un CSV o solicita tus datos en Spotify → Cuenta → Privacidad. Usa el archivo Playlist*.json.\n\n'
+          '2. Elige el archivo, revisa las listas y pulsa Importar.\n\n'
+          '3. Toca una canción pendiente para elegir su versión de YouTube.',
         ),
         actions: [
           TextButton(

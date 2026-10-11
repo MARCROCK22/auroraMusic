@@ -86,7 +86,9 @@ class _SpotifyImportDialogState extends State<SpotifyImportDialog> {
                           ? 'Lista sin nombre'
                           : playlist.name,
                     ),
-                    subtitle: Text('${playlist.tracks.length} canciones'),
+                    subtitle: Text(
+                      '${playlist.tracks.length} ${playlist.tracks.length == 1 ? 'canción' : 'canciones'}',
+                    ),
                   );
                 },
               ),
