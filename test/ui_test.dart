@@ -407,6 +407,55 @@ void main() {
     },
   );
 
+  testWidgets(
+    'Biblioteca shows only Likes and user playlists with their own members',
+    (tester) async {
+      final extraTracks = List.generate(
+        24,
+        (index) => Track(
+          id: 'catalog-$index',
+          title: 'Catálogo $index',
+          artist: 'Aurora',
+          pageUrl: 'https://www.youtube.com/watch?v=catalog$index',
+          duration: const Duration(minutes: 3),
+        ),
+      );
+      controller.tracks.addAll(extraTracks);
+      await tester.runAsync(() async {
+        await controller.toggleFavorite(controller.tracks.first);
+        await controller.createPlaylist('Mi lista');
+        await controller.addToPlaylist(
+          controller.playlists.single,
+          controller.tracks[1],
+        );
+      });
+      await mount(tester, const Size(320, 800));
+      await tester.tap(find.byIcon(Icons.library_music_outlined).last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Me gusta'), findsOneWidget);
+      expect(find.text('Mi lista'), findsOneWidget);
+      expect(find.text('Catálogo 0'), findsNothing);
+      expect(find.text('Catálogo 23'), findsNothing);
+
+      await tester.tap(find.text('Me gusta'));
+      await tester.pumpAndSettle();
+      expect(find.text(controller.tracks.first.title), findsOneWidget);
+      expect(find.text(controller.tracks[1].title), findsNothing);
+      expect(find.text('Catálogo 0'), findsNothing);
+
+      await tester.tap(find.text('Todas las listas'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Mi lista'));
+      await tester.pumpAndSettle();
+      expect(find.text(controller.tracks[1].title), findsOneWidget);
+      expect(find.text(controller.tracks.first.title), findsNothing);
+      expect(find.text('Catálogo 0'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('Selected playlist header follows renames', (tester) async {
     await tester.runAsync(() => controller.createPlaylist('Nombre anterior'));
     final selected = controller.playlists.single;

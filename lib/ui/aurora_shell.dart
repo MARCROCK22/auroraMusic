@@ -42,8 +42,8 @@ class AuroraShell extends ConsumerStatefulWidget {
 class _AuroraShellState extends ConsumerState<AuroraShell>
     with WidgetsBindingObserver {
   int _section = 0;
-  int _libraryTab = 0;
   MusicPlaylist? _playlist;
+  bool _likesSelected = false;
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
   String _submittedQuery = '';
@@ -99,6 +99,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   void _navigate(int value) => setState(() {
     _section = value;
     _playlist = null;
+    _likesSelected = false;
   });
 
   void _submitSearch(AppController c, String query) {
@@ -274,7 +275,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         child: Material(
           color: active
               ? colors.primary.withValues(alpha: .12)
-              : Colors.transparent,
+              : Theme.of(context).colorScheme.surface.withValues(alpha: 0),
           borderRadius: BorderRadius.circular(8),
           child: InkWell(
             onTap: () => _navigate(index),
@@ -473,22 +474,13 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             onPressed: () => _navigate(3),
           ),
           ActionChip(
-            avatar: const Icon(Icons.folder_open_outlined, size: 18),
-            label: const Text('Archivos locales'),
-            onPressed: () {
-              setState(() {
-                _section = 2;
-                _libraryTab = 4;
-              });
-            },
-          ),
-          ActionChip(
             avatar: const Icon(Icons.favorite_border, size: 18),
             label: const Text('Favoritos'),
             onPressed: () {
               setState(() {
                 _section = 2;
-                _libraryTab = 1;
+                _likesSelected = true;
+                _playlist = null;
               });
             },
           ),
@@ -893,19 +885,25 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     ],
   );
   Widget _library(AppController c) {
-    if (_playlist != null) {
-      final p = c.playlists.where((p) => p.id == _playlist!.id).firstOrNull;
-      if (p == null) {
+    if (_playlist != null || _likesSelected) {
+      final playlist = _likesSelected
+          ? null
+          : c.playlists.where((item) => item.id == _playlist!.id).firstOrNull;
+      if (!_likesSelected && playlist == null) {
         return _empty(
           Icons.queue_music,
           'Esta lista ya no existe',
           'Selecciona otra lista de tu biblioteca.',
         );
       }
-      final items = p.trackIds
-          .map((id) => c.tracks.where((t) => t.id == id).firstOrNull)
-          .whereType<Track>()
-          .toList();
+      final items = _likesSelected
+          ? c.tracks.where((track) => c.favoriteIds.contains(track.id)).toList()
+          : playlist!.trackIds
+                .map(
+                  (id) => c.tracks.where((track) => track.id == id).firstOrNull,
+                )
+                .whereType<Track>()
+                .toList();
       return Column(
         children: [
           Padding(
@@ -915,10 +913,18 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
               runSpacing: 8,
               children: [
                 TextButton.icon(
-                  onPressed: () => setState(() => _playlist = null),
+                  onPressed: () => setState(() {
+                    _playlist = null;
+                    _likesSelected = false;
+                  }),
                   icon: const Icon(Icons.arrow_back),
                   label: const Text('Todas las listas'),
                 ),
+                if (_likesSelected)
+                  Text(
+                    'Me gusta',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                 FilledButton.icon(
                   onPressed: items.isEmpty
                       ? null
@@ -926,62 +932,68 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                   icon: const Icon(Icons.play_arrow),
                   label: const Text('Reproducir'),
                 ),
-                OutlinedButton(
-                  onPressed: () async {
-                    final name = await _askText(
-                      'Renombrar lista',
-                      'Nombre',
-                      initial: p.name,
-                    );
-                    if (name != null) c.renamePlaylist(p, name);
-                  },
-                  child: const Text('Renombrar'),
-                ),
-                TextButton(
-                  onPressed: () async {
-                    if (await _confirm(
-                      'Eliminar lista',
-                      'Se eliminará «${p.name}». Tus archivos permanecerán en la biblioteca.',
-                    )) {
-                      c.deletePlaylist(p);
-                      setState(() => _playlist = null);
-                    }
-                  },
-                  child: const Text('Eliminar'),
-                ),
+                if (playlist != null) ...[
+                  OutlinedButton(
+                    onPressed: () async {
+                      final name = await _askText(
+                        'Renombrar lista',
+                        'Nombre',
+                        initial: playlist.name,
+                      );
+                      if (name != null) c.renamePlaylist(playlist, name);
+                    },
+                    child: const Text('Renombrar'),
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      if (await _confirm(
+                        'Eliminar lista',
+                        'Se eliminará «${playlist.name}». Tus archivos permanecerán en la biblioteca.',
+                      )) {
+                        c.deletePlaylist(playlist);
+                        setState(() => _playlist = null);
+                      }
+                    },
+                    child: const Text('Eliminar'),
+                  ),
+                ],
               ],
             ),
           ),
           Expanded(
             child: items.isEmpty
                 ? _empty(
-                    Icons.playlist_add,
-                    'Esta lista está esperando música',
-                    'Añade canciones desde el menú de cualquier resultado o canción.',
+                    _likesSelected ? Icons.favorite_border : Icons.playlist_add,
+                    _likesSelected
+                        ? 'Aún no hay canciones que te gusten'
+                        : 'Esta lista está esperando música',
+                    _likesSelected
+                        ? 'Marca una canción con Me gusta para verla aquí.'
+                        : 'Añade canciones desde el menú de cualquier resultado o canción.',
+                  )
+                : playlist == null
+                ? ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: items.length,
+                    itemBuilder: (_, i) => _trackTile(c, items[i], items),
                   )
                 : ReorderableListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     itemCount: items.length,
                     onReorder: (oldIndex, newIndex) =>
-                        c.reorderPlaylist(p, oldIndex, newIndex),
+                        c.reorderPlaylist(playlist, oldIndex, newIndex),
                     itemBuilder: (_, i) => _trackTile(
                       c,
                       items[i],
                       items,
-                      key: ValueKey('${p.id}-${items[i].id}'),
-                      playlist: p,
+                      key: ValueKey('${playlist.id}-${items[i].id}'),
+                      playlist: playlist,
                     ),
                   ),
           ),
         ],
       );
     }
-    final items = switch (_libraryTab) {
-      1 => c.tracks.where((t) => c.favoriteIds.contains(t.id)).toList(),
-      3 => c.recentTracks,
-      4 => c.tracks.where((t) => t.isLocal).toList(),
-      _ => c.tracks,
-    };
     return Column(
       children: [
         Padding(
@@ -996,110 +1008,49 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             ),
           ),
         ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Row(
-              children: [
-                for (final entry in [
-                  'Canciones',
-                  'Favoritos',
-                  'Listas',
-                  'Historial',
-                  'Archivos locales',
-                ].asMap().entries)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(entry.value),
-                      selected: _libraryTab == entry.key,
-                      onSelected: (_) =>
-                          setState(() => _libraryTab = entry.key),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
         Expanded(
-          child: _libraryTab == 2
-              ? ListView(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  children: [
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: FilledButton.icon(
-                        onPressed: () => _createPlaylist(c),
-                        icon: const Icon(Icons.add),
-                        label: const Text('Crear lista'),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    if (c.playlists.isEmpty)
-                      _empty(
-                        Icons.queue_music,
-                        'Una lista para cada momento',
-                        'Crea una lista y reúne tus canciones favoritas.',
-                      ),
-                    ...c.playlists.map(
-                      (p) => ListTile(
-                        leading: const Icon(Icons.queue_music),
-                        title: Text(p.name),
-                        subtitle: Text('${p.trackIds.length} canciones'),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: () => setState(() => _playlist = p),
-                      ),
-                    ),
-                  ],
-                )
-              : items.isEmpty
-              ? _empty(
-                  Icons.library_music_outlined,
-                  'Todavía no hay canciones aquí',
-                  'Importa archivos, guarda favoritos o descubre música en Buscar.',
-                )
-              : _libraryTab == 0
-              ? LayoutBuilder(
-                  builder: (context, constraints) {
-                    const horizontalPadding = 48.0;
-                    const spacing = 16.0;
-                    const maxCellWidth = 220.0;
-                    final availableWidth =
-                        (constraints.maxWidth - horizontalPadding).clamp(
-                          0.0,
-                          double.infinity,
-                        );
-                    final columns =
-                        ((availableWidth + spacing) / (maxCellWidth + spacing))
-                            .ceil()
-                            .clamp(1, 100);
-                    final cellWidth =
-                        (availableWidth - spacing * (columns - 1)) / columns;
-                    final rowExtent =
-                        cellWidth +
-                        MediaQuery.textScalerOf(context).scale(64) +
-                        16;
-                    return GridView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                        maxCrossAxisExtent: maxCellWidth,
-                        mainAxisExtent: rowExtent,
-                        crossAxisSpacing: spacing,
-                        mainAxisSpacing: spacing,
-                      ),
-                      itemCount: items.length,
-                      itemBuilder: (_, i) => _albumCard(c, items[i]),
-                    );
-                  },
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: items.length,
-                  itemBuilder: (_, i) => _trackTile(c, items[i], items),
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                  onPressed: () => _createPlaylist(c),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Crear lista'),
                 ),
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: const Icon(Icons.favorite),
+                title: const Text('Me gusta'),
+                subtitle: Text('${c.favoriteIds.length} canciones'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => setState(() {
+                  _likesSelected = true;
+                  _playlist = null;
+                }),
+              ),
+              if (c.playlists.isEmpty)
+                _empty(
+                  Icons.queue_music,
+                  'Una lista para cada momento',
+                  'Crea una lista y reúne tus canciones favoritas.',
+                ),
+              ...c.playlists.map(
+                (playlist) => ListTile(
+                  leading: const Icon(Icons.queue_music),
+                  title: Text(playlist.name),
+                  subtitle: Text('${playlist.trackIds.length} canciones'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => setState(() {
+                    _likesSelected = false;
+                    _playlist = playlist;
+                  }),
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );
