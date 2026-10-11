@@ -6,6 +6,7 @@ Reproductor de música en Flutter y Dart para **Windows x64 y Android 7+**. Inte
 
 - Inicio, búsqueda, importación de enlaces/listas de YouTube y archivos locales.
 - Favoritos, playlists editables, historial y cola reordenable; aleatorio, repetición, volumen, avance y temporizador.
+- Importación gratuita de playlists de Spotify desde JSON/CSV local, con vista previa y elección explícita de la versión en YouTube; sin configurar claves de API.
 - Descargas locales MP3 con progreso, cancelación, reintento y eliminación; carpeta de destino configurable en Windows y biblioteca disponible sin conexión.
 - Interfaz cálida con Newsreader y Plus Jakarta Sans incluidas, portadas protagonistas y panel de reproducción/cola en escritorio ancho.
 - Diseño aprobado en Stitch: biblioteca en cuadrícula, cola con vista propia y ajustes por secciones. **Modo Vinilo** gira durante la reproducción y permite desplazar la posición arrastrando el disco.
@@ -14,6 +15,7 @@ Reproductor de música en Flutter y Dart para **Windows x64 y Android 7+**. Inte
 - Ecualizador DSP de ocho bandas, presets y reducción automática de ganancia para los refuerzos.
 - Controles multimedia del sistema, servicio de audio Android, pausa por desconexión e interrupciones de audio.
 - SQLite local; restaura cola y posición **en pausa**. Temas claro/oscuro/sistema y movimiento reducido.
+- Paletas Automático, Morado, Terracota, Ámbar y Verde bosque para toda la interfaz.
 
 No hay cuentas, sincronización, catálogo de Spotify, DRM ni recomendaciones de un servicio remoto.
 
@@ -28,6 +30,8 @@ El botón **Letras** está en el reproductor inferior y en la cabecera del repro
 En escritorio, la entrada **Letras** mantiene la navegación y los controles inferiores; el botón del reproductor abre la vista completa. En móvil, **Más vistas** abre vinilo, cola o letras, conservando los cuatro destinos principales. En la cola, el menú de cada pista permite quitar esa aparición sin borrar el archivo. Las referencias y la preferencia de trabajar con subagentes Luna están en [docs/design/README.md](docs/design/README.md).
 
 ## Ejecutar desde el código
+
+Las ramas de desarrollo y pruebas usan `aurora/<cambio-o-prueba>` (por ejemplo, `aurora/corregir-cache`). Cada subagente trabaja en su propia rama y checkout; la integración y las pruebas preceden a la publicación en `main`.
 
 Requisitos usados: Flutter 3.38.8 / Dart 3.10.7. Para Windows: Visual Studio con desarrollo de escritorio C++; para Android: SDK Android, Java 17+ y dispositivo/emulador de 64 bits. Usa el Dart incluido en Flutter.
 
@@ -54,6 +58,12 @@ Si Windows impide crear los enlaces de plugins, ejecuta `./scripts/prepare_windo
 Este comando permite prepararlas por separado. Descarga versiones oficiales verificadas de yt-dlp, Deno, FFmpeg y ffprobe en `tools/windows/`, junto a hashes, versiones y licencias. `scripts/windows_tools.lock.json` fija las versiones predeterminadas. **Ajustes → Herramientas** permite un diagnóstico o una carpeta personalizada. No se ejecutan herramientas encontradas arbitrariamente en `PATH`.
 
 Android incorpora Python, JavaScript, yt-dlp y FFmpeg mediante `youtubedl-android` 0.18.1; no necesita instalar Python. Las primeras operaciones preparan esos componentes localmente.
+
+### Caché de reproducción en Windows
+
+Para reducir cortes de las URLs temporales de YouTube, Aurora descarga primero el audio completo en su carpeta privada y valida su duración con ffprobe. La primera reproducción necesita esperar la descarga; una copia válida puede reutilizarse. La caché se limita a 512 MB y limpia los archivos más antiguos. **Ajustes → Almacenamiento y biblioteca → Limpiar caché** conserva la canción actual y tus descargas locales. Los paquetes para compartir no incluyen esta caché ni tus datos personales.
+
+Los reintentos de reproducción son limitados, conservan la canción y posición, y se cancelan al pausar, detener o cambiar de canción. No evitan restricciones de YouTube ni hacen accesibles videos privados o eliminados.
 
 ### Cuando YouTube limita solicitudes
 
