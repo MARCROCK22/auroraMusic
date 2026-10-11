@@ -26,6 +26,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install pinned Android SDK packages
         shell: pwsh
@@ -90,7 +92,7 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($sdk)) { $sdk = $env:ANDROID_SDK_ROOT }
           if ([string]::IsNullOrWhiteSpace($sdk)) { throw 'Android SDK path is not set by setup-android.' }
           $buildTools = Join-Path $sdk 'build-tools/36.1.0'
-          $cmdlineTools = Join-Path $sdk 'cmdline-tools/latest/bin'
+          $cmdlineTools = Split-Path (Get-Command sdkmanager.bat -ErrorAction Stop).Source
           & (Join-Path $buildTools 'apksigner.bat') verify --verbose --print-certs $apk
           if ($LASTEXITCODE -ne 0) { throw 'APK signature verification failed.' }
           $debuggable = & (Join-Path $cmdlineTools 'apkanalyzer.bat') manifest debuggable $apk
