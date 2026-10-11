@@ -1381,6 +1381,34 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
           ),
           const SizedBox(height: 8),
           const Text('La carpeta se usa para las próximas descargas.'),
+          if (c.source.supportsPlaybackCache) ...[
+            const SizedBox(height: 20),
+            Text(
+              'Caché de reproducción',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Hasta 512 MB. Los archivos antiguos se limpian automáticamente. Tus descargas y la canción actual se conservan.',
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: c.busy || c.clearingPlaybackCache
+                    ? null
+                    : c.clearPlaybackCache,
+                icon: const Icon(Icons.cleaning_services_outlined),
+                label: Text(
+                  c.clearingPlaybackCache ? 'Limpiando…' : 'Limpiar caché',
+                ),
+              ),
+            ),
+            if (c.playbackCacheMessage != null) ...[
+              const SizedBox(height: 8),
+              Text(c.playbackCacheMessage!),
+            ],
+          ],
         ],
       ),
       (

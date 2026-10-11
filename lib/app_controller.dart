@@ -44,6 +44,8 @@ class AppController extends ChangeNotifier {
   bool diagnosing = false;
   bool sessionBusy = false;
   bool configuringDownloadDirectory = false;
+  bool clearingPlaybackCache = false;
+  String? playbackCacheMessage;
   String get downloadsDirectoryPath =>
       preferences.getString('downloadsDirectory') ??
       p.join(supportDirectory.path, 'downloads');
@@ -88,6 +90,7 @@ class AppController extends ChangeNotifier {
   final _closed = Completer<void>();
   Future<void> get closed => _closed.future;
   String? _loadedTrackId;
+  String? _loadedAudioInput;
   Duration _resumePosition = Duration.zero;
   final Random _random = Random();
   final List<int> _shuffleHistory = [];
@@ -350,6 +353,7 @@ class AppController extends ChangeNotifier {
     try {
       await audio.stop();
       if (generation != _playGeneration || _disposed) return;
+      _loadedAudioInput = null;
       for (final item in List<Track>.of(queue)) {
         await _remember(item);
         if (generation != _playGeneration || _disposed) return;
@@ -371,6 +375,7 @@ class AppController extends ChangeNotifier {
           ? ResolvedAudio(input: local, duration: track.duration)
           : await source.resolve(track);
       if (generation != _playGeneration || _disposed) return;
+      _loadedAudioInput = resolved.input;
       await audio.load(
         resolved,
         ffmpegExecutable: source.ffmpegExecutable,
@@ -519,6 +524,7 @@ class AppController extends ChangeNotifier {
     busy = false;
     _recoverableRemoteTrackId = null;
     await audio.stop();
+    _loadedAudioInput = null;
     _controls?.updateTrack(null);
     _loadedTrackId = null;
     _resumePosition = Duration.zero;
@@ -779,6 +785,26 @@ class AppController extends ChangeNotifier {
     await _replacePlaylist(
       MusicPlaylist(id: playlist.id, name: playlist.name, trackIds: ids),
     );
+  }
+
+  Future<void> clearPlaybackCache() async {
+    if (busy || clearingPlaybackCache) return;
+    clearingPlaybackCache = true;
+    playbackCacheMessage = null;
+    _notify();
+    try {
+      final removed = await source.clearPlaybackCache(
+        protectedPath: _loadedAudioInput,
+      );
+      playbackCacheMessage = removed == 0
+          ? 'No hay archivos temporales que limpiar. La canción actual se conserva.'
+          : 'Caché limpiada: $removed archivos temporales. La canción actual se conserva.';
+    } catch (exception) {
+      _report(exception);
+    } finally {
+      clearingPlaybackCache = false;
+      _notify();
+    }
   }
 
   Future<void> importFiles() async {
