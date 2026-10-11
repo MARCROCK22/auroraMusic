@@ -112,6 +112,7 @@ class LibraryDatabase extends GeneratedDatabase {
         'progress': job.progress,
         'error': job.error,
         'localPath': job.localPath,
+        'destinationRoot': job.destinationRoot,
       }),
     ],
   );
@@ -135,6 +136,7 @@ class LibraryDatabase extends GeneratedDatabase {
               ? 'Descarga interrumpida. Puedes reintentar.'
               : data['error'] as String?,
           localPath: data['localPath'] as String?,
+          destinationRoot: data['destinationRoot'] as String?,
         );
       }).toList();
 

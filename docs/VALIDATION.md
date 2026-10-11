@@ -9,6 +9,7 @@ Windows x64, Flutter 3.38.8 / Dart 3.10.7; Android API 36.1 en emulador x86_64. 
 ```powershell
 flutter analyze --no-pub
 flutter test --no-pub
+flutter test integration_test/interface_smoke_test.dart -d windows --no-pub
 flutter test integration_test/app_smoke_test.dart -d windows --no-pub
 flutter test integration_test/app_smoke_test.dart -d <android-id> --no-pub
 flutter test integration_test/audio_smoke_test.dart -d windows --no-pub --dart-define=AURORA_TOOLS=C:/ruta/tools/windows --name "native WAV|FFmpeg PCM"
@@ -30,7 +31,8 @@ Usa un video público permitido para probar extracción, reproducción y descarg
 
 | Comprobación | Resultado |
 | --- | --- |
-| Unitarias y widgets | 37 pruebas aprobadas: cola y duplicados, carreras asíncronas, cierre, restauración, biblioteca, descargas, borrado seguro, sesión opcional, entrada/redacción, DSP, layouts, contraste y prevención de búsquedas duplicadas. |
+| Unitarias y widgets | 60 pruebas aprobadas: cola y duplicados, carreras asíncronas, cierre, restauración, biblioteca, carpeta de descargas persistente, borrado seguro, letras y caché/importación, sesión opcional, DSP, layouts, contraste y prevención de búsquedas duplicadas. |
+| Rediseño y centrado | Capturas nativas a 1440×900 y 390×844; navegación, biblioteca, búsqueda, descargas, ajustes, vinilo, cola y letras. Botón de reproducción centrado a 1440/900 dp; metadatos móviles separados de controles; disco, etiqueta y agujero del vinilo concéntricos con tolerancia de 1 dp, también a 320 dp con texto al 200 %. |
 | Layouts | 320, 800 y 1440 dp; texto al 200%; reproductor, cola y EQ; confirmar/cancelar borrado. |
 | Contraste | 24 tonos de portada en temas claro/oscuro; acciones y texto ≥4,5:1. |
 | Audio Windows | WAV y PCM FFmpeg aprobados: reloj consumido, pausa, seek, FFT, RMS del EQ, buffer reciclado, cambios rápidos y EOF. |
@@ -39,7 +41,7 @@ Usa un video público permitido para probar extracción, reproducción y descarg
 | Audio Android | WAV y PCM FFmpeg aprobados: pausa, seek, FFT, EQ, cancelación y EOF. Excepción de cierre del worker corregida y comprobada. |
 | Reproducción continua Windows | Ejecutable release independiente: 30 minutos aprobados, 1801 s de reloj consumido, crecimiento máximo de memoria de 909312 bytes. Log `build/native_audio_soak_release_30min.jsonl`, evento final `complete`. |
 | YouTube Windows (2026-10-11) | Búsqueda por texto y extracción CLI aprobadas sin sesión. Prueba nativa aprobada con `jNQXAC9IVRw`: metadatos, extracción HTTPS, reproducción real, descarga MP3, reproducción local y seek. El bloqueo 429 observado el día anterior no se reprodujo hoy; el resultado no garantiza disponibilidad de todos los videos o redes. |
-| Paquetes | Windows release actualizado: `dist/actualizado/Aurora-Windows.zip`, herramientas/licencias incluidas; ejecutable abierto y búsqueda/reproducción observadas en su interfaz. Android ARM64 actualizado: `dist/Aurora-Android-arm64-debug.apk`, firma de desarrollo. Ambos tienen archivos SHA-256. |
+| Paquetes del rediseño | Windows release: `dist/redisenado/Aurora-Windows.zip`, herramientas/licencias incluidas; hash del motor release verificado y ejecutable independiente activo tras cinco segundos de arranque. Android ARM64: `dist/redisenado/Aurora-Android-arm64-debug.apk`, firma de desarrollo. Ambos tienen archivos SHA-256. Las comprobaciones online y de audio de las filas anteriores corresponden a la validación previa del motor, conservado en este rediseño. |
 | Alineación Android | ZIP de 16 KB y 265 ELF ARM64, incluyendo dependencias archivadas Python/FFmpeg: aprobados. WebP recompilado y avisos de licencia presentes en APK. |
 
 La inspección de dependencias detectó cinco ELF WebP de 4 KB dentro del archivo FFmpeg original. `scripts/rebuild_android_webp.ps1` recompila esas bibliotecas desde código oficial con NDK 28 y verifica sus símbolos/SONAME; `scripts/verify_android_alignment.ps1` revisa tanto las bibliotecas visibles del APK como las dependencias archivadas de Python/FFmpeg. La comprobación estática y la ejecución en un dispositivo de 16 KB son verificaciones diferentes.
@@ -57,6 +59,13 @@ flutter build windows --release --no-pub -t lib/main.dart
 El runner escribe muestras cada 10 segundos y eventos `complete`/`failed`; el código de salida es 0/1. Durante esta implementación se ejecutó una copia aislada en `build/soak-runner-bin`, permitiendo compilar la aplicación simultáneamente.
 
 Los logs de ejecución quedan en `build/` y los artefactos en `dist/`; ambos están excluidos de Git.
+
+El rediseño se verificó con `build/ui-union-tests.log` (60 pruebas),
+`build/ui-analyze.log`, `build/interface-native.log`,
+`build/app-native-redesign.log` y `build/android-redesign-alignment.log`.
+Las capturas `build/screenshots/aurora-redesign-*.png` utilizan audio simulado y
+portadas geométricas originales para comparar el diseño sin datos personales;
+la prueba de arranque utiliza SQLite y el motor de audio nativos.
 
 La búsqueda se envía solo con Enter o la flecha. La prueba de interfaz comprueba que escribir y repetir Enter durante una consulta pendiente no duplique solicitudes. La importación de sesión es voluntaria: valida Netscape y cookies de YouTube, conserva el original, protege cambios durante operaciones activas y no expone valores en errores. No se probó con credenciales reales de un usuario.
 

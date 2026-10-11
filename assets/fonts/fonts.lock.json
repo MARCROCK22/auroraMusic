@@ -1,0 +1,14 @@
+﻿[
+    {
+        "file":  "assets/fonts/newsreader/Newsreader-Variable.ttf",
+        "sha256":  "8a08d13f8a6c0d51be379a60af84f945f65369a67e509ee3c3bdcc421254d7c1",
+        "provider":  "google/fonts",
+        "license":  "SIL Open Font License 1.1"
+    },
+    {
+        "file":  "assets/fonts/plus_jakarta_sans/PlusJakartaSans-Variable.ttf",
+        "sha256":  "89b3fb38aa0d275d7a731d0d817a4f1622b316b4d7fbdedcf02ee9099ff68bc8",
+        "provider":  "google/fonts",
+        "license":  "SIL Open Font License 1.1"
+    }
+]

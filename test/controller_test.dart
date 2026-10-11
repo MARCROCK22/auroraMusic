@@ -262,6 +262,30 @@ void main() {
   });
 
   test(
+    'download jobs retain their destination root and never overwrite files',
+    () async {
+      final controller = await createTestController();
+      addTearDown(() => closeTestController(controller));
+      await controller.downloadTrack(first);
+      while (controller.downloads.single.status != DownloadStatus.completed) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      final job = controller.downloads.single;
+      final original = File(job.localPath!);
+      expect(
+        job.destinationRoot,
+        await Directory(original.parent.path).resolveSymbolicLinks(),
+      );
+      await controller.preferences.setString(
+        'downloadsDirectory',
+        '${controller.supportDirectory.path}/another-folder',
+      );
+      await controller.removeDownload(job);
+      expect(await original.exists(), isFalse);
+    },
+  );
+
+  test(
     'expired remote audio is re-extracted once and resumes position',
     () async {
       final source = FakeSource();

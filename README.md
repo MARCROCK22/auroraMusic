@@ -6,13 +6,26 @@ Reproductor de música en Flutter y Dart para **Windows x64 y Android 7+**. Inte
 
 - Inicio, búsqueda, importación de enlaces/listas de YouTube y archivos locales.
 - Favoritos, playlists editables, historial y cola reordenable; aleatorio, repetición, volumen, avance y temporizador.
-- Descargas MP3 con progreso, cancelación, reintento y eliminación; biblioteca disponible sin conexión.
+- Descargas locales MP3 con progreso, cancelación, reintento y eliminación; carpeta de destino configurable en Windows y biblioteca disponible sin conexión.
+- Interfaz cálida con Newsreader y Plus Jakarta Sans incluidas, portadas protagonistas y panel de reproducción/cola en escritorio ancho.
+- Diseño aprobado en Stitch: biblioteca en cuadrícula, cola con vista propia y ajustes por secciones. **Modo Vinilo** gira durante la reproducción y permite desplazar la posición arrastrando el disco.
+- Botón **Letras**: búsqueda exacta en LRCLIB, texto sincronizado o tradicional, caché privada e importación de archivos LRC/TXT.
 - Colores extraídos de la portada, ambiente reactivo a la energía y visualizador FFT del audio real.
 - Ecualizador DSP de ocho bandas, presets y reducción automática de ganancia para los refuerzos.
 - Controles multimedia del sistema, servicio de audio Android, pausa por desconexión e interrupciones de audio.
 - SQLite local; restaura cola y posición **en pausa**. Temas claro/oscuro/sistema y movimiento reducido.
 
-No hay cuentas, sincronización, catálogo de Spotify, DRM, letras ni recomendaciones de un servicio remoto.
+No hay cuentas, sincronización, catálogo de Spotify, DRM ni recomendaciones de un servicio remoto.
+
+### Encontrar descargas y letras
+
+Abre **Descargas locales** en la navegación o desde Inicio. La ruta aparece en la página: **Cambiar carpeta** selecciona un destino para futuras descargas y **Abrir carpeta** lo abre en Explorer. Las descargas existentes conservan su ubicación; no se trasladan ni sobrescriben archivos. Espera a que terminen los trabajos activos antes de cambiarla. **Biblioteca → Archivos locales** reúne los archivos importados y descargados.
+
+En Android, las descargas permanecen en el almacenamiento privado de Aurora; la selección de una carpeta externa aún no está implementada.
+
+El botón **Letras** está en el reproductor inferior y en la cabecera del reproductor completo. Al abrirlo, se envían título y artista a LRCLIB si no existe una copia local. Las letras sincronizadas siguen la posición de reproducción. No todas las pistas tienen coincidencia: puedes importar tu propio `.lrc` o `.txt` (máximo 1 MiB), cuyo original permanece intacto. Las letras guardadas funcionan sin conexión.
+
+En escritorio, la entrada **Letras** mantiene la navegación y los controles inferiores; el botón del reproductor abre la vista completa. En móvil, **Más vistas** abre vinilo, cola o letras, conservando los cuatro destinos principales. En la cola, el menú de cada pista permite quitar esa aparición sin borrar el archivo. Las referencias y la preferencia de trabajar con subagentes Luna están en [docs/design/README.md](docs/design/README.md).
 
 ## Ejecutar desde el código
 

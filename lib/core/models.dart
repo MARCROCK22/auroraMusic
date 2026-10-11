@@ -74,6 +74,7 @@ class DownloadJob {
     this.progress = 0,
     this.error,
     this.localPath,
+    this.destinationRoot,
   });
   final String id;
   final Track track;
@@ -81,6 +82,7 @@ class DownloadJob {
   double progress;
   String? error;
   String? localPath;
+  String? destinationRoot;
 }
 
 class ResolvedAudio {

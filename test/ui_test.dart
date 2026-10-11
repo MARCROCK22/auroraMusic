@@ -78,7 +78,7 @@ void main() {
     'typing and repeated submission cannot duplicate a pending YouTube search',
     (tester) async {
       await mount(tester, const Size(800, 900));
-      await tester.tap(find.text('Encontrar música'));
+      await tester.tap(find.byTooltip('Buscar música'));
       await tester.pumpAndSettle();
       final source = controller.source as FakeSource;
       source.pendingSearch = Completer<List<Track>>();
@@ -109,17 +109,13 @@ void main() {
       tester,
     ) async {
       await mount(tester, size);
-      expect(
-        find.text('La música cambia.\nTu espacio también.'),
-        findsOneWidget,
-      );
+      expect(find.text('Inicio').first, findsOneWidget);
       expect(tester.takeException(), isNull);
-      if (size.width < 600) {
-        await tester.drag(find.byType(ListView).first, const Offset(0, -300));
-        await tester.pumpAndSettle();
+      if (size.width >= 600) {
+        await tester.tap(find.byTooltip('Buscar música'));
+      } else {
+        await tester.tap(find.byTooltip('Buscar').last);
       }
-      await tester.ensureVisible(find.text('Encontrar música'));
-      await tester.tap(find.text('Encontrar música'));
       await tester.pumpAndSettle();
       expect(find.byType(TextField), findsOneWidget);
       expect(tester.takeException(), isNull);
@@ -142,6 +138,70 @@ void main() {
     });
   }
 
+  testWidgets('600px-high desktop navigation stays scroll-safe and routes', (
+    tester,
+  ) async {
+    await mount(tester, const Size(1100, 600));
+    expect(tester.takeException(), isNull);
+    for (final destination in [
+      'Buscar',
+      'Biblioteca',
+      'Descargas locales',
+      'Modo Vinilo',
+      'Cola de reproducción',
+      'Ajustes',
+    ]) {
+      await tester.tap(find.byTooltip(destination).first);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: destination);
+    }
+    await tester.tap(find.byTooltip('Letras').first);
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Cerrar letras'), findsOneWidget);
+    await tester.tap(find.byTooltip('Cerrar letras'));
+    await tester.pumpAndSettle();
+    expect(find.text('Hola de nuevo'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('mobile navigation has four destinations and settings shortcut', (
+    tester,
+  ) async {
+    await mount(tester, const Size(320, 700), scale: 2);
+    expect(find.byType(NavigationDestination), findsNWidgets(4));
+    await tester.tap(find.byIcon(Icons.more_horiz));
+    await tester.pumpAndSettle();
+    expect(find.text('Modo Vinilo'), findsOneWidget);
+    expect(find.text('Cola de reproducción'), findsOneWidget);
+    expect(find.text('Letras'), findsOneWidget);
+    await tester.tap(find.text('Modo Vinilo'));
+    await tester.pumpAndSettle();
+    expect(find.byType(NavigationDestination), findsNWidgets(4));
+    await tester.tap(find.byIcon(Icons.more_horiz));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cola de reproducción'));
+    await tester.pumpAndSettle();
+    await tester.dragUntilVisible(
+      find.text('No hay canciones en la cola'),
+      find.byType(ListView).first,
+      const Offset(0, -250),
+    );
+    expect(find.text('No hay canciones en la cola'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.more_horiz));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Letras'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Cerrar letras'), findsOneWidget);
+    await tester.tap(find.byTooltip('Cerrar letras'));
+    await tester.pumpAndSettle();
+    expect(find.text('Hola de nuevo'), findsOneWidget);
+    await tester.tap(find.byTooltip('Ajustes'));
+    await tester.pumpAndSettle();
+    expect(find.text('Almacenamiento y biblioteca'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('200 percent text remains usable on a narrow screen', (
     tester,
   ) async {
@@ -156,9 +216,18 @@ void main() {
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);
-    await tester.tap(find.byIcon(Icons.download_outlined).last);
+    await tester.tap(find.byTooltip('Descargas locales').last);
     await tester.pumpAndSettle();
-    expect(find.text('Música que te acompaña sin conexión'), findsOneWidget);
+    expect(find.text('Carpeta de descargas'), findsOneWidget);
+    final downloadsScroll = find.byType(ListView).first;
+    await tester.dragUntilVisible(
+      find.text('Cambiar carpeta'),
+      downloadsScroll,
+      const Offset(0, -240),
+    );
+    expect(find.text('Cambiar carpeta'), findsOneWidget);
+    expect(find.text('Abrir carpeta'), findsOneWidget);
+    expect(find.text(controller.downloadsDirectoryPath), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -167,6 +236,7 @@ void main() {
     'Deleting a completed download requires confirmation and keeps collections',
     (tester) async {
       late File file;
+      late DownloadJob job;
       await tester.runAsync(() async {
         final directory = Directory(
           p.join(controller.supportDirectory.path, 'downloads'),
@@ -177,7 +247,7 @@ void main() {
         final track = controller.tracks
             .firstWhere((track) => track.id == 'one')
             .copyWith(localPath: file.path);
-        final job = DownloadJob(
+        job = DownloadJob(
           id: 'download-one',
           track: track,
           status: DownloadStatus.completed,
@@ -191,11 +261,17 @@ void main() {
         await controller.addToPlaylist(controller.playlists.single, track);
       });
       await mount(tester, const Size(320, 800), scale: 2);
-      await tester.tap(find.byIcon(Icons.download_outlined).last);
+      await tester.tap(find.byTooltip('Descargas locales').last);
       await tester.pumpAndSettle();
-      await tester.runAsync(
-        () => tester.tap(find.byTooltip('Eliminar archivo descargado')),
+      final deleteDownload = find.byTooltip('Eliminar archivo descargado');
+      await tester.dragUntilVisible(
+        deleteDownload,
+        find.byType(ListView).first,
+        const Offset(0, -300),
       );
+      await tester.ensureVisible(deleteDownload);
+      await tester.pumpAndSettle();
+      await tester.tap(deleteDownload);
       await tester.pumpAndSettle();
       expect(find.text('Eliminar descarga'), findsOneWidget);
       expect(tester.takeException(), isNull);
@@ -203,16 +279,19 @@ void main() {
       await tester.pumpAndSettle();
       expect(await tester.runAsync(file.exists), isTrue);
       expect(controller.downloads, hasLength(1));
-      await tester.runAsync(
-        () => tester.tap(find.byTooltip('Eliminar archivo descargado')),
+      await tester.dragUntilVisible(
+        deleteDownload,
+        find.byType(ListView).first,
+        const Offset(0, -300),
       );
+      await tester.ensureVisible(deleteDownload);
+      await tester.pumpAndSettle();
+      await tester.tap(deleteDownload);
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Eliminar archivo'));
       await tester.runAsync(() => tester.tap(find.text('Eliminar archivo')));
       await tester.pumpAndSettle();
-      await tester.runAsync(
-        () async => Future<void>.delayed(const Duration(milliseconds: 100)),
-      );
+      await tester.runAsync(() => controller.removeDownload(job));
       await tester.pumpAndSettle();
       expect(controller.error, isNull);
       expect(await tester.runAsync(file.exists), isFalse);
@@ -232,12 +311,15 @@ void main() {
       await tester.pumpAndSettle();
       final settingsScroll = find.byType(ListView).first;
       await tester.dragUntilVisible(
-        find.text('Sin sesión importada'),
+        find.text('Sesión de YouTube opcional sin importar'),
         settingsScroll,
         const Offset(0, -300),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Sin sesión importada'), findsOneWidget);
+      expect(
+        find.text('Sesión de YouTube opcional sin importar'),
+        findsOneWidget,
+      );
       await tester.dragUntilVisible(
         find.textContaining('cookies.txt en formato Netscape'),
         settingsScroll,
@@ -249,7 +331,7 @@ void main() {
         find.textContaining('cookies.txt en formato Netscape'),
         findsOneWidget,
       );
-      expect(find.textContaining('ni los errores 429.'), findsOneWidget);
+      expect(find.textContaining('ni errores 429.'), findsOneWidget);
       await tester.dragUntilVisible(
         find.text('Importar sesión'),
         settingsScroll,
@@ -280,15 +362,12 @@ void main() {
       await tester.pumpAndSettle();
       final localCopy = File(controller.source.cookieFile!);
       await tester.dragUntilVisible(
-        find.text('Sesión configurada en este dispositivo'),
+        find.text('Sesión de YouTube configurada'),
         settingsScroll,
         const Offset(0, 200),
       );
       await tester.pumpAndSettle();
-      expect(
-        find.text('Sesión configurada en este dispositivo'),
-        findsOneWidget,
-      );
+      expect(find.text('Sesión de YouTube configurada'), findsOneWidget);
       await tester.dragUntilVisible(
         find.text('Reemplazar sesión'),
         settingsScroll,
@@ -401,6 +480,17 @@ void main() {
     await tester.tap(find.text(controller.currentTrack!.title).first);
     await tester.pumpAndSettle();
     expect(find.text('AHORA SUENA'), findsOneWidget);
+    expect(find.byTooltip('Letras'), findsNWidgets(2));
+    final lyricsButton = find.byTooltip('Letras').last;
+    await tester.ensureVisible(lyricsButton);
+    await tester.tap(lyricsButton);
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.text('Letras').last, findsOneWidget);
+    expect(find.byTooltip('Cerrar letras'), findsOneWidget);
+    final closeLyrics = find.byTooltip('Cerrar letras');
+    await tester.ensureVisible(closeLyrics);
+    await tester.tap(closeLyrics);
+    await tester.pumpAndSettle();
     expect(audio.analysisEnabled, isTrue);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     await tester.pump();

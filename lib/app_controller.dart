@@ -41,6 +41,11 @@ class AppController extends ChangeNotifier {
   bool searching = false;
   bool diagnosing = false;
   bool sessionBusy = false;
+  bool configuringDownloadDirectory = false;
+  String get downloadsDirectoryPath =>
+      preferences.getString('downloadsDirectory') ??
+      p.join(supportDirectory.path, 'downloads');
+  bool get canConfigureDownloadDirectory => Platform.isWindows;
   bool get hasYouTubeSession => source.cookieFile != null;
   String? error;
   String? diagnostics;
@@ -63,7 +68,7 @@ class AppController extends ChangeNotifier {
   bool adaptiveColors = true;
   bool reducedMotion = false;
   ThemeMode themeMode = ThemeMode.dark;
-  Color accentColor = const Color(0xffe8b568);
+  Color accentColor = const Color(0xffe86927);
   Timer? _sleepTimer;
   DateTime? _sleepEnd;
   int _playGeneration = 0;
@@ -98,6 +103,14 @@ class AppController extends ChangeNotifier {
       favoriteIds = await database.readFavorites();
       playlists = await database.readPlaylists();
       downloads = await database.readDownloads();
+      final legacyRoot = Directory(p.join(supportDirectory.path, 'downloads'));
+      await legacyRoot.create(recursive: true);
+      for (final job in downloads) {
+        job.destinationRoot ??= await _canonicalDownloadRoot(
+          p.join(supportDirectory.path, 'downloads'),
+        );
+        await database.saveDownload(job);
+      }
       recentTracks = _lookup(await database.readHistory());
       adaptiveColors = preferences.getBool('adaptiveColors') ?? true;
       reducedMotion = preferences.getBool('reducedMotion') ?? false;
@@ -731,10 +744,23 @@ class AppController extends ChangeNotifier {
         )) {
       return;
     }
-    await _remember(track);
+    late final String destinationRoot;
+    try {
+      final directory = Directory(downloadsDirectoryPath);
+      if (downloadsDirectoryPath ==
+          p.join(supportDirectory.path, 'downloads')) {
+        await directory.create(recursive: true);
+      }
+      destinationRoot = await _canonicalDownloadRoot(downloadsDirectoryPath);
+      await _remember(track);
+    } catch (exception) {
+      _report(exception);
+      return;
+    }
     final job = DownloadJob(
       id: 'job_${DateTime.now().microsecondsSinceEpoch}',
       track: track,
+      destinationRoot: destinationRoot,
     );
     downloads.insert(0, job);
     await database.saveDownload(job);
@@ -761,16 +787,17 @@ class AppController extends ChangeNotifier {
         if (job.status == DownloadStatus.cancelled) continue;
         _notify();
         try {
-          final directory = Directory(
-            p.join(supportDirectory.path, 'downloads'),
-          );
+          final directory = Directory(job.destinationRoot!);
           await directory.create(recursive: true);
           if (_disposed) return;
-          final safeId = job.track.id.replaceAll(
-            RegExp(r'[^a-zA-Z0-9_-]'),
-            '_',
-          );
+          final safeId = _safeDownloadId(job.track.id);
           final destination = File(p.join(directory.path, '$safeId.mp3'));
+          if (await destination.exists()) {
+            throw FileSystemException(
+              'El archivo de destino ya existe.',
+              destination.path,
+            );
+          }
           await source.download(
             job.track,
             destination,
@@ -800,7 +827,10 @@ class AppController extends ChangeNotifier {
           } else if (await destination.exists()) {
             final root = await directory.resolveSymbolicLinks();
             final target = await destination.resolveSymbolicLinks();
-            if (p.isWithin(root, target)) await File(target).delete();
+            if (p.dirname(target) == root &&
+                p.basename(target) == '${_safeDownloadId(job.track.id)}.mp3') {
+              await File(target).delete();
+            }
           }
         } catch (exception) {
           if (_disposed) return;
@@ -842,11 +872,17 @@ class AppController extends ChangeNotifier {
     try {
       final localPath = job.localPath;
       if (localPath != null && await File(localPath).exists()) {
-        final root = await Directory(
-          p.join(supportDirectory.path, 'downloads'),
-        ).resolveSymbolicLinks();
-        final target = await File(localPath).resolveSymbolicLinks();
-        if (!p.isWithin(root, target)) {
+        final root = await _canonicalDownloadRoot(
+          job.destinationRoot ?? p.join(supportDirectory.path, 'downloads'),
+        );
+        final file = File(localPath);
+        final absolutePath = p.normalize(p.absolute(file.path));
+        final expectedName = '${_safeDownloadId(job.track.id)}.mp3';
+        final target = await file.resolveSymbolicLinks();
+        if (p.dirname(absolutePath) != root ||
+            p.basename(absolutePath) != expectedName ||
+            p.dirname(target) != root ||
+            p.basename(target) != expectedName) {
           throw StateError('La descarga está fuera de la carpeta de Aurora.');
         }
         if (currentTrack?.id == job.track.id && !_usingRemote) {
@@ -880,6 +916,90 @@ class AppController extends ChangeNotifier {
       await database.deleteDownload(job.id);
       downloads.removeWhere((item) => item.id == job.id);
       _notify();
+    } catch (exception) {
+      _report(exception);
+    }
+  }
+
+  Future<String> _canonicalDownloadRoot(String path) async {
+    final directory = Directory(path);
+    if (!await directory.exists()) throw ArgumentError('La carpeta no existe.');
+    final root = await directory.resolveSymbolicLinks();
+    final probe = File(
+      p.join(root, '.aurora-write-${DateTime.now().microsecondsSinceEpoch}'),
+    );
+    try {
+      await probe.writeAsBytes(const []);
+    } finally {
+      if (await probe.exists()) await probe.delete();
+    }
+    return p.normalize(root);
+  }
+
+  String _safeDownloadId(String id) =>
+      id.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+
+  Future<void> configureDownloadDirectory(String? path) async {
+    if (!canConfigureDownloadDirectory) {
+      error = 'La carpeta de descargas no se puede configurar en Android.';
+      _notify();
+      return;
+    }
+    if (downloads.any(
+      (job) =>
+          job.status == DownloadStatus.queued ||
+          job.status == DownloadStatus.downloading,
+    )) {
+      _report(
+        StateError(
+          'Espera a que terminen las descargas antes de cambiar la carpeta.',
+        ),
+      );
+      return;
+    }
+    try {
+      final selected = path ?? p.join(supportDirectory.path, 'downloads');
+      if (path == null) await Directory(selected).create(recursive: true);
+      final root = await _canonicalDownloadRoot(selected);
+      await preferences.setString('downloadsDirectory', root);
+      error = null;
+    } catch (exception) {
+      _report(exception);
+    }
+    _notify();
+  }
+
+  Future<void> chooseDownloadDirectory() async {
+    if (!canConfigureDownloadDirectory) return configureDownloadDirectory('');
+    if (configuringDownloadDirectory) return;
+    configuringDownloadDirectory = true;
+    _notify();
+    try {
+      final selected = await FilePicker.getDirectoryPath();
+      if (selected != null) await configureDownloadDirectory(selected);
+    } catch (exception) {
+      _report(exception);
+    } finally {
+      configuringDownloadDirectory = false;
+      _notify();
+    }
+  }
+
+  Future<void> openDownloadDirectory() async {
+    if (!Platform.isWindows) {
+      _report(
+        UnsupportedError(
+          'Abrir la carpeta de descargas no está disponible en Android.',
+        ),
+      );
+      return;
+    }
+    try {
+      final root = p.normalize(p.absolute(downloadsDirectoryPath));
+      await Directory(root).create(recursive: true);
+      await Process.start('explorer.exe', [
+        root,
+      ], mode: ProcessStartMode.detached);
     } catch (exception) {
       _report(exception);
     }
@@ -940,7 +1060,7 @@ class AppController extends ChangeNotifier {
     if (currentTrack != null) {
       unawaited(_updateAccent(currentTrack!));
     } else {
-      accentColor = const Color(0xffe8b568);
+      accentColor = const Color(0xffe86927);
     }
     _notify();
   }
@@ -968,7 +1088,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _updateAccent(Track track) async {
-    const fallback = Color(0xffe8b568);
+    const fallback = Color(0xffe86927);
     if (!adaptiveColors || track.artworkUrl == null) {
       accentColor = fallback;
       _notify();

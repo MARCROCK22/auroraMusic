@@ -13,11 +13,13 @@ void main() {
         track: const Track(id: 'track', title: 'Título', artist: 'Artista'),
         status: DownloadStatus.downloading,
         progress: 0.4,
+        destinationRoot: r'C:\Music',
       ),
     );
     final restored = (await database.readDownloads()).single;
     expect(restored.status, DownloadStatus.failed);
     expect(restored.progress, 0.4);
     expect(restored.error, contains('interrumpida'));
+    expect(restored.destinationRoot, r'C:\Music');
   });
 }
