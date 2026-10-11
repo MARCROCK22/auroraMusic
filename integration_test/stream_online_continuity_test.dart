@@ -36,25 +36,53 @@ void main() {
             start: initialPosition,
           );
           await audio.play();
-          final deadline = DateTime.now().add(const Duration(seconds: 160));
+          const fullTrack = bool.fromEnvironment('AURORA_FULL_TRACK');
+          final deadline = DateTime.now().add(
+            fullTrack
+                ? resolved.duration + const Duration(seconds: 30)
+                : const Duration(seconds: 160),
+          );
           while (audio.position <
-              initialPosition + const Duration(seconds: 130)) {
+                  initialPosition + const Duration(seconds: 130) ||
+              (fullTrack && completions == 0)) {
             expect(audio.lastError, isNull);
-            expect(completions, 0);
-            expect(audio.isPlaying, isTrue);
+            if (completions == 0) expect(audio.isPlaying, isTrue);
             if (DateTime.now().isAfter(deadline)) {
-              fail('Online playback did not reach 130 seconds');
+              fail('Playback did not reach its expected endpoint');
             }
             await Future<void>.delayed(const Duration(milliseconds: 200));
           }
-          expect(completions, 0);
+          expect(completions, fullTrack ? 1 : 0);
           expect(audio.lastError, isNull);
-          if (const bool.fromEnvironment('AURORA_CHECK_EOF')) {
+          if (!fullTrack && const bool.fromEnvironment('AURORA_CHECK_EOF')) {
             final ended = audio.completed.first;
             await audio.seek(resolved.duration - const Duration(seconds: 3));
             await ended.timeout(const Duration(seconds: 20));
             expect(completions, 1);
             expect(audio.lastError, isNull);
+          }
+          if (fullTrack) {
+            // Repeat pointer-like seek bursts on the same resolved song. Pause
+            // while a seek is outstanding must win over its asynchronous load.
+            await audio.load(
+              resolved,
+              ffmpegExecutable: source.ffmpegExecutable,
+            );
+            await audio.play();
+            await Future.wait([
+              audio.seek(const Duration(seconds: 35)),
+              audio.seek(const Duration(seconds: 65)),
+              audio.seek(const Duration(seconds: 125)),
+            ]);
+            await Future<void>.delayed(const Duration(milliseconds: 400));
+            expect(audio.isPlaying, isTrue);
+            expect(audio.position.inSeconds, closeTo(125, 2));
+            expect(audio.lastError, isNull);
+            final seek = audio.seek(const Duration(seconds: 45));
+            await audio.pause();
+            await seek;
+            expect(audio.isPlaying, isFalse);
+            expect(completions, 1);
           }
           return true;
         } finally {

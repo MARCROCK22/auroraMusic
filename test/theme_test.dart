@@ -88,10 +88,8 @@ void main() {
         hasLength(6),
       );
       expect(schemes.map((scheme) => scheme.primary).toSet(), hasLength(6));
-      final surfaceTintDistance = (Color a, Color b) =>
-          (a.red - b.red).abs() +
-          (a.green - b.green).abs() +
-          (a.blue - b.blue).abs();
+      double surfaceTintDistance(Color a, Color b) =>
+          ((a.r - b.r).abs() + (a.g - b.g).abs() + (a.b - b.b).abs()) * 255;
       expect(
         surfaceTintDistance(schemes.first.surface, schemes.last.surface),
         greaterThanOrEqualTo(8),
