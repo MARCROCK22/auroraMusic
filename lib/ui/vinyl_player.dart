@@ -20,6 +20,8 @@ class _VinylPlayerState extends State<VinylPlayer>
     duration: const Duration(seconds: 18),
   );
   bool _foreground = true;
+  Duration? _dragStartPosition;
+  Duration? _dragTarget;
 
   @override
   void initState() {
@@ -112,14 +114,45 @@ class _VinylPlayerState extends State<VinylPlayer>
           child: Stack(
             children: [
               GestureDetector(
-                onHorizontalDragUpdate: duration > Duration.zero
+                onTapUp: duration > Duration.zero
                     ? (details) => c.seek(
                         Duration(
-                          milliseconds: (pos + details.delta.dx * 900)
-                              .round()
-                              .clamp(0, duration.inMilliseconds),
+                          milliseconds:
+                              (duration.inMilliseconds *
+                                      (details.localPosition.dx / artSize)
+                                          .clamp(0.0, 1.0))
+                                  .round(),
                         ),
                       )
+                    : null,
+                onHorizontalDragStart: duration > Duration.zero
+                    ? (_) {
+                        _dragStartPosition = c.audio.position;
+                        _dragTarget = _dragStartPosition;
+                      }
+                    : null,
+                onHorizontalDragUpdate: duration > Duration.zero
+                    ? (details) {
+                        final start = _dragStartPosition;
+                        if (start == null || artSize <= 0) return;
+                        _dragTarget = Duration(
+                          milliseconds:
+                              (start.inMilliseconds +
+                                      details.delta.dx *
+                                          duration.inMilliseconds /
+                                          artSize)
+                                  .round()
+                                  .clamp(0, duration.inMilliseconds),
+                        );
+                      }
+                    : null,
+                onHorizontalDragEnd: duration > Duration.zero
+                    ? (_) {
+                        final target = _dragTarget;
+                        _dragStartPosition = null;
+                        _dragTarget = null;
+                        if (target != null) c.seek(target);
+                      }
                     : null,
                 child: AnimatedBuilder(
                   animation: _rotation,
@@ -183,7 +216,13 @@ class _VinylPlayerState extends State<VinylPlayer>
               ),
               Positioned.fill(
                 child: IgnorePointer(
-                  child: CustomPaint(painter: _TonearmPainter()),
+                  child: CustomPaint(
+                    painter: _TonearmPainter(
+                      pivot: color.outline,
+                      arm: color.outlineVariant,
+                      needle: color.primary,
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -380,22 +419,26 @@ class _VinylPlayerState extends State<VinylPlayer>
 }
 
 class _TonearmPainter extends CustomPainter {
-  const _TonearmPainter();
+  const _TonearmPainter({
+    required this.pivot,
+    required this.arm,
+    required this.needle,
+  });
+  final Color pivot;
+  final Color arm;
+  final Color needle;
+
   @override
   void paint(Canvas canvas, Size size) {
     final start = Offset(size.width * .82, size.height * .12);
     final bend = Offset(size.width * .75, size.height * .20);
     final end = Offset(size.width * .58, size.height * .50);
-    canvas.drawCircle(
-      start,
-      size.width * .045,
-      Paint()..color = const Color(0xff363330),
-    );
+    canvas.drawCircle(start, size.width * .045, Paint()..color = pivot);
     canvas.drawLine(
       start,
       bend,
       Paint()
-        ..color = const Color(0xffa49a88)
+        ..color = arm
         ..strokeWidth = size.width * .018
         ..strokeCap = StrokeCap.round,
     );
@@ -403,19 +446,18 @@ class _TonearmPainter extends CustomPainter {
       bend,
       end,
       Paint()
-        ..color = const Color(0xffc4bba9)
+        ..color = arm
         ..strokeWidth = size.width * .014
         ..strokeCap = StrokeCap.round,
     );
-    canvas.drawCircle(
-      end,
-      size.width * .018,
-      Paint()..color = const Color(0xffd97935),
-    );
+    canvas.drawCircle(end, size.width * .018, Paint()..color = needle);
   }
 
   @override
-  bool shouldRepaint(covariant _TonearmPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _TonearmPainter oldDelegate) =>
+      pivot != oldDelegate.pivot ||
+      arm != oldDelegate.arm ||
+      needle != oldDelegate.needle;
 }
 
 class _GroovesPainter extends CustomPainter {
@@ -444,19 +486,27 @@ class _Artwork extends StatelessWidget {
   Widget build(BuildContext context) {
     final url = track.artworkUrl;
     if (url == null || url.isEmpty) {
-      return const ColoredBox(
-        color: Color(0xff302923),
-        child: Icon(Icons.music_note, size: 42),
+      final color = Theme.of(context).colorScheme;
+      return ColoredBox(
+        color: color.surfaceContainerHighest,
+        child: Icon(Icons.music_note, size: 42, color: color.onSurfaceVariant),
       );
     }
     return Image.network(
       url,
       fit: BoxFit.cover,
       alignment: Alignment.center,
-      errorBuilder: (_, _, _) => const ColoredBox(
-        color: Color(0xff302923),
-        child: Icon(Icons.music_note, size: 42),
-      ),
+      errorBuilder: (context, _, _) {
+        final color = Theme.of(context).colorScheme;
+        return ColoredBox(
+          color: color.surfaceContainerHighest,
+          child: Icon(
+            Icons.music_note,
+            size: 42,
+            color: color.onSurfaceVariant,
+          ),
+        );
+      },
     );
   }
 }

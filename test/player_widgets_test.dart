@@ -99,6 +99,49 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('vinyl click seeks by position without changing playback', (
+      tester,
+    ) async {
+      await mount(tester, VinylPlayer(controller: controller));
+      final disc = find.byKey(const ValueKey('vinyl-disc'));
+      final rect = tester.getRect(disc);
+      await tester.tapAt(Offset(rect.left + rect.width * .75, rect.center.dy));
+      await tester.pump();
+      await tester.runAsync(
+        () async => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+
+      expect(audio.position, const Duration(seconds: 135));
+      expect(audio.isPlaying, isFalse);
+      expect(controller.queue, [previous, current, duplicateA, duplicateB]);
+      expect(controller.queueIndex, 1);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('vinyl drag coalesces movement and seeks backward', (
+      tester,
+    ) async {
+      audio.position = const Duration(seconds: 90);
+      await mount(tester, VinylPlayer(controller: controller));
+      final disc = find.byKey(const ValueKey('vinyl-disc'));
+      final rect = tester.getRect(disc);
+      final gesture = await tester.startGesture(rect.center);
+      await gesture.moveBy(Offset(-rect.width * .1, 0));
+      await gesture.moveBy(Offset(-rect.width * .1, 0));
+      expect(audio.position, const Duration(seconds: 90));
+      await gesture.up();
+      await tester.pump();
+      await tester.runAsync(
+        () async => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+
+      expect(audio.position, const Duration(seconds: 54));
+      expect(audio.isPlaying, isFalse);
+      expect(controller.queue, [previous, current, duplicateA, duplicateB]);
+      expect(controller.queueIndex, 1);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets(
       'vinyl stays safe while paused by reduced motion and background',
       (tester) async {
