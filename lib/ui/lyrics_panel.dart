@@ -268,17 +268,23 @@ class _LyricsPanelState extends State<LyricsPanel> {
   Widget _artwork(Track track) {
     final url = track.artworkUrl;
     if (url == null || url.isEmpty) {
-      return const ColoredBox(
-        color: Color(0xff302923),
-        child: Icon(Icons.music_note),
+      return ColoredBox(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        child: Icon(
+          Icons.music_note,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
       );
     }
     return Image.network(
       url,
       fit: BoxFit.cover,
-      errorBuilder: (_, _, _) => const ColoredBox(
-        color: Color(0xff302923),
-        child: Icon(Icons.music_note),
+      errorBuilder: (_, _, _) => ColoredBox(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        child: Icon(
+          Icons.music_note,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
       ),
     );
   }

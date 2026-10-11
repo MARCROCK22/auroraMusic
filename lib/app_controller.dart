@@ -66,6 +66,13 @@ class AppController extends ChangeNotifier {
   bool eqEnabled = false;
   List<double> eqGains = List.filled(8, 0);
   bool adaptiveColors = true;
+  String accentPalette = 'automatic';
+  static const Map<String, Color> accentPaletteColors = {
+    'terracotta': Color(0xffc45c2b),
+    'amber': Color(0xffa66b00),
+    'forest': Color(0xff28734a),
+    'purple': Color(0xff7047a3),
+  };
   bool reducedMotion = false;
   ThemeMode themeMode = ThemeMode.dark;
   Color accentColor = const Color(0xffe86927);
@@ -112,7 +119,16 @@ class AppController extends ChangeNotifier {
         await database.saveDownload(job);
       }
       recentTracks = _lookup(await database.readHistory());
-      adaptiveColors = preferences.getBool('adaptiveColors') ?? true;
+      final savedPalette = preferences.getString('accentPalette');
+      accentPalette =
+          savedPalette == 'automatic' ||
+              accentPaletteColors.containsKey(savedPalette)
+          ? savedPalette!
+          : (preferences.getBool('adaptiveColors') == false
+                ? 'terracotta'
+                : 'automatic');
+      adaptiveColors = accentPalette == 'automatic';
+      accentColor = accentPaletteColors[accentPalette] ?? accentColor;
       reducedMotion = preferences.getBool('reducedMotion') ?? false;
       themeMode = ThemeMode.values.firstWhere(
         (mode) => mode.name == preferences.getString('themeMode'),
@@ -1072,14 +1088,21 @@ class AppController extends ChangeNotifier {
   }
 
   void setAdaptiveColors(bool value) {
-    adaptiveColors = value;
-    unawaited(preferences.setBool('adaptiveColors', value));
-    if (currentTrack != null) {
+    setAccentPalette(value ? 'automatic' : 'terracotta');
+  }
+
+  void setAccentPalette(String value) {
+    if (value != 'automatic' && !accentPaletteColors.containsKey(value)) return;
+    accentPalette = value;
+    adaptiveColors = value == 'automatic';
+    unawaited(preferences.setString('accentPalette', value));
+    unawaited(preferences.setBool('adaptiveColors', adaptiveColors));
+    if (adaptiveColors && currentTrack != null) {
       unawaited(_updateAccent(currentTrack!));
     } else {
-      accentColor = const Color(0xffe86927);
+      accentColor = accentPaletteColors[value] ?? const Color(0xffe86927);
+      _notify();
     }
-    _notify();
   }
 
   void setReducedMotion(bool value) {
@@ -1106,7 +1129,12 @@ class AppController extends ChangeNotifier {
 
   Future<void> _updateAccent(Track track) async {
     const fallback = Color(0xffe86927);
-    if (!adaptiveColors || track.artworkUrl == null) {
+    if (!adaptiveColors) {
+      accentColor = accentPaletteColors[accentPalette] ?? fallback;
+      _notify();
+      return;
+    }
+    if (track.artworkUrl == null) {
       accentColor = fallback;
       _notify();
       return;

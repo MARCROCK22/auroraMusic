@@ -10,15 +10,98 @@ double contrast(Color first, Color second) {
 }
 
 void main() {
-  test('all artwork hue buckets preserve readable text and action contrast', () {
-    for (final brightness in Brightness.values) {
-      for (var hue = 0; hue < 360; hue += 15) {
-        final scheme = auroraTheme(brightness, HSLColor.fromAHSL(1, hue + 7.5, .65, .65).toColor()).colorScheme;
-        expect(contrast(scheme.onSurface, scheme.surface), greaterThanOrEqualTo(4.5));
-        expect(contrast(scheme.onSurfaceVariant, scheme.surface), greaterThanOrEqualTo(4.5));
-        expect(contrast(scheme.onPrimary, scheme.primary), greaterThanOrEqualTo(4.5), reason: '$brightness hue $hue button');
-        expect(contrast(scheme.primary, scheme.surface), greaterThanOrEqualTo(4.5), reason: '$brightness hue $hue accent text');
+  test(
+    'all artwork hue buckets preserve readable text and action contrast',
+    () {
+      for (final brightness in Brightness.values) {
+        for (var hue = 0; hue < 360; hue += 15) {
+          final scheme = auroraTheme(
+            brightness,
+            HSLColor.fromAHSL(1, hue + 7.5, .65, .65).toColor(),
+          ).colorScheme;
+          expect(
+            contrast(scheme.onSurface, scheme.surface),
+            greaterThanOrEqualTo(4.5),
+          );
+          expect(
+            contrast(scheme.onSurfaceVariant, scheme.surface),
+            greaterThanOrEqualTo(4.5),
+          );
+          expect(
+            contrast(scheme.onPrimary, scheme.primary),
+            greaterThanOrEqualTo(4.5),
+            reason: '$brightness hue $hue button',
+          );
+          expect(
+            contrast(scheme.primary, scheme.surface),
+            greaterThanOrEqualTo(4.5),
+            reason: '$brightness hue $hue accent text',
+          );
+        }
       }
+    },
+  );
+
+  test('artwork accents tint distinct semantic surfaces in both themes', () {
+    final accents = <Color>[
+      const Color(0xffe86927), // orange
+      const Color(0xff3478c8), // blue
+      const Color(0xff28734a), // forest
+      const Color(0xffc45c2b), // terracotta
+      const Color(0xffa66b00), // amber
+      const Color(0xff7047a3), // purple
+    ];
+    for (final brightness in Brightness.values) {
+      final themes = accents
+          .map((accent) => auroraTheme(brightness, accent))
+          .toList();
+      final schemes = themes.map((theme) => theme.colorScheme).toList();
+      for (final scheme in schemes) {
+        expect(scheme.surface, isNot(scheme.surfaceContainerLow));
+        expect(scheme.surfaceContainerLow, isNot(scheme.surfaceContainer));
+        expect(scheme.surfaceContainer, isNot(scheme.surfaceContainerHigh));
+        expect(
+          contrast(scheme.onSurface, scheme.surfaceContainerLow),
+          greaterThanOrEqualTo(4.5),
+        );
+        expect(
+          contrast(scheme.onSurface, scheme.surfaceContainer),
+          greaterThanOrEqualTo(4.5),
+        );
+        expect(
+          contrast(scheme.onSurface, scheme.surfaceContainerLowest),
+          greaterThanOrEqualTo(4.5),
+        );
+        expect(
+          contrast(scheme.onSurfaceVariant, scheme.surfaceContainerHigh),
+          greaterThanOrEqualTo(4.5),
+        );
+        expect(
+          contrast(scheme.onPrimaryContainer, scheme.primaryContainer),
+          greaterThanOrEqualTo(4.5),
+          reason: '$brightness selected navigation text',
+        );
+      }
+      expect(schemes.map((scheme) => scheme.surface).toSet(), hasLength(6));
+      expect(
+        schemes.map((scheme) => scheme.surfaceContainer).toSet(),
+        hasLength(6),
+      );
+      expect(schemes.map((scheme) => scheme.primary).toSet(), hasLength(6));
+      expect(themes[0].cardTheme.color, schemes[0].surfaceContainerLow);
+      expect(
+        themes[0].inputDecorationTheme.fillColor,
+        schemes[0].surfaceContainer,
+      );
+      expect(
+        themes[0].dialogTheme.backgroundColor,
+        schemes[0].surfaceContainerHigh,
+      );
+      expect(themes[0].popupMenuTheme.color, schemes[0].surfaceContainerHigh);
+      expect(
+        themes[0].listTileTheme.selectedColor,
+        schemes[0].onPrimaryContainer,
+      );
     }
   });
 }

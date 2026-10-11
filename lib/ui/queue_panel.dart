@@ -261,17 +261,27 @@ class _Artwork extends StatelessWidget {
   Widget build(BuildContext context) {
     final url = track?.artworkUrl;
     if (url == null || url.isEmpty) {
-      return const ColoredBox(
-        color: Color(0xff302923),
-        child: Center(child: Icon(Icons.music_note)),
+      return ColoredBox(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        child: Center(
+          child: Icon(
+            Icons.music_note,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
       );
     }
     return Image.network(
       url,
       fit: BoxFit.cover,
-      errorBuilder: (_, _, _) => const ColoredBox(
-        color: Color(0xff302923),
-        child: Center(child: Icon(Icons.music_note)),
+      errorBuilder: (_, _, _) => ColoredBox(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        child: Center(
+          child: Icon(
+            Icons.music_note,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
       ),
     );
   }

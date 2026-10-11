@@ -153,7 +153,20 @@ ThemeData auroraTheme(Brightness brightness, Color accent) {
   const ivory = Color(0xfff4eee7);
   const mutedIvory = Color(0xffd9cec1);
   const brown = Color(0xff38312c);
-  final surface = dark ? ink : paper;
+  Color tinted(Color base, double amount) => Color.lerp(base, accent, amount)!;
+  final surface = tinted(dark ? ink : paper, dark ? .045 : .025);
+  final surfaceLow = tinted(
+    dark ? const Color(0xff191512) : const Color(0xfffffaf5),
+    dark ? .055 : .035,
+  );
+  final surfaceMid = tinted(
+    dark ? const Color(0xff211b17) : const Color(0xffeee6dd),
+    dark ? .065 : .045,
+  );
+  final surfaceHigh = tinted(
+    dark ? const Color(0xff2b231e) : const Color(0xffe7ddd2),
+    dark ? .075 : .055,
+  );
   final onPrimary = dark ? const Color(0xff151514) : Colors.white;
   var primary = dark
       ? accent
@@ -184,15 +197,41 @@ ThemeData auroraTheme(Brightness brightness, Color accent) {
         onSecondary: dark ? ink : paper,
         tertiary: dark ? const Color(0xffb9a99a) : const Color(0xff55483e),
         surface: surface,
+        surfaceDim: tinted(
+          dark ? const Color(0xff0c0a09) : const Color(0xffded5cc),
+          .035,
+        ),
+        surfaceBright: tinted(
+          dark ? const Color(0xff39302a) : const Color(0xfffffcf8),
+          .045,
+        ),
         onSurface: dark ? ivory : const Color(0xff201a16),
         onSurfaceVariant: dark ? mutedIvory : const Color(0xff51463e),
-        outline: dark ? const Color(0xff75685d) : const Color(0xff8b7d71),
-        surfaceContainerLow: dark
-            ? const Color(0xff191512)
-            : const Color(0xfffffaf5),
-        surfaceContainer: dark
-            ? const Color(0xff211b17)
-            : const Color(0xffeee6dd),
+        outline: dark ? const Color(0xff827468) : const Color(0xff88796d),
+        outlineVariant: dark
+            ? const Color(0xff51463d)
+            : const Color(0xffc4b6a8),
+        surfaceContainerLowest: tinted(
+          dark ? const Color(0xff100d0b) : const Color(0xfffbf8f4),
+          .02,
+        ),
+        surfaceContainerLow: surfaceLow,
+        surfaceContainer: surfaceMid,
+        surfaceContainerHigh: surfaceHigh,
+        surfaceContainerHighest: tinted(
+          dark ? const Color(0xff352b24) : const Color(0xffddd1c5),
+          dark ? .085 : .065,
+        ),
+        primaryContainer: tinted(
+          dark ? const Color(0xff33251c) : const Color(0xfff0dfd1),
+          .12,
+        ),
+        onPrimaryContainer: dark ? ivory : const Color(0xff352218),
+        secondaryContainer: tinted(
+          dark ? const Color(0xff29231e) : const Color(0xffe8dfd6),
+          .12,
+        ),
+        onSecondaryContainer: dark ? ivory : const Color(0xff302820),
       );
   const bodyFont = 'Plus Jakarta Sans';
   const headlineFont = 'Newsreader';
@@ -234,6 +273,7 @@ ThemeData auroraTheme(Brightness brightness, Color accent) {
     fontFamily: bodyFont,
     textTheme: textTheme,
     scaffoldBackgroundColor: scheme.surface,
+    dividerTheme: DividerThemeData(color: scheme.outlineVariant, thickness: 1),
     visualDensity: VisualDensity.standard,
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
@@ -259,16 +299,57 @@ ThemeData auroraTheme(Brightness brightness, Color accent) {
     ),
     cardTheme: CardThemeData(
       elevation: 0,
-      color: dark ? const Color(0xff211b17) : const Color(0xfffffaf5),
+      color: scheme.surfaceContainerLow,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: dark ? const Color(0xff211b17) : const Color(0xffeee6dd),
+      fillColor: scheme.surfaceContainer,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide.none,
+        borderSide: BorderSide(color: scheme.outlineVariant),
       ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide(color: scheme.outlineVariant),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: BorderSide(color: scheme.primary, width: 2),
+      ),
+    ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: scheme.surfaceContainerHigh,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ),
+    drawerTheme: DrawerThemeData(
+      backgroundColor: scheme.surfaceContainerLow,
+      surfaceTintColor: Colors.transparent,
+    ),
+    listTileTheme: ListTileThemeData(
+      selectedColor: scheme.onPrimaryContainer,
+      selectedTileColor: scheme.primaryContainer,
+      iconColor: scheme.onSurfaceVariant,
+    ),
+    popupMenuTheme: PopupMenuThemeData(
+      color: scheme.surfaceContainerHigh,
+      surfaceTintColor: Colors.transparent,
+      textStyle: TextStyle(color: scheme.onSurface),
+    ),
+    iconButtonTheme: IconButtonThemeData(
+      style: ButtonStyle(
+        foregroundColor: WidgetStatePropertyAll(scheme.onSurfaceVariant),
+        overlayColor: WidgetStatePropertyAll(
+          scheme.primary.withValues(alpha: .12),
+        ),
+      ),
+    ),
+    sliderTheme: SliderThemeData(
+      activeTrackColor: scheme.primary,
+      thumbColor: scheme.primary,
+      inactiveTrackColor: scheme.outlineVariant,
+      overlayColor: scheme.primary.withValues(alpha: .14),
     ),
     tooltipTheme: const TooltipThemeData(
       waitDuration: Duration(milliseconds: 500),

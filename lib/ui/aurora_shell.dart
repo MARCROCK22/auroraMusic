@@ -1392,13 +1392,32 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             ],
           ),
           const SizedBox(height: 12),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Colores adaptativos'),
-            subtitle: const Text('El acento toma el color de la portada.'),
-            value: c.adaptiveColors,
-            onChanged: c.setAdaptiveColors,
+          Text(
+            'Color de acento',
+            style: Theme.of(context).textTheme.titleSmall,
           ),
+          const SizedBox(height: 4),
+          const Text('Automático toma el color de la portada actual.'),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final entry in const {
+                'automatic': 'Automático',
+                'terracotta': 'Terracota',
+                'amber': 'Ámbar',
+                'forest': 'Verde bosque',
+                'purple': 'Morado',
+              }.entries)
+                ChoiceChip(
+                  label: Text(entry.value),
+                  selected: c.accentPalette == entry.key,
+                  onSelected: (_) => c.setAccentPalette(entry.key),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Reducir movimiento'),
