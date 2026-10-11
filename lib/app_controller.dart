@@ -91,6 +91,7 @@ class AppController extends ChangeNotifier {
   Future<void> get closed => _closed.future;
   String? _loadedTrackId;
   String? _loadedAudioInput;
+  String? _pendingResolveVideoId;
   Duration _resumePosition = Duration.zero;
   final Random _random = Random();
   final List<int> _shuffleHistory = [];
@@ -342,6 +343,7 @@ class AppController extends ChangeNotifier {
     final track = currentTrack;
     if (track == null) return;
     final generation = ++_playGeneration;
+    if (!fromRecovery) _cancelPendingResolution();
     if (track.isPendingSpotifyMatch) {
       _playIntent = false;
       _recoverableRemoteTrackId = null;
@@ -398,10 +400,21 @@ class AppController extends ChangeNotifier {
           'El archivo ya no está disponible. Vuelve a importarlo.',
         );
       }
+      if (!availableLocally && source.supportsPlaybackCache) {
+        final page = Uri.tryParse(track.pageUrl ?? '');
+        final videoId = page?.host == 'youtu.be'
+            ? page?.pathSegments.firstOrNull
+            : page?.queryParameters['v'];
+        if (videoId != null &&
+            RegExp(r'^[A-Za-z0-9_-]{11}$').hasMatch(videoId)) {
+          _pendingResolveVideoId = videoId;
+        }
+      }
       final resolved = availableLocally
           ? ResolvedAudio(input: local, duration: track.duration)
           : await source.resolve(track);
       if (generation != _playGeneration || _disposed) return;
+      _pendingResolveVideoId = null;
       _loadedAudioInput = resolved.input;
       await audio.load(
         resolved,
@@ -443,6 +456,7 @@ class AppController extends ChangeNotifier {
       if (generation == _playGeneration) _report(exception);
     } finally {
       if (generation == _playGeneration) {
+        _pendingResolveVideoId = null;
         busy = false;
         _notify();
       }
@@ -526,6 +540,14 @@ class AppController extends ChangeNotifier {
     _recovering = false;
   }
 
+  void _cancelPendingResolution() {
+    final videoId = _pendingResolveVideoId;
+    _pendingResolveVideoId = null;
+    if (videoId != null) {
+      unawaited(source.cancel('resolve:$videoId').catchError((Object _) {}));
+    }
+  }
+
   Future<void> togglePlayback() async {
     if (_playIntent && (audio.isPlaying || busy || _recovering)) {
       await pausePlayback();
@@ -538,6 +560,7 @@ class AppController extends ChangeNotifier {
   Future<void> pausePlayback() async {
     _playIntent = false;
     _cancelRecovery();
+    _cancelPendingResolution();
     ++_playGeneration;
     busy = false;
     await audio.pause();
@@ -548,6 +571,7 @@ class AppController extends ChangeNotifier {
     ++_playGeneration;
     _playIntent = false;
     _cancelRecovery();
+    _cancelPendingResolution();
     busy = false;
     _recoverableRemoteTrackId = null;
     await audio.stop();
