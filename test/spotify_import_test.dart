@@ -38,6 +38,30 @@ void main() {
       expect(result.playlists.first.tracks.first.artist, 'Artist "A"');
     });
 
+    test('accepts Spotify CSV export aliases without playlist column', () {
+      final result = SpotifyImportParser.parse(
+        'Track Name,Artist Name(s),Album Name,Track URI\n'
+        'Song,Artist One; Artist Two,Record,spotify:track:abc\n',
+        extension: 'csv',
+        fallbackPlaylistName: 'Liked Songs',
+      );
+      expect(result.playlists.single.name, 'Liked Songs');
+      expect(result.playlists.single.tracks.single.title, 'Song');
+      expect(
+        result.playlists.single.tracks.single.artist,
+        'Artist One; Artist Two',
+      );
+      expect(result.playlists.single.tracks.single.uri, 'spotify:track:abc');
+    });
+
+    test('accepts Artist(s) header spelling', () {
+      final result = SpotifyImportParser.parse(
+        'Track Name,Artist(s),Playlist Name\nSong,Artist,Playlist\n',
+        extension: 'csv',
+      );
+      expect(result.playlists.single.tracks.single.artist, 'Artist');
+    });
+
     test('rejects malformed CSV and JSON', () {
       expect(
         () => SpotifyImportParser.parse('"unclosed', extension: 'csv'),
@@ -102,6 +126,109 @@ void main() {
       );
       expect(restoredSong.spotifyUri, 'spotify:track:abc');
       expect(restoredSong.isPendingSpotifyMatch, isTrue);
+    },
+  );
+
+  test(
+    'manual match preserves Spotify identity in tracks and restored queue',
+    () async {
+      const pending = Track(
+        id: 'spotify-stable-id',
+        title: 'Original title',
+        artist: 'Original artist',
+        album: 'Original album',
+        spotifyUri: 'spotify:track:abc',
+        spotifyMatchPending: true,
+      );
+      const match = Track(
+        id: 'youtube-result',
+        title: 'Different YouTube title',
+        artist: 'Different YouTube artist',
+        duration: Duration(minutes: 3),
+        artworkUrl: 'https://img.test/art.jpg',
+        pageUrl: 'https://youtu.be/abcdefghijk',
+      );
+      final source = FakeSource()..searchMatches = [match];
+      final controller = await createTestController(
+        tracks: const [pending],
+        source: source,
+        preferences: const {
+          'queue': ['spotify-stable-id'],
+          'queueIndex': 0,
+        },
+      );
+      addTearDown(() => closeTestController(controller));
+
+      final matches = await controller.findSpotifyMatches(pending);
+      expect(matches, [match]);
+      expect(source.searchQueries, ['Original title Original artist']);
+      expect(source.searchLimits, [3]);
+      expect(await controller.matchSpotifyTrack(pending.id, match), isTrue);
+
+      final saved = (await controller.database.readTracks()).single;
+      expect(saved.id, pending.id);
+      expect(saved.title, pending.title);
+      expect(saved.artist, pending.artist);
+      expect(saved.album, pending.album);
+      expect(saved.spotifyUri, pending.spotifyUri);
+      expect(saved.isPendingSpotifyMatch, isFalse);
+      expect(saved.pageUrl, match.pageUrl);
+      expect(saved.artworkUrl, match.artworkUrl);
+      expect(saved.duration, match.duration);
+      expect(controller.currentTrack?.id, pending.id);
+      expect(controller.currentTrack?.pageUrl, match.pageUrl);
+      expect((controller.audio as FakeAudio).loadCount, 0);
+      expect(source.resolved, isEmpty);
+    },
+  );
+
+  test('manual match plays only when the user requests it', () async {
+    const pending = Track(
+      id: 'spotify-stable-id',
+      title: 'Song',
+      artist: 'Artist',
+      spotifyUri: 'spotify:track:abc',
+      spotifyMatchPending: true,
+    );
+    const match = Track(
+      id: 'youtube-result',
+      title: 'Video title',
+      artist: 'Video artist',
+      pageUrl: 'https://youtu.be/abcdefghijk',
+    );
+    final controller = await createTestController(tracks: const [pending]);
+    addTearDown(() => closeTestController(controller));
+
+    expect(
+      await controller.matchSpotifyTrack(pending.id, match, play: true),
+      isTrue,
+    );
+    expect(controller.currentTrack?.id, pending.id);
+    expect((controller.audio as FakeAudio).loaded?.input, contains(pending.id));
+  });
+
+  test(
+    'pending restored queue playback stops with actionable guidance',
+    () async {
+      const pending = Track(
+        id: 'spotify-pending',
+        title: 'Song',
+        artist: 'Artist',
+        spotifyMatchPending: true,
+      );
+      final controller = await createTestController(
+        tracks: const [pending],
+        preferences: const {
+          'queue': ['spotify-pending'],
+          'queueIndex': 0,
+        },
+      );
+      addTearDown(() => closeTestController(controller));
+      await controller.playQueueAt(0);
+
+      expect((controller.audio as FakeAudio).isPlaying, isFalse);
+      expect(controller.error, contains('elige su video de YouTube'));
+      expect((controller.audio as FakeAudio).loadCount, 0);
     },
   );
 

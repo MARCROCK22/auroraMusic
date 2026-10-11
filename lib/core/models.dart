@@ -30,6 +30,7 @@ class Track {
   Track copyWith({
     String? localPath,
     Duration? duration,
+    String? artworkUrl,
     bool clearLocalPath = false,
     String? pageUrl,
     String? spotifyUri,
@@ -39,7 +40,7 @@ class Track {
     title: title,
     artist: artist,
     duration: duration ?? this.duration,
-    artworkUrl: artworkUrl,
+    artworkUrl: artworkUrl ?? this.artworkUrl,
     pageUrl: pageUrl ?? this.pageUrl,
     localPath: clearLocalPath ? null : localPath ?? this.localPath,
     album: album,

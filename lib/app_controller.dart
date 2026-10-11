@@ -341,11 +341,32 @@ class AppController extends ChangeNotifier {
     if (!fromRecovery) _cancelRecovery();
     final track = currentTrack;
     if (track == null) return;
+    final generation = ++_playGeneration;
+    if (track.isPendingSpotifyMatch) {
+      _playIntent = false;
+      _recoverableRemoteTrackId = null;
+      busy = true;
+      _notify();
+      try {
+        try {
+          await audio.stop();
+        } catch (_) {}
+        _report(
+          StateError(
+            'Esta canción de Spotify aún no tiene una coincidencia. '
+            'Abre la biblioteca y elige su video de YouTube.',
+          ),
+        );
+      } finally {
+        busy = false;
+        _notify();
+      }
+      return;
+    }
     if (_recoveryTrackId != track.id) {
       _recoveryTrackId = track.id;
       _expiryRetries = 0;
     }
-    final generation = ++_playGeneration;
     busy = true;
     error = null;
     _loadedTrackId = null;
@@ -860,6 +881,7 @@ class AppController extends ChangeNotifier {
       return SpotifyImportParser.parse(
         await File(path).readAsString(),
         extension: p.extension(file.name).replaceFirst('.', ''),
+        fallbackPlaylistName: p.basenameWithoutExtension(file.name),
       );
     } catch (exception) {
       _report(exception);
@@ -867,10 +889,10 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> importSpotifyPlaylists(
+  Future<bool> importSpotifyPlaylists(
     List<SpotifyImportPlaylist> imported,
   ) async {
-    if (imported.isEmpty) return;
+    if (imported.isEmpty) return false;
     busy = true;
     _notify();
     try {
@@ -917,11 +939,59 @@ class AppController extends ChangeNotifier {
       tracks.insertAll(0, newTracks);
       playlists.addAll(newPlaylists);
       error = null;
+      return true;
     } catch (exception) {
       _report(exception);
+      return false;
     } finally {
       busy = false;
       _notify();
+    }
+  }
+
+  Future<List<Track>> findSpotifyMatches(Track track) =>
+      source.search('${track.title} ${track.artist}', limit: 3);
+
+  Future<bool> matchSpotifyTrack(
+    String trackId,
+    Track match, {
+    bool play = false,
+  }) async {
+    final index = tracks.indexWhere((track) => track.id == trackId);
+    if (index < 0 || !tracks[index].isPendingSpotifyMatch) return false;
+    if (match.pageUrl == null || match.pageUrl!.isEmpty) {
+      _report(
+        StateError('El resultado no incluye un enlace de YouTube válido.'),
+      );
+      return false;
+    }
+    final original = tracks[index];
+    final updated = original.copyWith(
+      pageUrl: match.pageUrl,
+      artworkUrl: match.artworkUrl,
+      duration: match.duration,
+      spotifyMatchPending: false,
+    );
+    try {
+      await database.saveTrack(updated);
+      tracks[index] = updated;
+      for (var i = 0; i < queue.length; i++) {
+        if (queue[i].id == trackId) queue[i] = updated;
+      }
+      error = null;
+      _notify();
+      if (play) {
+        final queuePosition = queue.indexWhere((track) => track.id == trackId);
+        if (queuePosition >= 0) {
+          await playQueueAt(queuePosition);
+        } else {
+          await playTrack(updated);
+        }
+      }
+      return true;
+    } catch (exception) {
+      _report(exception);
+      return false;
     }
   }
 

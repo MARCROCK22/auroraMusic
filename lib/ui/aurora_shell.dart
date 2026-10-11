@@ -10,6 +10,7 @@ import '../core/audio_backend.dart';
 import '../core/models.dart';
 import 'lyrics_panel.dart';
 import 'spotify_import_dialog.dart';
+import 'spotify_match_dialog.dart';
 import 'vinyl_player.dart';
 import 'queue_panel.dart';
 
@@ -1099,11 +1100,15 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         ),
       ),
       subtitle: Text(
-        '${t.artist}${t.isLocal ? ' · Disponible sin conexión' : ''}',
+        t.isPendingSpotifyMatch
+            ? '${t.artist} · Elige una coincidencia de YouTube'
+            : '${t.artist}${t.isLocal ? ' · Disponible sin conexión' : ''}',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
-      onTap: () => c.playTrack(t, context: items),
+      onTap: t.isPendingSpotifyMatch
+          ? () => _matchSpotify(c, t)
+          : () => c.playTrack(t, context: items),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1116,6 +1121,8 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             tooltip: 'Opciones de ${t.title}',
             onSelected: (value) {
               switch (value) {
+                case 'match':
+                  _matchSpotify(c, t);
                 case 'favorite':
                   c.toggleFavorite(t);
                 case 'queue':
@@ -1146,6 +1153,11 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
               }
             },
             itemBuilder: (_) => [
+              if (t.isPendingSpotifyMatch)
+                const PopupMenuItem(
+                  value: 'match',
+                  child: Text('Elegir coincidencia de YouTube'),
+                ),
               PopupMenuItem(
                 value: 'favorite',
                 child: Text(
@@ -2552,6 +2564,28 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
 
   Future<void> _importSpotify(AppController c) async {
     c.clearError();
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Importar datos de Spotify'),
+        content: const Text(
+          '1. Elige tu archivo Spotify Account Data (JSON) o un CSV de canciones.\n'
+          '2. Revisa las listas seleccionadas y pulsa Importar.\n'
+          '3. En la biblioteca, elige manualmente un resultado de YouTube para cada canción pendiente.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Elegir archivo'),
+          ),
+        ],
+      ),
+    );
+    if (proceed != true || !mounted) return;
     final result = await c.pickSpotifyImport();
     if (!mounted) return;
     if (result == null) {
@@ -2574,6 +2608,15 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     ).showSnackBar(SnackBar(content: Text(c.error!)));
     c.clearError();
   }
+
+  Future<void> _matchSpotify(AppController c, Track track) =>
+      SpotifyMatchDialog.show(
+        context,
+        track: track,
+        onSearch: () => c.findSpotifyMatches(track),
+        onSave: (match, {required play}) =>
+            c.matchSpotifyTrack(track.id, match, play: play),
+      );
 
   Future<String?> _askText(
     String title,

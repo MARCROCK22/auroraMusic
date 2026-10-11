@@ -32,17 +32,23 @@ class SpotifyImportResult {
 }
 
 class SpotifyImportParser {
-  static SpotifyImportResult parse(String contents, {String? extension}) {
+  static SpotifyImportResult parse(
+    String contents, {
+    String? extension,
+    String? fallbackPlaylistName,
+  }) {
     if (utf8.encode(contents).length > maxSpotifyImportBytes) {
       throw const FormatException('El archivo supera el límite de 20 MB.');
     }
     final type = extension?.toLowerCase();
-    if (type == 'csv') return _parseCsv(contents);
+    if (type == 'csv') {
+      return _parseCsv(contents, fallbackPlaylistName: fallbackPlaylistName);
+    }
     if (type == 'json') return _parseJson(contents);
     final trimmed = contents.trimLeft();
     return trimmed.startsWith('{') || trimmed.startsWith('[')
         ? _parseJson(contents)
-        : _parseCsv(contents);
+        : _parseCsv(contents, fallbackPlaylistName: fallbackPlaylistName);
   }
 
   static SpotifyImportResult _parseJson(String contents) {
@@ -101,25 +107,36 @@ class SpotifyImportParser {
     return SpotifyImportResult(playlists: playlists, skipped: skipped);
   }
 
-  static SpotifyImportResult _parseCsv(String contents) {
+  static SpotifyImportResult _parseCsv(
+    String contents, {
+    String? fallbackPlaylistName,
+  }) {
     final rows = _csvRows(contents);
     if (rows.isEmpty) throw const FormatException('El CSV está vacío.');
     final header = {
       for (var i = 0; i < rows.first.length; i++) _normalize(rows.first[i]): i,
     };
-    final titleColumn = _column(header, const ['trackname', 'track name']);
-    final artistColumn = _column(header, const ['artistname', 'artist name']);
-    final albumColumn = _column(header, const ['albumname', 'album name']);
+    final titleColumn = _column(header, const ['track name', 'name']);
+    final artistColumn = _column(header, const [
+      'artist name',
+      'artist name(s)',
+      'artist(s)',
+      'artists',
+    ]);
+    final albumColumn = _column(header, const ['album name', 'album']);
     final playlistColumn = _column(header, const [
       'playlistname',
       'playlist name',
     ]);
-    final uriColumn = _column(header, const ['trackuri', 'track uri', 'uri']);
-    if (titleColumn == null || artistColumn == null || playlistColumn == null) {
+    final uriColumn = _column(header, const ['track uri', 'uri']);
+    if (titleColumn == null || artistColumn == null) {
       throw const FormatException(
-        'El CSV requiere las columnas TrackName, ArtistName y PlaylistName.',
+        'El CSV requiere las columnas Track Name y Artist Name(s).',
       );
     }
+    final fallback = _string(fallbackPlaylistName).isEmpty
+        ? 'Lista importada'
+        : _string(fallbackPlaylistName);
     final grouped = <String, List<SpotifyImportTrack>>{};
     var skipped = 0;
     var total = 0;
@@ -132,7 +149,9 @@ class SpotifyImportParser {
       }
       final title = _cell(row, titleColumn);
       final artist = _cell(row, artistColumn);
-      final playlist = _cell(row, playlistColumn);
+      final playlist = playlistColumn == null
+          ? fallback
+          : _cell(row, playlistColumn);
       if (title.isEmpty || artist.isEmpty || playlist.isEmpty) {
         skipped++;
         continue;
@@ -219,8 +238,11 @@ class SpotifyImportParser {
     return null;
   }
 
-  static String _normalize(String value) =>
-      value.replaceAll('\uFEFF', '').trim().toLowerCase().replaceAll('_', ' ');
+  static String _normalize(String value) => value
+      .replaceAll('\uFEFF', '')
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]'), '');
 
   static String _cell(List<String> row, int index) =>
       index < row.length ? row[index].trim() : '';
