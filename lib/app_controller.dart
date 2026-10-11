@@ -21,6 +21,7 @@ final controllerProvider = ChangeNotifierProvider<AppController>((ref) {
 });
 
 class AppController extends ChangeNotifier {
+  static const _maxStreamRecoveryAttempts = 2;
   AppController({
     required this.audio,
     required this.source,
@@ -93,6 +94,7 @@ class AppController extends ChangeNotifier {
   bool _recovering = false;
   bool _usingRemote = false;
   String? _recoveryTrackId;
+  String? _recoverableRemoteTrackId;
   int _expiryRetries = 0;
 
   Track? get currentTrack =>
@@ -205,10 +207,11 @@ class AppController extends ChangeNotifier {
     final audioError = audio.lastError;
     if (audioError != null && audioError != error) error = audioError;
     if (audioError != null &&
-        _loadedTrackId != null &&
         _usingRemote &&
+        _recoverableRemoteTrackId == currentTrack?.id &&
         !_recovering &&
-        _expiryRetries == 0 &&
+        !busy &&
+        _expiryRetries < _maxStreamRecoveryAttempts &&
         _isRecoverableStreamError(audioError)) {
       unawaited(_recoverExpiredStream());
     }
@@ -366,6 +369,7 @@ class AppController extends ChangeNotifier {
       if (generation != _playGeneration || _disposed) return;
       await audio.play();
       if (generation != _playGeneration || _disposed) return;
+      _recoverableRemoteTrackId = _usingRemote ? track.id : null;
       final readyTrack = audio.duration > Duration.zero
           ? track.copyWith(duration: audio.duration, localPath: local)
           : track;
@@ -421,10 +425,11 @@ class AppController extends ChangeNotifier {
     final trackId = currentTrack?.id;
     final occurrence = queueIndex;
     final generation = _playGeneration;
+    final failedError = audio.lastError;
     if (trackId == null || generation == 0) return;
     _recovering = true;
     _expiryRetries++;
-    _resumePosition = audio.position;
+    if (audio.position > Duration.zero) _resumePosition = audio.position;
     try {
       if (generation != _playGeneration ||
           occurrence != queueIndex ||
@@ -432,6 +437,15 @@ class AppController extends ChangeNotifier {
         return;
       }
       await _playCurrent();
+      if (occurrence == queueIndex &&
+          currentTrack?.id == trackId &&
+          _loadedTrackId == trackId &&
+          audio.isPlaying &&
+          audio.lastError == null &&
+          error == failedError) {
+        error = null;
+        _notify();
+      }
     } finally {
       _recovering = false;
     }
@@ -449,6 +463,7 @@ class AppController extends ChangeNotifier {
   Future<void> stopPlayback() async {
     ++_playGeneration;
     busy = false;
+    _recoverableRemoteTrackId = null;
     await audio.stop();
     _controls?.updateTrack(null);
     _loadedTrackId = null;

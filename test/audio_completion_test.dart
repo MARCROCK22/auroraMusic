@@ -73,6 +73,46 @@ void main() {
     );
   });
 
+  test('a clean EOF rejects any decoded shortfall against known duration', () {
+    expect(
+      isCompleteAudioStream(
+        isPlaying: true,
+        isBuffering: false,
+        cleanEof: true,
+        decoded: duration,
+        consumed: duration,
+        expected: duration,
+      ),
+      isTrue,
+    );
+    expect(
+      isCompleteAudioStream(
+        isPlaying: true,
+        isBuffering: false,
+        cleanEof: true,
+        decoded: duration - const Duration(milliseconds: 1),
+        consumed: duration - const Duration(milliseconds: 1),
+        expected: duration,
+      ),
+      isFalse,
+    );
+  });
+
+  test('only the newest seek may restore current play intent', () {
+    expect(
+      shouldResumeAfterSeek(request: 4, latestRequest: 4, playIntent: true),
+      isTrue,
+    );
+    expect(
+      shouldResumeAfterSeek(request: 3, latestRequest: 4, playIntent: true),
+      isFalse,
+    );
+    expect(
+      shouldResumeAfterSeek(request: 4, latestRequest: 4, playIntent: false),
+      isFalse,
+    );
+  });
+
   test(
     'does not complete while paused, buffering, or before full consumption',
     () {

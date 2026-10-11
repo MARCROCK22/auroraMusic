@@ -45,7 +45,7 @@ Future<void> _settle(AppController controller) async {
 
 void main() {
   test(
-    'premature EOF refreshes URL once at position on same queue occurrence',
+    'premature EOF refreshes the same queue occurrence twice at position',
     () async {
       final source = FakeSource();
       final audio = FakeAudio();
@@ -69,15 +69,17 @@ void main() {
       expect(controller.currentTrack?.id, 'one');
       expect(source.resolved, ['one', 'one']);
       expect(audio.position, const Duration(seconds: 37));
+      expect(controller.error, isNull);
       audio.lastError = 'El audio terminó antes de completar la reproducción.';
       audio.notifyListeners();
       await _settle(controller);
-      expect(source.resolved, ['one', 'one']);
+      expect(source.resolved, ['one', 'one', 'one']);
+      expect(controller.error, isNull);
     },
   );
 
   test(
-    'network read timeout recovery is bounded and manual retry reloads position',
+    'timeout recovery retries twice, clears recovered error, and stays bounded',
     () async {
       final source = FakeSource();
       final audio = _FailingAudio();
@@ -93,15 +95,24 @@ void main() {
       audio.notifyListeners();
       await _settle(controller);
       expect(source.resolved, ['one', 'one']);
+      expect(audio.position, Duration.zero);
+      expect(controller.error, 'socket timeout');
 
       audio.lastError = 'SocketException: connection timed out';
       audio.notifyListeners();
       await _settle(controller);
-      expect(source.resolved, ['one', 'one']);
-
-      audio.position = Duration.zero;
-      await controller.resumePlayback();
       expect(source.resolved, ['one', 'one', 'one']);
+      expect(audio.position, const Duration(seconds: 24));
+      expect(controller.error, isNull);
+
+      audio.lastError = 'SocketException: connection timed out';
+      audio.notifyListeners();
+      await _settle(controller);
+      expect(source.resolved, ['one', 'one', 'one']);
+      expect(controller.error, 'SocketException: connection timed out');
+
+      await controller.resumePlayback();
+      expect(source.resolved, ['one', 'one', 'one', 'one']);
       expect(audio.position, const Duration(seconds: 24));
     },
   );

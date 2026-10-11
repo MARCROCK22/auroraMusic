@@ -27,7 +27,9 @@ class MusicAudio extends AudioBackend {
   String? _ffmpeg;
   Future<void> _operations = Future.value();
   int _generation = 0;
+  int _seekGeneration = 0;
   bool _disposed = false, _playing = false, _buffering = false;
+  bool _playIntent = false;
   bool _streaming = false, _ended = false, _visualization = true;
   Duration _position = Duration.zero, _duration = Duration.zero;
   Duration _offset = Duration.zero;
@@ -80,6 +82,16 @@ class MusicAudio extends AudioBackend {
 
   @override
   Future<void> load(
+    ResolvedAudio source, {
+    String? ffmpegExecutable,
+    Duration start = Duration.zero,
+  }) {
+    _playIntent = false;
+    ++_seekGeneration;
+    return _load(source, ffmpegExecutable: ffmpegExecutable, start: start);
+  }
+
+  Future<void> _load(
     ResolvedAudio source, {
     String? ffmpegExecutable,
     Duration start = Duration.zero,
@@ -399,6 +411,7 @@ class MusicAudio extends AudioBackend {
 
   @override
   Future<void> play() async {
+    _playIntent = true;
     if (_handle == null) return;
     _engine.setPause(_handle!, false);
     _playing = true;
@@ -407,6 +420,7 @@ class MusicAudio extends AudioBackend {
 
   @override
   Future<void> pause() async {
+    _playIntent = false;
     if (_handle != null) _engine.setPause(_handle!, true);
     _playing = false;
     _spectrum.value = List.filled(48, 0);
@@ -417,7 +431,6 @@ class MusicAudio extends AudioBackend {
   Future<void> seek(Duration target) async {
     final source = _resolved;
     if (source == null) return;
-    final wasPlaying = _playing;
     final bounded = Duration(
       microseconds: target.inMicroseconds.clamp(
         0,
@@ -432,13 +445,23 @@ class MusicAudio extends AudioBackend {
       notifyListeners();
       return;
     }
-    await load(source, ffmpegExecutable: _ffmpeg, start: bounded);
-    if (wasPlaying) await play();
+    final request = ++_seekGeneration;
+    await _load(source, ffmpegExecutable: _ffmpeg, start: bounded);
+    if (shouldResumeAfterSeek(
+          request: request,
+          latestRequest: _seekGeneration,
+          playIntent: _playIntent,
+        ) &&
+        _handle != null) {
+      await play();
+    }
   }
 
   @override
   Future<void> stop() {
     ++_generation;
+    ++_seekGeneration;
+    _playIntent = false;
     return _serialize(() async {
       await _release();
       _position = Duration.zero;

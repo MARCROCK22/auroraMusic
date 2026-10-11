@@ -32,8 +32,13 @@ bool isCompleteAudioStream({
     // mix block at 48 kHz (about 21.34 ms) for conversion rounding and block
     // granularity; larger unconsumed tails still prevent completion.
     consumed + const Duration(microseconds: 21334) >= decoded &&
-    (expected <= Duration.zero ||
-        decoded + const Duration(seconds: 1) >= expected);
+    (expected <= Duration.zero || decoded >= expected);
+
+bool shouldResumeAfterSeek({
+  required int request,
+  required int latestRequest,
+  required bool playIntent,
+}) => request == latestRequest && playIntent;
 
 /// Log-frequency display bars from the native mixer's first 256 FFT bins.
 List<double> spectrumBars(List<double> fft) {
