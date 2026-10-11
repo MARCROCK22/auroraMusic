@@ -6,6 +6,11 @@ import '../app_controller.dart';
 import '../core/models.dart';
 import '../lyrics/lyrics_service.dart';
 
+String _formatTime(Duration value) {
+  final seconds = value.inSeconds;
+  return '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
+}
+
 Future<void> showLyrics(BuildContext context, AppController controller) async {
   await showModalBottomSheet<void>(
     context: context,
@@ -148,11 +153,17 @@ class _LyricsPanelState extends State<LyricsPanel> {
           child: ListenableBuilder(
             listenable: widget.controller.audio,
             builder: (context, _) {
-              final position = widget.controller.audio.position;
+              final audio = widget.controller.audio;
+              final position = audio.position;
               final active = lines.lastIndexWhere(
                 (line) => line.at <= position,
               );
-              return _body(track, lines, active, position, media);
+              return Column(
+                children: [
+                  Expanded(child: _body(track, lines, active, position, media)),
+                  _playbackControls(),
+                ],
+              );
             },
           ),
         );
@@ -289,6 +300,81 @@ class _LyricsPanelState extends State<LyricsPanel> {
     );
   }
 
+  Widget _playbackControls() {
+    final controller = widget.controller;
+    final audio = controller.audio;
+    final duration = audio.duration;
+    final length = duration.inMilliseconds;
+    final position = audio.position.inMilliseconds
+        .clamp(0, length > 0 ? length : 0)
+        .toDouble();
+    final volume = audio.volume.clamp(0.0, 1.0);
+    final enabled = controller.currentTrack != null;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 8, 4, 4),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Text(_formatTime(audio.position)),
+              Expanded(
+                child: Semantics(
+                  label: 'Posición de reproducción',
+                  child: Slider(
+                    value: position,
+                    max: length > 0 ? length.toDouble() : 1,
+                    onChanged: enabled && length > 0
+                        ? (value) => controller.seek(
+                            Duration(milliseconds: value.round()),
+                          )
+                        : null,
+                  ),
+                ),
+              ),
+              Text(_formatTime(duration)),
+            ],
+          ),
+          Row(
+            children: [
+              IconButton.filled(
+                tooltip: audio.isPlaying ? 'Pausar' : 'Reproducir',
+                onPressed: enabled ? controller.togglePlayback : null,
+                icon: Icon(
+                  audio.isPlaying
+                      ? Icons.pause_rounded
+                      : Icons.play_arrow_rounded,
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                tooltip: volume == 0 ? 'Activar sonido' : 'Silenciar',
+                onPressed: enabled
+                    ? () => controller.setVolume(volume == 0 ? .7 : 0)
+                    : null,
+                icon: Icon(
+                  volume == 0
+                      ? Icons.volume_off_outlined
+                      : Icons.volume_up_outlined,
+                ),
+              ),
+              Expanded(
+                child: Semantics(
+                  label: 'Volumen',
+                  child: Slider(
+                    value: volume,
+                    onChanged: enabled ? controller.setVolume : null,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _body(
     Track? track,
     List<LyricLine> lines,
@@ -348,22 +434,47 @@ class _LyricsPanelState extends State<LyricsPanel> {
       itemBuilder: (context, index) {
         final key = _lineKeys.putIfAbsent(index, GlobalKey.new);
         final highlighted = index == active;
+        final line = lines[index];
         return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 9),
+          padding: const EdgeInsets.symmetric(vertical: 4),
           child: Semantics(
             key: key,
             liveRegion: highlighted,
-            child: Text(
-              lines[index].text,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontFamily: 'Newsreader',
-                fontSize: highlighted ? 34 : 25,
-                height: 1.45,
-                fontWeight: highlighted ? FontWeight.w700 : FontWeight.w400,
-                color: highlighted
-                    ? Theme.of(context).colorScheme.primary
-                    : Theme.of(context).colorScheme.onSurfaceVariant,
+            label: '${_formatTime(line.at)} ${line.text}',
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => widget.controller.seek(line.at),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 6,
+                      ),
+                      child: AnimatedDefaultTextStyle(
+                        duration: media.disableAnimations
+                            ? Duration.zero
+                            : const Duration(milliseconds: 180),
+                        curve: Curves.easeOut,
+                        style: TextStyle(
+                          fontFamily: 'Newsreader',
+                          fontSize: highlighted ? 34 : 25,
+                          height: 1.45,
+                          fontWeight: highlighted
+                              ? FontWeight.w700
+                              : FontWeight.w400,
+                          color: highlighted
+                              ? Theme.of(context).colorScheme.primary
+                              : Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                        child: Text(line.text, textAlign: TextAlign.center),
+                      ),
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
