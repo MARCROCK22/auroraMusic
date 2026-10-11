@@ -45,6 +45,8 @@ class _LyricsPanelState extends State<LyricsPanel> {
   String? _trackId;
   int _request = 0;
   int _lastActive = -1;
+  Duration? _scrubPosition;
+  String? _scrubTrackId;
   final Map<int, GlobalKey> _lineKeys = {};
   @override
   void initState() {
@@ -59,6 +61,8 @@ class _LyricsPanelState extends State<LyricsPanel> {
     _trackId = track?.id;
     _request++;
     _lastActive = -1;
+    _scrubPosition = null;
+    _scrubTrackId = null;
     _lineKeys.clear();
     _loading = false;
     _result = null;
@@ -136,6 +140,8 @@ class _LyricsPanelState extends State<LyricsPanel> {
   @override
   void dispose() {
     widget.controller.removeListener(_changed);
+    _scrubPosition = null;
+    _scrubTrackId = null;
     _service.dispose();
     super.dispose();
   }
@@ -180,11 +186,11 @@ class _LyricsPanelState extends State<LyricsPanel> {
               onPressed: _loading ? null : _import,
               icon: const Icon(Icons.file_open),
             ),
-            IconButton(
-              tooltip: 'Cerrar letras',
+            TextButton.icon(
               onPressed:
                   widget.onClose ?? () => Navigator.of(context).maybePop(),
-              icon: const Icon(Icons.close),
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Volver'),
             ),
           ],
         );
@@ -305,7 +311,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
     final audio = controller.audio;
     final duration = audio.duration;
     final length = duration.inMilliseconds;
-    final position = audio.position.inMilliseconds
+    final position = (_scrubPosition ?? audio.position).inMilliseconds
         .clamp(0, length > 0 ? length : 0)
         .toDouble();
     final volume = audio.volume.clamp(0.0, 1.0);
@@ -325,10 +331,35 @@ class _LyricsPanelState extends State<LyricsPanel> {
                   child: Slider(
                     value: position,
                     max: length > 0 ? length.toDouble() : 1,
+                    onChangeStart: enabled && length > 0
+                        ? (_) => _scrubTrackId = controller.currentTrack?.id
+                        : null,
                     onChanged: enabled && length > 0
-                        ? (value) => controller.seek(
-                            Duration(milliseconds: value.round()),
-                          )
+                        ? (value) {
+                            if (_scrubTrackId != controller.currentTrack?.id) {
+                              return;
+                            }
+                            setState(
+                              () => _scrubPosition = Duration(
+                                milliseconds: value.round(),
+                              ),
+                            );
+                          }
+                        : null,
+                    onChangeEnd: enabled && length > 0
+                        ? (value) {
+                            final trackId = _scrubTrackId;
+                            _scrubTrackId = null;
+                            _scrubPosition = null;
+                            if (trackId == controller.currentTrack?.id) {
+                              unawaited(
+                                controller.seek(
+                                  Duration(milliseconds: value.round()),
+                                ),
+                              );
+                            }
+                            if (mounted) setState(() {});
+                          }
                         : null,
                   ),
                 ),
@@ -401,14 +432,26 @@ class _LyricsPanelState extends State<LyricsPanel> {
     if (result.kind == LyricsKind.plain) {
       return SingleChildScrollView(
         padding: const EdgeInsets.all(20),
-        child: SelectableText(
-          result.text,
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            fontFamily: 'Newsreader',
-            fontSize: 24,
-            height: 1.65,
-          ),
+        child: Column(
+          children: [
+            Text(
+              'Estas letras no tienen marcas de tiempo.',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 16),
+            SelectableText(
+              result.text,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontFamily: 'Newsreader',
+                fontSize: 24,
+                height: 1.65,
+              ),
+            ),
+          ],
         ),
       );
     }
@@ -430,11 +473,24 @@ class _LyricsPanelState extends State<LyricsPanel> {
     return ListView.builder(
       key: ValueKey(track.id),
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      itemCount: lines.length,
+      itemCount: lines.length + 1,
       itemBuilder: (context, index) {
-        final key = _lineKeys.putIfAbsent(index, GlobalKey.new);
-        final highlighted = index == active;
-        final line = lines[index];
+        if (index == 0) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(0, 4, 0, 8),
+            child: Text(
+              'Toca un verso para ir a ese momento',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          );
+        }
+        final lineIndex = index - 1;
+        final key = _lineKeys.putIfAbsent(lineIndex, GlobalKey.new);
+        final highlighted = lineIndex == active;
+        final line = lines[lineIndex];
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Semantics(
@@ -448,30 +504,53 @@ class _LyricsPanelState extends State<LyricsPanel> {
                 onTap: () => widget.controller.seek(line.at),
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(minHeight: 48),
-                  child: Center(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 6,
-                      ),
-                      child: AnimatedDefaultTextStyle(
-                        duration: media.disableAnimations
-                            ? Duration.zero
-                            : const Duration(milliseconds: 180),
-                        curve: Curves.easeOut,
-                        style: TextStyle(
-                          fontFamily: 'Newsreader',
-                          fontSize: highlighted ? 34 : 25,
-                          height: 1.45,
-                          fontWeight: highlighted
-                              ? FontWeight.w700
-                              : FontWeight.w400,
-                          color: highlighted
-                              ? Theme.of(context).colorScheme.primary
-                              : Theme.of(context).colorScheme.onSurfaceVariant,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 6,
+                    ),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 44,
+                          child: Text(
+                            _formatTime(line.at),
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
+                                ),
+                          ),
                         ),
-                        child: Text(line.text, textAlign: TextAlign.center),
-                      ),
+                        Expanded(
+                          child: Center(
+                            child: AnimatedDefaultTextStyle(
+                              duration: media.disableAnimations
+                                  ? Duration.zero
+                                  : const Duration(milliseconds: 180),
+                              curve: Curves.easeOut,
+                              style: TextStyle(
+                                fontFamily: 'Newsreader',
+                                fontSize: highlighted ? 34 : 25,
+                                height: 1.45,
+                                fontWeight: highlighted
+                                    ? FontWeight.w700
+                                    : FontWeight.w400,
+                                color: highlighted
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                              ),
+                              child: Text(
+                                line.text,
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
