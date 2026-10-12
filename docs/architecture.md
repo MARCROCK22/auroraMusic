@@ -1,46 +1,99 @@
 # Organización de Aurora
 
-Aurora usa Flutter y Dart para Windows y Android. Las recomendaciones y la
-persistencia tienen módulos propios; Spotify aporta metadatos en un proveedor
-aislado. Se conserva el esquema SQLite versión 1.
+Aurora usa Flutter/Dart para Windows x64 y Android. Las mejoras conservan el
+esquema SQLite versión 1, la biblioteca existente y los proveedores de audio.
+La interfaz del Atelier Sonoro se reconstruye con widgets nativos de Flutter;
+los HTML de referencia no se ejecutan dentro de un WebView.
 
 ```text
 lib/
-  main.dart                    # Arranque, dependencias y tema
-  app_controller.dart          # Coordinación, estado y cola
-  core/                        # Track, playlists y contratos de audio/fuentes
-  audio/                       # SoLoud, controles del sistema y cálculo de audio
-  sources/                     # Extracción con yt-dlp y transmisión progresiva
-  dj/
-    recommendations.dart       # Puntuación local, razones y claves de identidad
+  main.dart                         Arranque, dependencias y tema compartido
+  app_controller.dart               Estado personal, cola, reproducción y persistencia
+  core/                             Track, playlists, contratos y controles de ventana
+  audio/                            SoLoud, DSP, FFT y controles multimedia
+  sources/                          yt-dlp, caché y transmisión progresiva
   library/
-    library_database.dart      # Biblioteca, favoritos, playlists e historial SQLite
-  import/
-    spotify_import.dart        # Lectura de exportaciones de Spotify existentes
-  metadata/spotify/            # Autenticación anónima, consultas, mapeo y estado de búsqueda
-  lyrics/                      # Consulta y caché de letras
-  ui/                          # Pantallas, reproductor, cola y diálogos
-test/                          # Pruebas unitarias y de widgets
-integration_test/              # Pruebas con aplicación y audio nativos
-scripts/                       # Preparación, empaquetado y verificaciones nativas
+    library_database.dart           SQLite: biblioteca, favoritos, listas e historial
+    local_file_metadata.dart        Tamaño y formato de archivos conocidos
+  import/                           Lectura local de exportaciones JSON/CSV de Spotify
+  metadata/spotify/                 Autenticación, Pathfinder, mapeo, caché y navegación
+  dj/
+    recommendations.dart            Puntuación, filtros, razones e identidad de canciones
+    discovery_controller.dart       Elecciones de tarjetas durante la sesión del DJ
+  jam/
+    jam_models.dart                 Metadatos públicos, permisos, invitaciones y validación
+    jam_service.dart                Servidor/cliente LAN, autoridad, cola y reconexión
+    jam_controller.dart             Acciones y estado de la función Jam
+    jam_playback_bridge.dart        Audio temporal, reloj, desfase y restauración personal
+    jam_qr.dart                     Lectura de imágenes QR con límites de tamaño
+  lyrics/                           Consulta, caché y modelos de letras
+  ui/
+    aurora_shell.dart               Navegación adaptable y conexión con controladores
+    home_music_page.dart            Inicio con datos reales y secciones musicales
+    horizontal_music_row.dart       Carruseles con tacto, rueda y controles de escritorio
+    dj_discovery_page.dart          Tarjetas del DJ, gestos y botones equivalentes
+    lyrics_panel.dart              Texto sincronizado, modos, tipografía y offset
+    studio/                        Componentes del Atelier Sonoro
+      studio_components.dart        Paneles y etiquetas del diseño
+      studio_symbols.dart           Iconos de la fuente local
+      studio_navigation.dart        Cabecera, barra lateral y acciones de ventana
+      studio_transport.dart         Controles persistentes de audio personal
+      home_introduction.dart        Cabecera editorial y fundas de discos
+      session_aside.dart            Estado Jam, próximos temas y ecualizador real
+      downloads_studio_page.dart    Descargas y archivo local, tabla/tarjetas adaptables
+    jam/                            Conexión, sesión, QR y cámara bajo demanda
+assets/
+  design_idea/                      20 imágenes originales de referencia y sources.json
+  fonts/                            Newsreader, Plus Jakarta Sans, símbolos y licencias
+third_party/nuclear_spotify/         AGPL y atribución de la adaptación de metadatos
+android/app/src/main/kotlin/         Audio e integración nativa Android
+windows/                            Runner, audio y controles de ventana Windows
+test/                               Pruebas unitarias, widgets y protocolo LAN simulado
+integration_test/                   Comprobaciones con aplicación y audio nativos
+scripts/                            Preparación, empaquetado, herramientas y firma de CI
+docs/                               Arquitectura, diseño, funciones y validaciones
 ```
 
-El flujo sigue siendo interfaz → controlador → contratos/proveedores y base de
-datos. El DJ depende de los modelos compartidos, y la persistencia también;
-ninguno depende de widgets. Los proveedores de audio no deben consultar el DJ.
+## Responsabilidades y dependencias
 
-`lib/metadata/spotify/` está separado de `sources/`: Spotify describe canciones,
-artistas, álbumes y playlists; yt-dlp y los archivos locales aportan el audio.
-Los modelos comunes permanecen en `core/` cuando los necesitan varios módulos.
+La navegación y los widgets reciben acciones del controlador; la lógica del DJ
+permanece en `dj/`, y el acceso a archivos conocidos en `library/`. No se duplican
+los importadores ni el motor de reproducción para construir las nuevas pantallas.
+`AppController` sigue coordinando el estado personal; la base de datos y los
+proveedores no dependen de los widgets. `WindowControls` encapsula el canal nativo
+para arrastrar, minimizar, maximizar y cerrar la ventana.
 
-`aurora_shell.dart` reúne navegación y muchas pantallas, y `app_controller.dart`
-coordina numerosas funciones. La mejora de interfaz debe extraer los componentes
-que modifique a `ui/`, con datos y acciones recibidos del controlador, sin mover
-pantallas ajenas al trabajo ni introducir lógica del recomendador en widgets.
-La puntuación y filtros del DJ permanecen en `dj/`, comprobables sin Flutter.
-No se agregan repositorios, fábricas ni capas de servicios duplicadas.
+Spotify se mantiene separado de `sources/`: aporta canciones, artistas, álbumes,
+playlists y portadas. Antes de encolar metadatos, el usuario elige una coincidencia
+de un proveedor de audio existente. Las referencias Spotify se conservan para
+reconocer duplicados, pero no se usan como entradas de audio.
 
-El historial actual registra la última reproducción de cada canción (hasta 100
-identificadores), no contadores, omisiones ni reproducciones completadas. Estas
-señales no se deben inferir como datos existentes. No hace falta una migración
-para separar módulos ni para usar favoritos, playlists y recencia.
+Jam tiene su propio controlador y servidor/cliente WebSocket, sin base de datos
+ni cola personal duplicada. El anfitrión valida las acciones y conserva la cola
+común en memoria. El puente de reproducción utiliza los contratos de audio y
+fuentes; `beginJamPlayback`/`endJamPlayback` aíslan los eventos del reproductor
+personal mientras dura el audio compartido. Al salir se conserva la cola personal
+actual, incluidas las ediciones realizadas durante la sesión. El QR y la cámara
+se crean únicamente cuando se activa la función correspondiente.
+
+El relay progresivo de `sources/` usa loopback para decodificar audio localmente;
+no se reutiliza como servidor Jam ni se comparte entre dispositivos. Jam abre
+solo una interfaz IPv4 privada elegida y transmite metadatos públicos y estado,
+nunca entradas extraídas, archivos, rutas locales o credenciales de proveedores.
+
+## Persistencia y señales disponibles
+
+SQLite conserva biblioteca, favoritos, playlists e historial. El historial guarda
+la última reproducción de cada canción y consulta hasta 100 identificadores; no
+aporta frecuencia, finalizaciones ni eventos de salto. Los gestos de omisión del
+DJ son elecciones temporales de tarjetas, no estadísticas de reproducción.
+Aceptar una tarjeta guarda un favorito y encola mediante los métodos existentes.
+
+Los filtros del DJ se guardan en preferencias. `Track.genres` conserva únicamente
+géneros explícitos de los datos; las canciones anteriores usan una lista vacía.
+No se infieren géneros desde nombres ni se migra el esquema de la base de datos.
+Las sesiones Jam, sus participantes, tokens y cola común permanecen en memoria.
+
+Consulta [diseño implementado](design_idea_implementation.md),
+[DJ y sus señales](dj.md), [metadatos Spotify](spotify_metadata.md),
+[Jam](jam.md) y [firma/CI](ci_signing.md).

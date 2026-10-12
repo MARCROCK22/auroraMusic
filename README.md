@@ -9,11 +9,13 @@ Reproductor de música en Flutter y Dart para **Windows x64 y Android 7+**. Inte
 - Importación gratuita de playlists de Spotify desde JSON/CSV local, con vista previa y elección explícita de la versión en YouTube; sin configurar claves de API.
 - Búsqueda de canciones, artistas, álbumes y playlists de Spotify mediante el proveedor de metadatos adaptado de Nuclear, sin cuenta personal ni Premium.
 - Descargas locales MP3 con progreso, cancelación, reintento y eliminación; carpeta de destino configurable en Windows y biblioteca disponible sin conexión.
-- Interfaz cálida con Newsreader y Plus Jakarta Sans incluidas, portadas protagonistas y panel de reproducción/cola en escritorio ancho.
-- Diseño aprobado en Stitch: biblioteca en cuadrícula, cola con vista propia y ajustes por secciones. **Modo Vinilo** gira durante la reproducción y permite desplazar la posición arrastrando el disco.
+- Interfaz Atelier Sonoro reconstruida en Flutter a partir de los originales de `diseñoidea/`: Newsreader normal e italic, Plus Jakarta Sans, símbolos locales y navegación adaptable.
+- Biblioteca en cuadrícula, cola con vista propia y ajustes por secciones. **Modo Vinilo** gira durante la reproducción y permite desplazar la posición arrastrando el disco.
 - Botón **Letras**: búsqueda exacta en LRCLIB, texto sincronizado o tradicional, caché privada e importación de archivos LRC/TXT.
 - Letras interactivas: toca un verso sincronizado para avanzar o retroceder, ajusta el volumen y vuelve al reproductor con **Volver**. Buscar una posición conserva tu decisión de reproducir o pausar.
+- Inicio con carruseles horizontales de datos reales; DJ de descubrimiento con gestos: izquierda omite, derecha guarda el favorito y encola.
 - **Para ti** recomienda según favoritos, listas y escuchas recientes. **DJ personal**, sin voz, continúa la cola con esas preferencias; las novedades de YouTube son opcionales y se consultan con límites visibles.
+- **Jam**: cola compartida en red local, QR, permisos del anfitrión y reproducción sincronizada opcional con fuentes de audio propias.
 - Colores extraídos de la portada, ambiente reactivo a la energía y visualizador FFT del audio real.
 - Ecualizador DSP de ocho bandas, presets y reducción automática de ganancia para los refuerzos.
 - Controles multimedia del sistema, servicio de audio Android, pausa por desconexión e interrupciones de audio.
@@ -32,6 +34,8 @@ cargar más resultados. **Añadir a la cola** abre la búsqueda de coincidencias
 YouTube: elige una fuente y confirma **Añadir a la cola** o **Reproducir**.
 La cola elimina duplicados por canción, URL canónica y referencia de Spotify.
 
+En **DJ**, desliza a la izquierda para omitir una tarjeta y a la derecha para guardar el favorito y añadirla a la cola; también hay botones equivalentes. Estas omisiones son elecciones de la sesión, no un historial de saltos de reproducción.
+
 En **Inicio → Para ti → Personalizar el DJ**, selecciona artistas, canciones o
 géneros de tu biblioteca. Las dimensiones se combinan; **Quitar filtros** las
 restablece. Los géneros solo se ofrecen cuando existen en los datos. Las
@@ -42,6 +46,36 @@ El método de Spotify depende de interfaces privadas que pueden cambiar. La
 adaptación conserva la licencia AGPL-3.0 y sus avisos. Consulta
 [metadatos](docs/spotify_metadata.md), [DJ](docs/dj.md) e
 [interfaz](docs/music_ui.md) para detalles y límites.
+
+### Compartir una Jam local
+
+Abre **Jam → Crear Jam**, elige la dirección privada de tu Wi-Fi/Ethernet y pulsa
+**Iniciar sesión local**. Aurora muestra el QR; las demás personas lo leen desde
+Jam. Android permite cámara bajo demanda. Windows permite importar una imagen QR
+o pegar la invitación copiada por el anfitrión.
+
+**Cola compartida** permite agregar a todos y muestra quién eligió cada canción;
+el anfitrión concede permisos para omitir, reordenar y quitar. En **Reproducción
+sincronizada**, controla canción, pausa y posición; los invitados activan audio
+local y cada dispositivo utiliza su propia biblioteca/proveedores. Una canción
+no disponible genera un aviso sin cerrar la cola. La sincronía es aproximada.
+
+La sesión y sus accesos son temporales, con hasta 16 identidades y 200 canciones.
+No se transfieren archivos, rutas ni credenciales; la conexión LAN no está cifrada
+ni se publica en Internet. Usa una red de confianza. **Reconectar** recupera la
+identidad durante la sesión; **Salir/Cerrar Jam** invalida el acceso correspondiente.
+La cola personal permanece separada. Consulta [Jam](docs/jam.md) para límites,
+permisos de plataforma y comprobaciones físicas pendientes.
+
+### Diseño y funciones pendientes
+
+La [implementación del diseño original](docs/design_idea_implementation.md)
+identifica los tres HTML, tres PNG, DESIGN.md y ZIP preservados, los veinte recursos
+con sus URLs/hashes y las fuentes incluidas. Inicio, transporte, descargas y letras
+usan datos y acciones reales. La simulación de válvulas/cinta, exportación USB,
+auditoría musical CRC/Hash, respaldo y traducción siguen pendientes y se señalan
+como tales en la interfaz. Las etiquetas editoriales no certifican fidelidad,
+latencia ni DSP analógico.
 
 ### Encontrar descargas y letras
 
@@ -148,7 +182,8 @@ ni contraseñas en el chat. El ZIP Windows no tiene firma Authenticode.
 
 `lib/core/` define modelos y contratos; `lib/audio/` contiene SoLoud y controles
 del sistema; `lib/sources/` integra yt-dlp; `lib/metadata/spotify/` consulta
-metadatos; `lib/dj/` puntúa recomendaciones y aplica filtros; `lib/library/`
+metadatos; `lib/dj/` puntúa recomendaciones y aplica filtros; `lib/jam/` mantiene
+sesiones LAN y audio temporal; `lib/ui/studio/` presenta el Atelier Sonoro; `lib/library/`
 persiste la biblioteca; `lib/ui/` presenta las pantallas. `AppController`
 coordina estado y reproducción. Consulta el [árbol de módulos](docs/architecture.md).
 
