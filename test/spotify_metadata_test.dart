@@ -322,15 +322,20 @@ void main() {
 
   test('401 renews once and concurrent rejections share renewal', () async {
     final fixture = OfflineSpotify();
+    final initialRequestsArrived = Completer<void>();
+    var initialRequests = 0;
     fixture.onQuery = (_) async {
-      await Future<void>.delayed(const Duration(milliseconds: 15));
-      return fixture.tokenCalls == 1
-          ? response({}, status: 401)
-          : response(searchData());
+      if (fixture.tokenCalls == 1) {
+        if (++initialRequests == 2) initialRequestsArrived.complete();
+        await initialRequestsArrived.future;
+        return response({}, status: 401);
+      }
+      return response(searchData());
     };
     final provider = fixture.provider();
     addTearDown(provider.close);
     await Future.wait([provider.search('first'), provider.search('second')]);
+    expect(initialRequests, 2);
     expect(fixture.tokenCalls, 2);
     expect(fixture.queryCalls, 4);
   });
