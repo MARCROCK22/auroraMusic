@@ -298,6 +298,8 @@ class MusicAudio extends AudioBackend {
         if (_disposed || generation != _generation) return;
         if (bytes.isEmpty) {
           if (remainder.isNotEmpty) throw StateError('Audio PCM incompleto');
+          await _resolved?.validateCompletion?.call();
+          if (_disposed || generation != _generation) return;
           _engine.setDataIsEnded(sound);
           _ended = true;
           return;

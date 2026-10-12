@@ -110,8 +110,12 @@ class ResolvedAudio {
     required this.input,
     this.headers = const {},
     this.duration = Duration.zero,
+    this.validateCompletion,
   });
   final String input;
   final Map<String, String> headers;
+
+  /// Progressive input must finish validation before a decoder EOF is trusted.
+  final Future<void> Function()? validateCompletion;
   final Duration duration;
 }

@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/models.dart';
 import '../core/source_backend.dart';
+import 'progressive_audio_relay.dart';
 
 class YtDlpSource extends SourceBackend {
   YtDlpSource(
@@ -35,6 +36,21 @@ class YtDlpSource extends SourceBackend {
   int _activeOperations = 0;
   bool _clearingCache = false;
   bool _changingCookie = false;
+  bool _experimentalProgressive = false;
+  bool _disposed = false;
+  ProgressiveAudioRelay? _progressive;
+  Future<File>? _progressiveDownload;
+  String? _progressiveVideoId;
+
+  @override
+  bool get supportsExperimentalProgressivePlayback =>
+      Platform.isWindows || _isAndroid;
+
+  @override
+  void setExperimentalProgressivePlayback(bool enabled) {
+    _experimentalProgressive = enabled;
+  }
+
   @override
   String? get cookieFile => _preferences.getString('cookieFile');
 
@@ -59,6 +75,7 @@ class YtDlpSource extends SourceBackend {
   }
 
   Future<T> _operation<T>(Future<T> Function() execute) async {
+    if (_disposed) throw StateError('La fuente de audio esta cerrada.');
     if (_changingCookie) {
       throw StateError('Espera a que termine el cambio de sesión.');
     }
@@ -197,6 +214,8 @@ class YtDlpSource extends SourceBackend {
       'resolve',
       'download',
       'cacheAudio',
+      'progressiveInfo',
+      'progressiveAudio',
     }.contains(method)) {
       return _operation(() => _invokeNative(method, arguments));
     }
@@ -215,6 +234,8 @@ class YtDlpSource extends SourceBackend {
           'resolve',
           'download',
           'cacheAudio',
+          'progressiveInfo',
+          'progressiveAudio',
         }.contains(method)) {
       arguments = {
         ...arguments,
@@ -446,6 +467,8 @@ class YtDlpSource extends SourceBackend {
       _listing(validateYouTube(url.toString()).toString(), 200, 'playlist');
   @override
   Future<ResolvedAudio> resolve(Track track) async {
+    final progressiveEnabled = _experimentalProgressive;
+    await _closeProgressive();
     if (track.isLocal && await File(track.localPath!).exists()) {
       return ResolvedAudio(input: track.localPath!, duration: track.duration);
     }
@@ -455,6 +478,10 @@ class YtDlpSource extends SourceBackend {
       );
     }
     final target = validateYouTube(track.pageUrl ?? '').toString();
+    if (progressiveEnabled && supportsExperimentalProgressivePlayback) {
+      final result = await _resolveProgressiveAudio(track, target);
+      if (result != null) return result;
+    }
     if (Platform.isWindows && !_isAndroid) {
       return _resolveWindowsAudio(track, target);
     }
@@ -758,7 +785,288 @@ class YtDlpSource extends SourceBackend {
           (expected.inMilliseconds * 0.02).clamp(5000, 10000);
 
   void _throwIfResolveCancelled(String jobId) {
-    if (_cancelled.remove(jobId)) throw StateError('Descarga cancelada.');
+    if (_disposed || _cancelled.contains(jobId)) {
+      throw StateError('Descarga cancelada.');
+    }
+  }
+
+  Future<void> _closeProgressive() async {
+    final relay = _progressive;
+    final download = _progressiveDownload;
+    _progressive = null;
+    _progressiveDownload = null;
+    _progressiveVideoId = null;
+    await relay?.dispose();
+    await download?.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace stack) {},
+    );
+  }
+
+  Future<ResolvedAudio?> _resolveProgressiveAudio(
+    Track track,
+    String target,
+  ) => _operation(() async {
+    final uri = Uri.parse(target);
+    final targetId = uri.host == 'youtu.be'
+        ? (uri.pathSegments.isEmpty ? null : uri.pathSegments.first)
+        : uri.queryParameters['v'];
+    final videoId = track.id.startsWith('yt:')
+        ? track.id.substring(3)
+        : targetId ?? '';
+    if (!_videoIdPattern.hasMatch(videoId) || targetId != videoId) {
+      throw ArgumentError(
+        'El identificador del video no coincide con el enlace.',
+      );
+    }
+    final jobId =
+        'progressive-$videoId-${DateTime.now().microsecondsSinceEpoch}';
+    _resolveJobs.putIfAbsent(videoId, () => <String>{}).add(jobId);
+    _startingJobs.add(jobId);
+    var backgroundOwnsJob = false;
+    try {
+      final cache = await _audioCacheDirectory();
+      final cached = File(
+        p.join(await cache.resolveSymbolicLinks(), '$videoId.audio'),
+      );
+      final cachedDuration = await _cachedAudioDuration(
+        cached,
+        expectedDuration: track.duration,
+      );
+      _throwIfResolveCancelled(jobId);
+      if (cachedDuration != null) {
+        await cached.setLastModified(DateTime.now());
+        return ResolvedAudio(input: cached.path, duration: cachedDuration);
+      }
+      final cachedType = await FileSystemEntity.type(
+        cached.path,
+        followLinks: false,
+      );
+      if (cachedType != FileSystemEntityType.notFound) {
+        if (cachedType != FileSystemEntityType.file) {
+          throw StateError('El archivo de audio en cache no es seguro.');
+        }
+        await cached.delete();
+      }
+      const selection = 'bestaudio[ext=webm][protocol=https]/bestaudio/best';
+      final raw = _isAndroid
+          ? await _native('progressiveInfo', {'target': target, 'jobId': jobId})
+          : await _run([
+              '--no-playlist',
+              '-f',
+              selection,
+              '--dump-single-json',
+              '--',
+              target,
+            ], jobId: jobId);
+      _throwIfResolveCancelled(jobId);
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      final format = data['format_id']?.toString() ?? '';
+      final seconds = (data['duration'] as num?)?.toDouble() ?? 0;
+      // Moov-at-end MP4, fragmented DASH/HLS and unknown duration retain the
+      // existing validated full-download path. yt-dlp owns every remote request.
+      if (data['ext'] != 'webm' ||
+          data['protocol'] != 'https' ||
+          !RegExp(r'^[A-Za-z0-9_-]{1,80}$').hasMatch(format) ||
+          !seconds.isFinite ||
+          seconds <= 0) {
+        return null;
+      }
+      final expected = Duration(milliseconds: (seconds * 1000).round());
+      if (!_durationMatches(expected, track.duration)) {
+        throw StateError('La duracion del audio no coincide con el video.');
+      }
+      final reportedSize = data['filesize'];
+      final total =
+          reportedSize is num &&
+              reportedSize.isFinite &&
+              reportedSize > 0 &&
+              reportedSize == reportedSize.roundToDouble()
+          ? reportedSize.toInt()
+          : null;
+      if (total != null && total > _maxAudioFileBytes) {
+        throw StateError('El audio supera el limite de 512 MiB.');
+      }
+      // Reserve disk space before growing the private input. Unknown-size audio
+      // reserves the full cap; publication never duplicates the staged file.
+      await _pruneAudioCache(cache, reserveBytes: total ?? _maxAudioFileBytes);
+      _throwIfResolveCancelled(jobId);
+      final staging = await cache.createTemp('.aurora-progressive-$videoId-');
+      final growing = File(p.join(staging.path, 'audio.webm'));
+      ProgressiveAudioRelay? session;
+      final completed = _operation(() async {
+        try {
+          _throwIfResolveCancelled(jobId);
+          if (_isAndroid) {
+            await _native('progressiveAudio', {
+              'target': target,
+              'videoId': videoId,
+              'directory': staging.path,
+              'jobId': jobId,
+              'formatId': format,
+            });
+          } else {
+            await _run([
+              '--no-playlist',
+              '-f',
+              '$format[ext=webm][protocol=https]',
+              '--no-part',
+              '--no-continue',
+              '--fixup',
+              'never',
+              '--max-filesize',
+              '512M',
+              '-o',
+              growing.path,
+              '--',
+              target,
+            ], jobId: jobId);
+          }
+          _throwIfResolveCancelled(jobId);
+          if (await FileSystemEntity.type(growing.path, followLinks: false) !=
+              FileSystemEntityType.file) {
+            throw StateError(
+              'La descarga no produjo un archivo de audio seguro.',
+            );
+          }
+          final length = await growing.length();
+          if (length <= 0 ||
+              length > _maxAudioFileBytes ||
+              (total != null && length != total)) {
+            throw StateError('La descarga de audio esta incompleta.');
+          }
+          final duration = await _audioDuration(growing);
+          if (duration == null ||
+              !_durationMatches(duration, expected) ||
+              !_durationMatches(duration, track.duration)) {
+            throw StateError(
+              'La duracion del audio descargado no coincide con el video.',
+            );
+          }
+          await _validateProgressiveDecode(growing, jobId);
+          _throwIfResolveCancelled(jobId);
+          final relay = session;
+          if (relay == null) {
+            await growing.rename(cached.path);
+          } else {
+            await relay.publishTo(cached);
+          }
+          await _pruneAudioCache(cache, protect: cached);
+          return cached;
+        } finally {
+          if (await staging.exists()) await staging.delete(recursive: true);
+          _finishResolveJob(videoId, jobId);
+        }
+      });
+      backgroundOwnsJob = true;
+      ProgressiveAudioRelay relay;
+      try {
+        relay = await ProgressiveAudioRelay.start(
+          file: growing,
+          completed: completed,
+          expectedBytes: total,
+          cancel: () => _cancelProgressiveJob(jobId),
+        );
+      } catch (_) {
+        await _cancelProgressiveJob(jobId);
+        await completed.catchError((Object _) => cached);
+        rethrow;
+      }
+      _progressive = relay;
+      _progressiveDownload = completed;
+      session = relay;
+      _progressiveVideoId = videoId;
+      try {
+        await relay.waitUntilReady();
+        _throwIfResolveCancelled(jobId);
+        return ResolvedAudio(
+          input: relay.uri.toString(),
+          duration: expected,
+          validateCompletion: () async {
+            await relay.settled;
+            if (!relay.isComplete) {
+              throw StateError(
+                'La descarga de audio fallo. Vuelve a intentar.',
+              );
+            }
+          },
+        );
+      } catch (_) {
+        await _closeProgressive();
+        rethrow;
+      }
+    } finally {
+      if (!backgroundOwnsJob) _finishResolveJob(videoId, jobId);
+    }
+  });
+
+  void _finishResolveJob(String videoId, String jobId) {
+    _startingJobs.remove(jobId);
+    final jobs = _resolveJobs[videoId];
+    jobs?.remove(jobId);
+    if (jobs?.isEmpty ?? false) _resolveJobs.remove(videoId);
+    _cancelled.remove(jobId);
+  }
+
+  Future<void> _cancelProgressiveJob(String jobId) async {
+    if (!_startingJobs.contains(jobId)) return;
+    _cancelled.add(jobId);
+    if (_isAndroid) {
+      await _channel.invokeMethod<void>('cancel', {'jobId': jobId});
+    } else {
+      final process = _jobs[jobId];
+      if (process != null) await _killTree(process);
+    }
+  }
+
+  Future<void> _validateProgressiveDecode(File file, String jobId) async {
+    _throwIfResolveCancelled(jobId);
+    if (_audioDurationOverride != null) return;
+    if (_isAndroid) {
+      await _native('validateProgressiveAudio', {
+        'path': file.path,
+        'jobId': jobId,
+      });
+      return;
+    }
+    final process = await Process.start(ffmpegExecutable!, [
+      '-nostdin',
+      '-v',
+      'error',
+      '-xerror',
+      '-err_detect',
+      'explode',
+      '-i',
+      file.path,
+      '-map',
+      '0:a:0',
+      '-vn',
+      '-f',
+      'null',
+      '-',
+    ], runInShell: false);
+    _jobs[jobId] = process;
+    final drains = Future.wait([
+      process.stdout.drain<void>(),
+      process.stderr.drain<void>(),
+    ]);
+    try {
+      final code = await process.exitCode.timeout(
+        const Duration(minutes: 2),
+        onTimeout: () async {
+          await _killTree(process);
+          return -1;
+        },
+      );
+      await drains;
+      if (code != 0) {
+        throw StateError(
+          'El audio descargado no se puede decodificar completamente.',
+        );
+      }
+    } finally {
+      _jobs.remove(jobId);
+    }
   }
 
   Future<Duration?> _cachedAudioDuration(
@@ -823,9 +1131,12 @@ class YtDlpSource extends SourceBackend {
     try {
       final cache = await _audioCacheDirectory();
       final cachePath = await cache.resolveSymbolicLinks();
-      final protected = protectedPath == null
+      final effectivePath = protectedPath == _progressive?.uri.toString()
+          ? _progressive?.file.path
+          : protectedPath;
+      final protected = effectivePath == null
           ? null
-          : p.normalize(File(protectedPath).absolute.path);
+          : p.normalize(File(effectivePath).absolute.path);
       var bytesRemoved = 0;
       await for (final entity in cache.list(followLinks: false)) {
         if (entity is! File ||
@@ -891,7 +1202,11 @@ class YtDlpSource extends SourceBackend {
     return Duration(milliseconds: (seconds * 1000).round());
   }
 
-  Future<void> _pruneAudioCache(Directory cache, {File? protect}) async {
+  Future<void> _pruneAudioCache(
+    Directory cache, {
+    File? protect,
+    int reserveBytes = 0,
+  }) async {
     final files = <File>[];
     await for (final entity in cache.list(followLinks: false)) {
       if (entity is File &&
@@ -909,8 +1224,12 @@ class YtDlpSource extends SourceBackend {
       total += await file.length();
     }
     for (final file in files) {
-      if (total <= _maxCachedAudioBytes) break;
+      if (total <= _maxCachedAudioBytes - reserveBytes) break;
       if (protect != null && p.equals(file.path, protect.path)) continue;
+      if (_progressive != null &&
+          p.equals(file.path, _progressive!.file.path)) {
+        continue;
+      }
       final size = await file.length();
       try {
         await file.delete();
@@ -918,6 +1237,9 @@ class YtDlpSource extends SourceBackend {
       } on FileSystemException {
         // An active player may still have this cached file open.
       }
+    }
+    if (reserveBytes > 0 && total > _maxCachedAudioBytes - reserveBytes) {
+      throw StateError('No hay espacio disponible en la cache de audio.');
     }
   }
 
@@ -982,6 +1304,7 @@ class YtDlpSource extends SourceBackend {
 
   @override
   Future<void> cancel(String jobId) async {
+    if (jobId == 'resolve:$_progressiveVideoId') await _closeProgressive();
     if (_isAndroid) {
       if (jobId.startsWith('resolve:')) {
         final videoId = jobId.substring('resolve:'.length);
@@ -1025,6 +1348,18 @@ class YtDlpSource extends SourceBackend {
 
   @override
   void dispose() {
+    _disposed = true;
+    unawaited(_closeProgressive().catchError((Object _) {}));
+    if (_isAndroid) {
+      for (final jobId in _startingJobs.toList()) {
+        _cancelled.add(jobId);
+        unawaited(
+          _channel
+              .invokeMethod<void>('cancel', {'jobId': jobId})
+              .catchError((Object _) {}),
+        );
+      }
+    }
     for (final process in _jobs.values) {
       unawaited(_killTree(process));
     }
