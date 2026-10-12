@@ -8,7 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_controller.dart';
 import 'audio/music_audio.dart';
-import 'library_database.dart';
+import 'library/library_database.dart';
 import 'sources/yt_dlp_source.dart';
 import 'ui/aurora_shell.dart';
 

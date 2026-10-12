@@ -6,7 +6,7 @@ import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
-import 'core/models.dart';
+import '../core/models.dart';
 
 class LibraryDatabase extends GeneratedDatabase {
   LibraryDatabase(super.executor);

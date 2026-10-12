@@ -5,7 +5,7 @@ import 'package:aurora_music/app_controller.dart';
 import 'package:aurora_music/core/audio_backend.dart';
 import 'package:aurora_music/core/models.dart';
 import 'package:aurora_music/core/source_backend.dart';
-import 'package:aurora_music/library_database.dart';
+import 'package:aurora_music/library/library_database.dart';
 import 'package:drift/native.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';

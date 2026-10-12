@@ -15,8 +15,8 @@ import 'core/audio_backend.dart';
 import 'core/models.dart';
 import 'core/source_backend.dart';
 import 'import/spotify_import.dart';
-import 'library_database.dart';
-import 'recommendations.dart';
+import 'library/library_database.dart';
+import 'dj/recommendations.dart';
 
 final controllerProvider = ChangeNotifierProvider<AppController>((ref) {
   throw StateError('Override controllerProvider at application startup.');

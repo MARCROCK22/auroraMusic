@@ -1,5 +1,5 @@
 import 'package:aurora_music/core/models.dart';
-import 'package:aurora_music/recommendations.dart';
+import 'package:aurora_music/dj/recommendations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Track track(String id, String artist) =>

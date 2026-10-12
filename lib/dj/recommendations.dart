@@ -1,4 +1,4 @@
-import 'core/models.dart';
+import '../core/models.dart';
 
 class TrackRecommendation {
   const TrackRecommendation({required this.track, required this.reason});

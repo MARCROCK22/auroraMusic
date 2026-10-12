@@ -1,5 +1,5 @@
 import 'package:aurora_music/core/models.dart';
-import 'package:aurora_music/library_database.dart';
+import 'package:aurora_music/library/library_database.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
