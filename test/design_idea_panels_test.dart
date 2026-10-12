@@ -1,11 +1,15 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:aurora_music/core/models.dart';
 import 'package:aurora_music/library/local_file_metadata.dart';
+import 'package:aurora_music/main.dart';
 import 'package:aurora_music/lyrics/lyrics_service.dart';
 import 'package:aurora_music/ui/lyrics_panel.dart';
 import 'package:aurora_music/ui/studio/downloads_studio_page.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fakes.dart';
@@ -32,6 +36,17 @@ class FixtureLyrics extends LyricsService {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(() async {
+    for (final font in {
+      'Newsreader': 'assets/fonts/newsreader/Newsreader-Variable.ttf',
+      'Plus Jakarta Sans':
+          'assets/fonts/plus_jakarta_sans/PlusJakartaSans-Variable.ttf',
+      'MaterialIcons': 'fonts/MaterialIcons-Regular.otf',
+    }.entries) {
+      await (FontLoader(font.key)..addFont(rootBundle.load(font.value))).load();
+    }
+  });
   test('file sizes excludes missing paths and directories', () async {
     final dir = await Directory.systemTemp.createTemp('aurora_sizes_');
     try {
@@ -138,4 +153,84 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets(
+    'studio panels review captures use native fonts and offline fixtures',
+    (tester) async {
+      final c = (await tester.runAsync(
+        () => createTestController(tracks: [track]),
+      ))!;
+      addTearDown(() => closeTestController(c));
+      final illustrated = track.copyWith(
+        artworkUrl: 'asset:assets/design_idea/letras_din_micas_aurora_01.png',
+      );
+      c.queue = [illustrated];
+      c.queueIndex = 0;
+      await tester.runAsync(() => c.playQueueAt(0));
+      c.downloads.add(
+        DownloadJob(
+          id: 'capture-active',
+          track: illustrated,
+          status: DownloadStatus.downloading,
+          progress: .68,
+        ),
+      );
+      c.downloads.add(
+        DownloadJob(
+          id: 'capture-completed',
+          track: illustrated,
+          status: DownloadStatus.completed,
+          localPath: '${c.supportDirectory.path}/fixture.mp3',
+          progress: 1,
+        ),
+      );
+      await tester.runAsync(
+        () => File(
+          c.downloads.last.localPath!,
+        ).writeAsBytes(List.filled(8192, 0)),
+      );
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      for (final page in ['downloads', 'lyrics']) {
+        for (final size in [const Size(1600, 1152), const Size(320, 800)]) {
+          await tester.binding.setSurfaceSize(size);
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: auroraTheme(Brightness.dark, const Color(0xffea6b29)),
+              builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                  textScaler: TextScaler.linear(size.width == 320 ? 2 : 1),
+                ),
+                child: child!,
+              ),
+              home: Scaffold(
+                body: RepaintBoundary(
+                  key: const ValueKey('studio-review'),
+                  child: page == 'downloads'
+                      ? DownloadsStudioPage(controller: c)
+                      : LyricsPanel(controller: c, service: FixtureLyrics()),
+                ),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          await tester.runAsync(() async {
+            final boundary = tester.renderObject<RenderRepaintBoundary>(
+              find.byKey(const ValueKey('studio-review')),
+            );
+            final image = await boundary.toImage();
+            final bytes = await image.toByteData(
+              format: ui.ImageByteFormat.png,
+            );
+            await Directory('build/ui-review').create(recursive: true);
+            await File(
+              'build/ui-review/studio-$page-${size.width.toInt()}.png',
+            ).writeAsBytes(bytes!.buffer.asUint8List());
+            image.dispose();
+          });
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+        }
+      }
+    },
+  );
 }
