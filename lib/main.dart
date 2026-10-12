@@ -189,7 +189,7 @@ ThemeData auroraTheme(Brightness brightness, Color accent) {
         .withLightness((hsl.lightness + (dark ? .01 : -.01)).clamp(0.0, 1.0))
         .toColor();
   }
-  final scheme = ColorScheme.fromSeed(seedColor: accent, brightness: brightness)
+  var scheme = ColorScheme.fromSeed(seedColor: accent, brightness: brightness)
       .copyWith(
         primary: primary,
         onPrimary: onPrimary,
@@ -233,6 +233,37 @@ ThemeData auroraTheme(Brightness brightness, Color accent) {
         ),
         onSecondaryContainer: dark ? ivory : const Color(0xff302820),
       );
+  if (dark) {
+    // Values from the supplied Atelier Sonoro HTML, with artwork accent retained.
+    scheme = scheme.copyWith(
+      primary: accent.toARGB32() == 0xffe86927
+          ? const Color(0xffffb596)
+          : primary,
+      onPrimary: accent.toARGB32() == 0xffe86927
+          ? const Color(0xff581e00)
+          : onPrimary,
+      primaryContainer: accent.toARGB32() == 0xffe86927
+          ? const Color(0xffea6b29)
+          : primary,
+      onPrimaryContainer: accent.toARGB32() == 0xffe86927
+          ? const Color(0xff4d1900)
+          : onPrimary,
+      surface: const Color(0xff151312),
+      surfaceDim: const Color(0xff151312),
+      surfaceBright: const Color(0xff3c3937),
+      surfaceContainerLowest: const Color(0xff100e0d),
+      surfaceContainerLow: const Color(0xff1d1b1a),
+      surfaceContainer: const Color(0xff211f1e),
+      surfaceContainerHigh: const Color(0xff2c2928),
+      surfaceContainerHighest: const Color(0xff373433),
+      onSurface: const Color(0xffe8e1df),
+      onSurfaceVariant: const Color(0xffdfc0b3),
+      outline: const Color(0xffa78b7f),
+      outlineVariant: const Color(0xff584239),
+      secondary: const Color(0xffd0c5b8),
+      tertiary: const Color(0xffd0c4bd),
+    );
+  }
   const bodyFont = 'Plus Jakarta Sans';
   const headlineFont = 'Newsreader';
   final textTheme = (dark ? ThemeData.dark() : ThemeData.light()).textTheme
@@ -242,10 +273,17 @@ ThemeData auroraTheme(Brightness brightness, Color accent) {
         displayColor: scheme.onSurface,
       )
       .copyWith(
+        displayLarge: TextStyle(
+          fontFamily: headlineFont,
+          fontSize: 56,
+          height: 64 / 56,
+          letterSpacing: -1.12,
+          color: scheme.onSurface,
+        ),
         headlineLarge: TextStyle(
           fontFamily: headlineFont,
-          fontSize: 32,
-          height: 1.15,
+          fontSize: 36,
+          height: 44 / 36,
           color: scheme.onSurface,
         ),
         headlineMedium: TextStyle(
@@ -278,7 +316,9 @@ ThemeData auroraTheme(Brightness brightness, Color accent) {
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         minimumSize: const Size(0, 44),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        backgroundColor: scheme.primaryContainer,
+        foregroundColor: scheme.onPrimaryContainer,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
