@@ -286,6 +286,28 @@ void main() {
     },
   );
 
+  test(
+    'late validation failure rejects clean EOF despite full bytes and matching duration',
+    () async {
+      source.setExperimentalProgressivePlayback(true);
+      final resolved = await source.resolve(track);
+      download.complete();
+      await validationStarted.future.timeout(const Duration(seconds: 1));
+      expect(await staging!.length(), metadata['filesize']);
+      expect(resolved.duration.inMilliseconds, durationMs);
+      var acceptedEof = false;
+      final eof = resolved.validateCompletion!().then((_) {
+        acceptedEof = true;
+      });
+      final rejected = expectLater(eof, throwsStateError);
+      validation.completeError(PlatformException(code: 'LATE_DECODE_FAILURE'));
+      await rejected.timeout(const Duration(seconds: 1));
+      expect(acceptedEof, isFalse);
+      expect(await source.playbackCacheInfo(), (bytes: 0, files: 0));
+      await waitFor(() => !staging!.parent.existsSync());
+    },
+  );
+
   test('oversize metadata is rejected before a downloader starts', () async {
     source.setExperimentalProgressivePlayback(true);
     metadata['filesize'] = 512 * 1024 * 1024 + 1;
