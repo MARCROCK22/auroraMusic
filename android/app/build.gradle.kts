@@ -22,6 +22,35 @@ val selectedAbis = (project.findProperty("target-platform") as? String)
 val splitAbis = project.findProperty("split-per-abi")?.toString() == "true"
 val rebuiltFfmpeg = rootProject.file("../tools/android/ffmpeg-0.18.1-webp16kb.aar")
 val rebuiltJni = rootProject.file("../build/rebuilt_ffmpeg_jni/${selectedAbis.sorted().joinToString("_")}")
+// CI credentials remain in the process environment; preserve local signing identity.
+val signingEnvironment = mapOf(
+    "storeFile" to "ANDROID_KEYSTORE_PATH",
+    "storePassword" to "ANDROID_STORE_PASSWORD",
+    "keyAlias" to "ANDROID_KEY_ALIAS",
+    "keyPassword" to "ANDROID_KEY_PASSWORD",
+)
+val usingSigningEnvironment = signingEnvironment.values.any { System.getenv(it) != null }
+val releaseKeys = Properties().apply {
+    if (usingSigningEnvironment) {
+        signingEnvironment.forEach { (property, variable) ->
+            System.getenv(variable)?.let { setProperty(property, it) }
+        }
+    } else {
+        val keyFile = rootProject.file("key.properties")
+        if (keyFile.exists()) keyFile.inputStream().use { load(it) }
+    }
+}
+val validReleaseSigning = signingEnvironment.keys.all {
+    !releaseKeys.getProperty(it).isNullOrBlank()
+} && rootProject.file(releaseKeys.getProperty("storeFile")).isFile
+
+gradle.taskGraph.whenReady {
+    if (allTasks.any { it.project == project && it.name.contains("Release", ignoreCase = true) }) {
+        check(validReleaseSigning) {
+            "Release signing is required. Configure all four Android signing secrets in CI, or a valid local android/key.properties."
+        }
+    }
+}
 if (rebuiltFfmpeg.exists()) {
     val lockFile = rootProject.file("../tools/android/ffmpeg-webp16kb.lock.json")
     check(lockFile.exists()) { "Missing FFmpeg provenance lock. Run scripts/rebuild_android_webp.ps1." }
@@ -94,15 +123,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            // An unsigned release is intentional until a private key is supplied.
-            val keyFile = rootProject.file("key.properties")
-            if (keyFile.exists()) {
-                val keys = Properties().apply { keyFile.inputStream().use { load(it) } }
+            if (validReleaseSigning) {
                 signingConfig = signingConfigs.create("privateRelease") {
-                    storeFile = rootProject.file(keys.getProperty("storeFile"))
-                    storePassword = keys.getProperty("storePassword")
-                    keyAlias = keys.getProperty("keyAlias")
-                    keyPassword = keys.getProperty("keyPassword")
+                    storeFile = rootProject.file(releaseKeys.getProperty("storeFile"))
+                    storePassword = releaseKeys.getProperty("storePassword")
+                    keyAlias = releaseKeys.getProperty("keyAlias")
+                    keyPassword = releaseKeys.getProperty("keyPassword")
                 }
             }
         }
