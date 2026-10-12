@@ -115,6 +115,10 @@ class AppController extends ChangeNotifier {
   DateTime _lastSnapshot = DateTime.fromMillisecondsSinceEpoch(0);
   bool _recovering = false;
   bool _playIntent = false;
+  bool _jamPlaybackActive = false;
+
+  /// Jam owns the audio backend temporarily, without persisting its queue.
+  bool get jamPlaybackActive => _jamPlaybackActive;
   bool _usingRemote = false;
   String? _recoveryTrackId;
   String? _recoverableRemoteTrackId;
@@ -270,6 +274,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> startPersonalDj({bool includeDiscovery = false}) async {
+    if (_jamPlaybackActive) return;
     if (personalDjActive) return;
     final preserveCurrent =
         currentTrack != null &&
@@ -576,6 +581,10 @@ class AppController extends ChangeNotifier {
   }
 
   void _audioChanged() {
+    if (_jamPlaybackActive) {
+      _notify();
+      return;
+    }
     final audioError = audio.lastError;
     if (audioError != null && audioError != error) error = audioError;
     if (_playIntent &&
@@ -671,6 +680,7 @@ class AppController extends ChangeNotifier {
       search(_searchQuery, limit: (_searchLimit + 20).clamp(1, 50));
 
   Future<void> playTrack(Track track, {List<Track>? context}) async {
+    if (_jamPlaybackActive) return;
     if (_personalDjActive) stopPersonalDj();
     await _playTrack(track, context: context);
   }
@@ -706,6 +716,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> playQueueAt(int index) async {
+    if (_jamPlaybackActive) return;
     if (index < 0 || index >= queue.length) return;
     stopPersonalDj();
     _playIntent = true;
@@ -720,6 +731,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _playCurrent({bool fromRecovery = false}) async {
+    if (_jamPlaybackActive) return;
     if (!fromRecovery) _cancelRecovery();
     final track = currentTrack;
     if (track == null) return;
@@ -849,7 +861,41 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  /// Suspend personal playback before Jam starts using [audio].
+  Future<void> beginJamPlayback() async {
+    if (_jamPlaybackActive) return;
+    if (_loadedTrackId != null) _resumePosition = audio.position;
+    _jamPlaybackActive = true;
+    _playIntent = false;
+    _cancelRecovery();
+    _cancelPendingResolution();
+    ++_playGeneration;
+    busy = false;
+    stopPersonalDj();
+    await audio.pause();
+    _controls?.updateTrack(null);
+    _notify();
+  }
+
+  /// Release Jam audio. The Jam bridge restores its captured personal session.
+  Future<void> endJamPlayback() async {
+    if (!_jamPlaybackActive) return;
+    try {
+      await audio.stop();
+    } finally {
+      _loadedTrackId = null;
+      _loadedAudioInput = null;
+      _recoverableRemoteTrackId = null;
+      _usingRemote = false;
+      _playIntent = false;
+      _jamPlaybackActive = false;
+      _controls?.updateTrack(currentTrack);
+      _notify();
+    }
+  }
+
   Future<void> resumePlayback() async {
+    if (_jamPlaybackActive) return;
     if (currentTrack == null) return;
     _playIntent = true;
     if (_loadedTrackId != currentTrack!.id || audio.lastError != null) {
@@ -936,6 +982,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> togglePlayback() async {
+    if (_jamPlaybackActive) return;
     if (_playIntent && (audio.isPlaying || busy || _recovering)) {
       await pausePlayback();
       await _saveQueue();
@@ -945,6 +992,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> pausePlayback() async {
+    if (_jamPlaybackActive) return;
     _playIntent = false;
     _cancelRecovery();
     _cancelPendingResolution();
@@ -955,6 +1003,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> stopPlayback() async {
+    if (_jamPlaybackActive) return;
     stopPersonalDj();
     ++_playGeneration;
     _playIntent = false;
@@ -972,6 +1021,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> seek(Duration position) async {
+    if (_jamPlaybackActive) return;
     if (_loadedTrackId == null) return;
     try {
       await audio.seek(position);
@@ -982,6 +1032,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _onCompleted() async {
+    if (_jamPlaybackActive) return;
     if (!_playIntent || _disposed) return;
     final duration = audio.duration;
     if (duration > Duration.zero &&
@@ -1011,6 +1062,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> next() async {
+    if (_jamPlaybackActive) return;
     if (queue.isEmpty) return;
     _playIntent = true;
     if (shuffle && queue.length > 1) {
@@ -1047,6 +1099,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> previous() async {
+    if (_jamPlaybackActive) return;
     if (audio.position > const Duration(seconds: 3)) {
       await seek(Duration.zero);
       return;
@@ -1063,6 +1116,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _saveQueue() async {
+    if (_jamPlaybackActive) return;
     await preferences.setStringList('queue', queue.map((t) => t.id).toList());
     await preferences.setInt('queueIndex', queueIndex);
     await preferences.setInt(
