@@ -311,4 +311,98 @@ void main() {
       }
     },
   );
+
+  testWidgets(
+    'real artist and album groups keep namesakes separate and play their own context at enlarged narrow size',
+    (tester) async {
+      const artistA = 'Artista A con un nombre largo';
+      const artistB = 'Artista B con un nombre largo';
+      const album = 'Un álbum homónimo de la biblioteca';
+      controller.tracks
+        ..clear()
+        ..addAll(const [
+          Track(
+            id: 'a-one',
+            title: 'Primera de A',
+            artist: artistA,
+            album: album,
+            pageUrl: 'https://youtu.be/a-one',
+          ),
+          Track(
+            id: 'a-two',
+            title: 'Segunda de A',
+            artist: artistA,
+            album: album,
+            pageUrl: 'https://youtu.be/a-two',
+          ),
+          Track(
+            id: 'b-one',
+            title: 'Primera de B',
+            artist: artistB,
+            album: album,
+            pageUrl: 'https://youtu.be/b-one',
+          ),
+          Track(
+            id: 'b-two',
+            title: 'Segunda de B',
+            artist: artistB,
+            album: album,
+            pageUrl: 'https://youtu.be/b-two',
+          ),
+          Track(
+            id: 'missing',
+            title: 'Sin metadatos',
+            artist: ' ',
+            pageUrl: 'https://youtu.be/missing',
+          ),
+        ]);
+      controller.playlists.clear();
+      await mount(
+        tester,
+        HomeMusicPage(
+          controller: controller,
+          onSearch: () {},
+          onDownloads: () {},
+          onLikes: () {},
+          onOpenPlaylist: (_) {},
+        ),
+        scale: 2,
+      );
+      final outer = find.byType(Scrollable).first;
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('home-artists')),
+        300,
+        scrollable: outer,
+      );
+      await tester.pumpAndSettle();
+      final artistsRow = tester.widget<HorizontalMusicRow>(
+        find.byKey(const ValueKey('home-artists')),
+      );
+      expect(artistsRow.itemCount, 2);
+      await tester.ensureVisible(find.byTooltip('Escuchar artista $artistB'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Escuchar artista $artistB'));
+      await tester.pumpAndSettle();
+      expect(controller.queue.map((t) => t.id), ['b-one', 'b-two']);
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('home-albums')),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      final albumsRow = tester.widget<HorizontalMusicRow>(
+        find.byKey(const ValueKey('home-albums')),
+      );
+      expect(albumsRow.itemCount, 2);
+      await tester.ensureVisible(
+        find.byTooltip('Escuchar álbum $album de $artistA'),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Escuchar álbum $album de $artistA'));
+      await tester.pumpAndSettle();
+      expect(controller.queue.map((t) => t.id), ['a-one', 'a-two']);
+      expect(controller.currentTrack?.id, 'a-one');
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

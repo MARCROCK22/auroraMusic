@@ -34,6 +34,21 @@ class HomeMusicPage extends StatelessWidget {
           c.playlists.any((p) => p.trackIds.any(libraryIds.contains)) ||
           c.recentTracks.isNotEmpty;
       final text = MediaQuery.textScalerOf(context);
+      final artists = <String, List<Track>>{};
+      final albums = <(String, String), List<Track>>{};
+      for (final track in c.tracks) {
+        final artist = track.artist.trim();
+        if (artist.isEmpty) continue;
+        (artists[artist.toLowerCase()] ??= []).add(track);
+        final album = track.album?.trim();
+        if (album != null && album.isNotEmpty) {
+          (albums[(artist.toLowerCase(), album.toLowerCase())] ??= []).add(
+            track,
+          );
+        }
+      }
+      final artistGroups = artists.values.toList();
+      final albumGroups = albums.values.toList();
       return ListView(
         padding: const EdgeInsets.all(24),
         children: [
@@ -156,6 +171,47 @@ class HomeMusicPage extends StatelessWidget {
             ),
             const SizedBox(height: 28),
           ],
+          if (artistGroups.length > 1) ...[
+            HorizontalMusicRow(
+              key: const ValueKey('home-artists'),
+              title: 'Tus artistas',
+              itemCount: artistGroups.length,
+              itemHeight: 228 + text.scale(120),
+              itemBuilder: (context, index) {
+                final tracks = artistGroups[index];
+                final artist = tracks.first.artist.trim();
+                return _GroupCard(
+                  title: artist,
+                  tracks: tracks,
+                  artist: true,
+                  tooltip: 'Escuchar artista $artist',
+                  onPlay: () => _play(context, tracks.first, tracks),
+                );
+              },
+            ),
+            const SizedBox(height: 28),
+          ],
+          if (albumGroups.length > 1) ...[
+            HorizontalMusicRow(
+              key: const ValueKey('home-albums'),
+              title: 'Álbumes de tu biblioteca',
+              itemCount: albumGroups.length,
+              itemHeight: 228 + text.scale(136),
+              itemBuilder: (context, index) {
+                final tracks = albumGroups[index];
+                final album = tracks.first.album!.trim();
+                final artist = tracks.first.artist.trim();
+                return _GroupCard(
+                  title: album,
+                  subtitle: artist,
+                  tracks: tracks,
+                  tooltip: 'Escuchar álbum $album de $artist',
+                  onPlay: () => _play(context, tracks.first, tracks),
+                );
+              },
+            ),
+            const SizedBox(height: 28),
+          ],
           if (c.tracks.isNotEmpty)
             HorizontalMusicRow(
               key: const ValueKey('home-library'),
@@ -194,6 +250,84 @@ class HomeMusicPage extends StatelessWidget {
               controller.matchSpotifyTrack(track.id, match, play: play),
         )
       : controller.playTrack(track, context: tracks);
+}
+
+class _GroupCard extends StatelessWidget {
+  const _GroupCard({
+    required this.title,
+    required this.tracks,
+    required this.tooltip,
+    required this.onPlay,
+    this.subtitle,
+    this.artist = false,
+  });
+  final String title, tooltip;
+  final String? subtitle;
+  final List<Track> tracks;
+  final VoidCallback onPlay;
+  final bool artist;
+
+  @override
+  Widget build(BuildContext context) {
+    final cover =
+        tracks
+            .where((track) => track.artworkUrl?.isNotEmpty == true)
+            .firstOrNull ??
+        tracks.first;
+    return Material(
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onPlay,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Stack(
+                children: [
+                  Artwork(track: cover, size: 176, radius: artist ? 88 : 8),
+                  Positioned(
+                    right: 8,
+                    bottom: 8,
+                    child: IconButton.filled(
+                      tooltip: tooltip,
+                      onPressed: onPlay,
+                      icon: const Icon(Icons.play_arrow),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              if (subtitle != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  subtitle!,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ],
+              const SizedBox(height: 4),
+              Text(
+                '${tracks.length} ${tracks.length == 1 ? 'canción' : 'canciones'}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _TrackCard extends StatelessWidget {
