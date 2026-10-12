@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:aurora_music/audio/music_audio.dart';
 import 'package:aurora_music/core/models.dart';
 import 'package:aurora_music/sources/yt_dlp_source.dart';
@@ -17,8 +19,13 @@ void main() {
         var completions = 0;
         final subscription = audio.completed.listen((_) => completions++);
         try {
-          await source.configureToolDirectory(
-            const String.fromEnvironment('AURORA_TOOLS'),
+          if (Platform.isWindows) {
+            await source.configureToolDirectory(
+              const String.fromEnvironment('AURORA_TOOLS'),
+            );
+          }
+          source.setExperimentalProgressivePlayback(
+            const bool.fromEnvironment('AURORA_PROGRESSIVE'),
           );
           final tracks = await source.search(
             const String.fromEnvironment('AURORA_SAMPLE_URL'),
@@ -35,6 +42,10 @@ void main() {
                 )
               : found;
           final resolved = await source.resolve(track);
+          if (!const bool.fromEnvironment('AURORA_PROGRESSIVE')) {
+            expect(File(resolved.input).existsSync(), isTrue);
+            expect(File(resolved.input).lengthSync(), greaterThan(0));
+          }
           expect(resolved.duration, greaterThan(const Duration(seconds: 150)));
           await audio.initialize();
           audio.setVolume(0);

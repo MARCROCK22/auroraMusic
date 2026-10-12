@@ -11,6 +11,8 @@ Reproductor de música en Flutter y Dart para **Windows x64 y Android 7+**. Inte
 - Interfaz cálida con Newsreader y Plus Jakarta Sans incluidas, portadas protagonistas y panel de reproducción/cola en escritorio ancho.
 - Diseño aprobado en Stitch: biblioteca en cuadrícula, cola con vista propia y ajustes por secciones. **Modo Vinilo** gira durante la reproducción y permite desplazar la posición arrastrando el disco.
 - Botón **Letras**: búsqueda exacta en LRCLIB, texto sincronizado o tradicional, caché privada e importación de archivos LRC/TXT.
+- Letras interactivas: toca un verso sincronizado para avanzar o retroceder, ajusta el volumen y vuelve al reproductor con **Volver**. Buscar una posición conserva tu decisión de reproducir o pausar.
+- **Para ti** recomienda según favoritos, listas y escuchas recientes. **DJ personal**, sin voz, continúa la cola con esas preferencias; las novedades de YouTube son opcionales y se consultan con límites visibles.
 - Colores extraídos de la portada, ambiente reactivo a la energía y visualizador FFT del audio real.
 - Ecualizador DSP de ocho bandas, presets y reducción automática de ganancia para los refuerzos.
 - Controles multimedia del sistema, servicio de audio Android, pausa por desconexión e interrupciones de audio.
@@ -59,9 +61,11 @@ Este comando permite prepararlas por separado. Descarga versiones oficiales veri
 
 Android incorpora Python, JavaScript, yt-dlp y FFmpeg mediante `youtubedl-android` 0.18.1; no necesita instalar Python. Las primeras operaciones preparan esos componentes localmente.
 
-### Caché de reproducción en Windows
+### Caché de reproducción en Windows y Android
 
 Para reducir cortes de las URLs temporales de YouTube, Aurora descarga primero el audio completo en su carpeta privada y valida su duración con ffprobe. La primera reproducción necesita esperar la descarga; una copia válida puede reutilizarse. La caché se limita a 512 MB y limpia los archivos más antiguos. **Ajustes → Almacenamiento y biblioteca → Limpiar caché** conserva la canción actual y tus descargas locales. Los paquetes para compartir no incluyen esta caché ni tus datos personales.
+
+Android también descarga y valida el archivo completo antes de reproducirlo. En **Ajustes → Almacenamiento y biblioteca**, **Descargar mientras se reproduce (experimental)** permite comenzar con un WebM compatible mientras yt-dlp sigue descargando. Está desactivado por defecto y afecta a las próximas canciones. Otros formatos conservan la descarga completa; buscar una parte todavía no descargada puede requerir esperar. Los archivos incompletos no se publican como copias válidas.
 
 Los reintentos de reproducción son limitados, conservan la canción y posición, y se cancelan al pausar, detener o cambiar de canción. No evitan restricciones de YouTube ni hacen accesibles videos privados o eliminados.
 

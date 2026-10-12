@@ -175,6 +175,34 @@ void main() {
           expect(audio.isPlaying, isFalse);
           expect(audio.position, const Duration(seconds: 8));
           expect(audio.lastError, isNull);
+          // A decoder can finish cleanly even when the download validator fails
+          // late. That must become a playback error, never a queue completion.
+          var validationCalls = 0;
+          var lateCompletions = 0;
+          final lateSubscription = audio.completed.listen(
+            (_) => lateCompletions++,
+          );
+          try {
+            await audio.load(
+              ResolvedAudio(
+                input: fixture.path,
+                duration: const Duration(seconds: 8),
+                validateCompletion: () async {
+                  validationCalls++;
+                  throw StateError('Fixture: full download validation failed');
+                },
+              ),
+              ffmpegExecutable: ffmpeg,
+              start: const Duration(milliseconds: 7500),
+            );
+            await audio.play();
+            await _wait(() => audio.lastError != null);
+            expect(validationCalls, 1);
+            expect(audio.isPlaying, isFalse);
+            expect(lateCompletions, 0);
+          } finally {
+            await lateSubscription.cancel();
+          }
           return true;
         } finally {
           await audio.stop();
