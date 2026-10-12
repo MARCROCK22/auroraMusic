@@ -7,6 +7,7 @@ Reproductor de música en Flutter y Dart para **Windows x64 y Android 7+**. Inte
 - Inicio, búsqueda, importación de enlaces/listas de YouTube y archivos locales.
 - Favoritos, playlists editables, historial y cola reordenable; aleatorio, repetición, volumen, avance y temporizador.
 - Importación gratuita de playlists de Spotify desde JSON/CSV local, con vista previa y elección explícita de la versión en YouTube; sin configurar claves de API.
+- Búsqueda de canciones, artistas, álbumes y playlists de Spotify mediante el proveedor de metadatos adaptado de Nuclear, sin cuenta personal ni Premium.
 - Descargas locales MP3 con progreso, cancelación, reintento y eliminación; carpeta de destino configurable en Windows y biblioteca disponible sin conexión.
 - Interfaz cálida con Newsreader y Plus Jakarta Sans incluidas, portadas protagonistas y panel de reproducción/cola en escritorio ancho.
 - Diseño aprobado en Stitch: biblioteca en cuadrícula, cola con vista propia y ajustes por secciones. **Modo Vinilo** gira durante la reproducción y permite desplazar la posición arrastrando el disco.
@@ -19,7 +20,28 @@ Reproductor de música en Flutter y Dart para **Windows x64 y Android 7+**. Inte
 - SQLite local; restaura cola y posición **en pausa**. Temas claro/oscuro/sistema y movimiento reducido.
 - Paletas Automático, Morado, Terracota, Ámbar y Verde bosque para toda la interfaz.
 
-No hay cuentas, sincronización, catálogo de Spotify, DRM ni recomendaciones de un servicio remoto.
+Spotify aporta descripciones y portadas; el audio proviene de archivos locales y
+YouTube. El DJ usa señales locales y filtros persistentes por artista, canción y
+género conocido.
+
+### Explorar Spotify y personalizar el DJ
+
+Abre **Buscar → Metadatos · Spotify**, escribe el nombre y elige canciones,
+artistas, álbumes o playlists. Las colecciones muestran sus canciones y permiten
+cargar más resultados. **Añadir a la cola** abre la búsqueda de coincidencias de
+YouTube: elige una fuente y confirma **Añadir a la cola** o **Reproducir**.
+La cola elimina duplicados por canción, URL canónica y referencia de Spotify.
+
+En **Inicio → Para ti → Personalizar el DJ**, selecciona artistas, canciones o
+géneros de tu biblioteca. Las dimensiones se combinan; **Quitar filtros** las
+restablece. Los géneros solo se ofrecen cuando existen en los datos. Las
+recomendaciones explican sus señales y se actualizan con favoritos, playlists e
+historial reciente. Los filtros afectan incorporaciones nuevas del DJ.
+
+El método de Spotify depende de interfaces privadas que pueden cambiar. La
+adaptación conserva la licencia AGPL-3.0 y sus avisos. Consulta
+[metadatos](docs/spotify_metadata.md), [DJ](docs/dj.md) e
+[interfaz](docs/music_ui.md) para detalles y límites.
 
 ### Encontrar descargas y letras
 
@@ -108,20 +130,27 @@ El ZIP Windows queda en `dist/`, con herramientas verificadas y avisos de licenc
 
 El APK de desarrollo queda en `build/app/outputs/flutter-apk/app-debug.apk`. Se instala directamente en teléfonos ARM64; autoriza la instalación desde el gestor de archivos. Es una compilación de desarrollo, firmada con la clave debug.
 
-Para un APK optimizado, crea una clave privada y configura `android/key.properties`:
+Para un APK optimizado, conserva la identidad de firma existente y configura
+`android/key.properties` localmente con `storeFile`, `storePassword`, `keyAlias`
+y `keyPassword`. Ejecuta
+`flutter build apk --release --no-pub --target-platform android-arm64`.
+Una compilación release sin configuración válida de firma falla expresamente.
+Las claves y contraseñas están excluidas de Git. Para emuladores x64 usa
+`--target-platform android-x64`.
 
-```properties
-storeFile=C:/ruta/privada/aurora.jks
-storePassword=TU_PASSWORD
-keyAlias=aurora
-keyPassword=TU_PASSWORD
-```
-
-Después ejecuta `flutter build apk --release --no-pub --target-platform android-arm64`. Sin ese archivo, release queda **sin firma**. Conserva la misma clave para futuras actualizaciones; las claves y contraseñas están excluidas de Git. Para emuladores x64 usa `--target-platform android-x64`.
+GitHub Actions recibe los cuatro secretos Android mediante el contexto seguro,
+restaura la keystore en un directorio temporal protegido y la elimina al terminar.
+PR y ejecuciones manuales debug no necesitan secretos de release. Consulta
+[firma y CI](docs/ci_signing.md) para nombres y configuración; no compartas claves
+ni contraseñas en el chat. El ZIP Windows no tiene firma Authenticode.
 
 ## Arquitectura y seguridad
 
-`lib/core/` define modelos y contratos; `lib/audio/` contiene SoLoud y controles del sistema; `lib/sources/` integra yt-dlp; `lib/ui/` presenta las pantallas. `AppController` coordina estado y `LibraryDatabase` persiste metadatos.
+`lib/core/` define modelos y contratos; `lib/audio/` contiene SoLoud y controles
+del sistema; `lib/sources/` integra yt-dlp; `lib/metadata/spotify/` consulta
+metadatos; `lib/dj/` puntúa recomendaciones y aplica filtros; `lib/library/`
+persiste la biblioteca; `lib/ui/` presenta las pantallas. `AppController`
+coordina estado y reproducción. Consulta el [árbol de módulos](docs/architecture.md).
 
 Los procesos reciben argumentos separados, con plugins/configuración externa desactivados; entradas YouTube restringidas a HTTPS y hosts permitidos. TLS permanece verificado, salidas/colas/buffers tienen límites y las descargas se publican por renombrado desde archivos temporales. Los mensajes ocultan consultas firmadas, cookies y autorización. No se guardan URLs de reproducción temporales.
 
