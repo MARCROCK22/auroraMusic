@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
@@ -60,6 +61,8 @@ class AppController extends ChangeNotifier {
   bool discoveringRecommendations = false;
   String? recommendationDiscoveryError;
   String? personalDjError;
+  DjFilters _djFilters = const DjFilters();
+  DjFilters get djFilters => _djFilters;
   String _searchQuery = '';
   int _searchLimit = 20;
   bool get hasMoreSearchResults =>
@@ -126,6 +129,7 @@ class AppController extends ChangeNotifier {
     playlists: playlists,
     history: recentTracks,
     currentTrackId: currentTrack?.id,
+    filters: djFilters,
   );
   bool get canDiscoverRecommendations =>
       strongestTasteArtist(
@@ -175,12 +179,36 @@ class AppController extends ChangeNotifier {
   String _recommendationTasteKey() {
     final sortedFavorites = favoriteIds.toList()..sort();
     return [
+      jsonEncode(djFilters.toJson()),
       ...sortedFavorites,
       ...playlists.map(
         (playlist) => '${playlist.id}:${playlist.trackIds.join(',')}',
       ),
       ...recentTracks.map((track) => track.id),
     ].join('|');
+  }
+
+  Future<void> setDjFilters(DjFilters filters) async {
+    // Copy lists so external mutations cannot bypass invalidation.
+    _djFilters = DjFilters.fromJson(filters.toJson());
+    ++_recommendationDiscoveryGeneration;
+    ++_personalDjGeneration;
+    discoveringRecommendations = false;
+    discoveredRecommendations = [];
+    recommendationDiscoveryError = null;
+    personalDjError = null;
+    _notify();
+    await preferences.setString('djFilters', jsonEncode(djFilters.toJson()));
+    if (_personalDjActive && _playIntent) unawaited(_refillPersonalDjQueue());
+  }
+
+  Future<void> refreshRecommendations() async {
+    ++_recommendationDiscoveryGeneration;
+    discoveringRecommendations = false;
+    discoveredRecommendations = [];
+    recommendationDiscoveryError = null;
+    _notify();
+    if (canDiscoverRecommendations) await discoverRecommendations();
   }
 
   Future<void> discoverRecommendations() async {
@@ -210,7 +238,8 @@ class AppController extends ChangeNotifier {
       final fresh = <Track>[];
       for (final track in results) {
         final keys = recommendationTrackKeys(track);
-        if (keys.any(seenIds.contains) ||
+        if (!djFilters.permits(track) ||
+            keys.any(seenIds.contains) ||
             track.isPendingSpotifyMatch ||
             track.pageUrl == null) {
           continue;
@@ -254,8 +283,9 @@ class AppController extends ChangeNotifier {
       ...recommendations.map((item) => item.track),
       if (includeDiscovery) ...discoveredRecommendations,
     ]) {
+      if (preserveCurrent && queue.length + seedTracks.length >= 24) break;
       final keys = recommendationTrackKeys(track);
-      if (keys.any(seenKeys.contains)) continue;
+      if (!djFilters.permits(track) || keys.any(seenKeys.contains)) continue;
       seenKeys.addAll(keys);
       seedTracks.add(track);
       if (seedTracks.length == 6) break;
@@ -343,8 +373,11 @@ class AppController extends ChangeNotifier {
 
   Future<void> _performPersonalDjRefill(int generation) async {
     final target = (24 - queue.length).clamp(0, 3);
+    if (target == 0) return;
+    _personalDjSeenKeys.addAll(queue.expand(recommendationTrackKeys));
     var added = 0;
     void addTrack(Track track) {
+      if (queue.length >= 24) return;
       queue.add(track);
       _personalDjSeenKeys.addAll(recommendationTrackKeys(track));
       added++;
@@ -357,6 +390,7 @@ class AppController extends ChangeNotifier {
       history: recentTracks,
       currentTrackId: currentTrack?.id,
       limit: 24,
+      filters: djFilters,
     );
     for (final recommendation in local) {
       final track = recommendation.track;
@@ -390,7 +424,8 @@ class AppController extends ChangeNotifier {
             final libraryKeys = tracks.expand(recommendationTrackKeys).toSet();
             for (final track in results) {
               final keys = recommendationTrackKeys(track);
-              if (track.isPendingSpotifyMatch ||
+              if (!djFilters.permits(track) ||
+                  track.isPendingSpotifyMatch ||
                   track.pageUrl == null ||
                   keys.any(libraryKeys.contains) ||
                   keys.any(_personalDjSeenKeys.contains)) {
@@ -438,6 +473,18 @@ class AppController extends ChangeNotifier {
         await database.saveDownload(job);
       }
       recentTracks = _lookup(await database.readHistory());
+      final savedFilters = preferences.getString('djFilters');
+      if (savedFilters != null) {
+        try {
+          _djFilters = DjFilters.fromJson(
+            jsonDecode(savedFilters) as Map<String, dynamic>,
+          );
+        } on FormatException {
+          _djFilters = const DjFilters();
+        } on TypeError {
+          _djFilters = const DjFilters();
+        }
+      }
       final savedPalette = preferences.getString('accentPalette');
       accentPalette =
           savedPalette == 'automatic' ||
@@ -1016,8 +1063,14 @@ class AppController extends ChangeNotifier {
 
   Future<void> persistSession() => _saveQueue();
   Future<void> addToQueue(Track track) async {
+    if (queue.any((queued) => recommendationTracksMatch(queued, track))) return;
     await _remember(track);
+    // Recheck after persistence: concurrent enqueue calls may finish together.
+    if (queue.any((queued) => recommendationTracksMatch(queued, track))) return;
     queue.add(track);
+    if (_personalDjActive) {
+      _personalDjSeenKeys.addAll(recommendationTrackKeys(track));
+    }
     if (queueIndex < 0) queueIndex = 0;
     await _saveQueue();
     _notify();
@@ -1331,6 +1384,48 @@ class AppController extends ChangeNotifier {
 
   Future<List<Track>> findSpotifyMatches(Track track) =>
       source.search('${track.title} ${track.artist}', limit: 3);
+
+  /// Spotify supplies descriptions only; the selected match supplies audio.
+  Future<bool> importSpotifyMetadataMatch(
+    Track metadata,
+    Track match, {
+    bool play = false,
+  }) async {
+    final uri = Uri.tryParse(match.pageUrl ?? '');
+    final host = uri?.host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+    final hasAudioPage =
+        uri?.scheme == 'https' &&
+        const {'youtube.com', 'music.youtube.com', 'youtu.be'}.contains(host);
+    if (match.isPendingSpotifyMatch || (!match.isLocal && !hasAudioPage)) {
+      _report(StateError('Selecciona una coincidencia de audio v\u00e1lida.'));
+      return false;
+    }
+    final track = Track(
+      id: match.id,
+      title: metadata.title,
+      artist: metadata.artist,
+      duration: metadata.duration == Duration.zero
+          ? match.duration
+          : metadata.duration,
+      artworkUrl: metadata.artworkUrl ?? match.artworkUrl,
+      album: metadata.album ?? match.album,
+      genres: metadata.genres.isEmpty ? match.genres : metadata.genres,
+      spotifyUri: metadata.spotifyUri,
+      pageUrl: match.pageUrl,
+      localPath: match.localPath,
+    );
+    try {
+      if (play) {
+        await playTrack(track);
+      } else {
+        await addToQueue(track);
+      }
+      return true;
+    } catch (exception) {
+      _report(exception);
+      return false;
+    }
+  }
 
   Future<bool> matchSpotifyTrack(
     String trackId,
