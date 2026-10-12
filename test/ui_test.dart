@@ -391,19 +391,51 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('mobile navigation has four destinations and settings shortcut', (
+  testWidgets('desktop places DJ immediately after Search and exposes Jam', (
+    tester,
+  ) async {
+    await mount(tester, const Size(1000, 900));
+    final search = tester.getCenter(find.byTooltip('Buscar'));
+    final dj = tester.getCenter(find.byTooltip('DJ'));
+    final library = tester.getCenter(find.byTooltip('Biblioteca'));
+    expect(dj.dy, greaterThan(search.dy));
+    expect(dj.dy, lessThan(library.dy));
+    expect(find.byTooltip('Jam'), findsOneWidget);
+    await tester.tap(find.byTooltip('DJ'));
+    await tester.pumpAndSettle();
+    expect(find.text('Descubre tu próxima canción'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('mobile navigation has five destinations and settings shortcut', (
     tester,
   ) async {
     await mount(tester, const Size(320, 700), scale: 2);
-    expect(find.byType(NavigationDestination), findsNWidgets(4));
+    expect(find.byType(NavigationDestination), findsNWidgets(5));
+    expect(
+      tester
+          .widgetList<NavigationDestination>(find.byType(NavigationDestination))
+          .map((destination) => destination.label),
+      ['Inicio', 'Buscar', 'DJ', 'Biblioteca', 'Descargas'],
+    );
+    await tester.tap(find.byTooltip('DJ').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Descubre tu próxima canción'), findsOneWidget);
+    expect(
+      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      2,
+    );
+    expect(tester.takeException(), isNull);
     await tester.tap(find.byIcon(Icons.more_horiz));
     await tester.pumpAndSettle();
     expect(find.text('Modo Vinilo'), findsOneWidget);
+    expect(find.text('Jam'), findsOneWidget);
     expect(find.text('Cola de reproducción'), findsOneWidget);
     expect(find.text('Letras'), findsOneWidget);
     await tester.tap(find.text('Modo Vinilo'));
     await tester.pumpAndSettle();
-    expect(find.byType(NavigationDestination), findsNWidgets(4));
+    expect(find.byType(NavigationDestination), findsNWidgets(5));
     await tester.tap(find.byIcon(Icons.more_horiz));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cola de reproducción'));

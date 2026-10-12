@@ -10,7 +10,9 @@ import '../core/audio_backend.dart';
 import '../core/models.dart';
 import 'lyrics_panel.dart';
 import 'artwork.dart';
-import 'dj_panel.dart';
+import 'dj_discovery_page.dart';
+import 'home_music_page.dart';
+import 'jam/jam_page.dart';
 import 'playlist_shelf.dart';
 import 'spotify_browser_panel.dart';
 export 'artwork.dart';
@@ -28,6 +30,8 @@ const _sections = [
   'Cola de reproducción',
   'Letras',
   'Ajustes',
+  'DJ',
+  'Jam',
 ];
 const _icons = [
   Icons.home_outlined,
@@ -38,7 +42,10 @@ const _icons = [
   Icons.queue_music,
   Icons.lyrics_outlined,
   Icons.tune,
+  Icons.explore_outlined,
+  Icons.groups_outlined,
 ];
+const _primarySections = [0, 1, 8, 2, 3];
 
 class AuroraShell extends ConsumerStatefulWidget {
   const AuroraShell({super.key});
@@ -105,7 +112,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   }
 
   void _navigate(int value) {
-    if (value != 0) {
+    if (value != 0 && value != 8) {
       ref.read(controllerProvider).cancelRecommendationDiscovery();
     }
     setState(() {
@@ -177,6 +184,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                             ),
                           ),
                           if (desktop &&
+                              !c.jamPlaybackActive &&
                               _section != 4 &&
                               _section != 5 &&
                               _section != 6 &&
@@ -185,23 +193,32 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                         ],
                       ),
                     ),
-                    if (c.currentTrack != null) _miniPlayer(c, wide),
+                    if (c.jamPlaybackActive)
+                      _jamPlaybackBar()
+                    else if (c.currentTrack != null)
+                      _miniPlayer(c, wide),
                   ],
                 ),
               ),
               bottomNavigationBar: rail
                   ? null
                   : NavigationBar(
-                      selectedIndex: _section.clamp(0, 3),
-                      onDestinationSelected: _navigate,
+                      selectedIndex: math.max(
+                        0,
+                        _primarySections.indexOf(_section),
+                      ),
+                      onDestinationSelected: (index) =>
+                          _navigate(_primarySections[index]),
                       labelBehavior:
                           NavigationDestinationLabelBehavior.onlyShowSelected,
                       destinations: List.generate(
-                        4,
+                        _primarySections.length,
                         (i) => NavigationDestination(
-                          icon: Icon(_icons[i]),
-                          label: i == 3 ? 'Descargas' : _sections[i],
-                          tooltip: _sections[i],
+                          icon: Icon(_icons[_primarySections[i]]),
+                          label: _primarySections[i] == 3
+                              ? 'Descargas'
+                              : _sections[_primarySections[i]],
+                          tooltip: _sections[_primarySections[i]],
                         ),
                       ),
                     ),
@@ -245,9 +262,9 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             child: SingleChildScrollView(
               child: Column(
                 children: [
-                  for (var i = 0; i < 4; i++) _navItem(i, wide),
+                  for (final i in _primarySections) _navItem(i, wide),
                   const Divider(indent: 20, endIndent: 20, height: 18),
-                  for (var i = 4; i < 7; i++) _navItem(i, wide),
+                  for (final i in [9, 4, 5, 6]) _navItem(i, wide),
                   if (wide && c.playlists.isNotEmpty) ...[
                     const Divider(indent: 20, endIndent: 20, height: 18),
                     for (final playlist in c.playlists)
@@ -378,6 +395,14 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             onSelected: _navigate,
             itemBuilder: (_) => const [
               PopupMenuItem(
+                value: 9,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.groups_outlined),
+                  title: Text('Jam'),
+                ),
+              ),
+              PopupMenuItem(
                 value: 4,
                 child: ListTile(
                   contentPadding: EdgeInsets.zero,
@@ -462,103 +487,29 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         return LyricsPanel(controller: c, onClose: () => _navigate(0));
       case 7:
         return _settings(c);
+      case 8:
+        return DjDiscoveryPage(controller: c, onSearch: () => _navigate(1));
+      case 9:
+        return JamPage(controller: c);
       default:
         return _home(c);
     }
   }
 
-  Widget _home(AppController c) => ListView(
-    padding: const EdgeInsets.all(24),
-    children: [
-      Text(
-        'Hola de nuevo',
-        style: Theme.of(
-          context,
-        ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700),
-      ),
-      const SizedBox(height: 18),
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          ActionChip(
-            avatar: const Icon(Icons.download_outlined, size: 18),
-            label: const Text('Descargas locales'),
-            onPressed: () => _navigate(3),
-          ),
-          ActionChip(
-            avatar: const Icon(Icons.favorite_border, size: 18),
-            label: const Text('Favoritos'),
-            onPressed: () {
-              setState(() {
-                _section = 2;
-                _likesSelected = true;
-                _playlist = null;
-              });
-            },
-          ),
-          ActionChip(
-            avatar: const Icon(Icons.search, size: 18),
-            label: const Text('Encontrar música'),
-            onPressed: () => _navigate(1),
-          ),
-        ],
-      ),
-      if (c.recentTracks.isNotEmpty &&
-          MediaQuery.sizeOf(context).width >= 1200) ...[
-        _featuredRecent(c, c.recentTracks.first),
-        const SizedBox(height: 28),
-      ],
-      _sectionTitle(
-        'Tu música',
-        c.recentTracks.isEmpty ? 'Tu colección' : 'Reanudá tu escucha',
-      ),
-      const SizedBox(height: 16),
-      if (c.recentTracks.isEmpty)
-        _empty(
-          Icons.history,
-          'Tu historia empieza aquí',
-          'Busca una canción o abre tus archivos para comenzar.',
-        )
-      else
-        SizedBox(
-          height: 180 + MediaQuery.textScalerOf(context).scale(72),
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: c.recentTracks.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 16),
-            itemBuilder: (_, i) =>
-                SizedBox(width: 164, child: _albumCard(c, c.recentTracks[i])),
-          ),
-        ),
-      const SizedBox(height: 28),
-      DjPanel(controller: c),
-      const SizedBox(height: 28),
-      if (c.playlists.isNotEmpty) ...[
-        PlaylistShelf(
-          controller: c,
-          onOpen: (playlist) => setState(() {
-            _section = 2;
-            _playlist = playlist;
-            _likesSelected = false;
-          }),
-        ),
-        const SizedBox(height: 28),
-      ],
-      _sectionTitle(
-        'Tu colección',
-        '${c.tracks.length} canciones · ${c.playlists.length} listas',
-      ),
-      const SizedBox(height: 12),
-      if (c.tracks.isNotEmpty)
-        ...c.tracks.take(5).map((t) => _trackTile(c, t, c.tracks))
-      else
-        OutlinedButton.icon(
-          onPressed: c.importFiles,
-          icon: const Icon(Icons.add),
-          label: const Text('Añadir música a tu biblioteca'),
-        ),
-    ],
+  Widget _home(AppController c) => HomeMusicPage(
+    controller: c,
+    onSearch: () => _navigate(1),
+    onDownloads: () => _navigate(3),
+    onLikes: () => setState(() {
+      _section = 2;
+      _likesSelected = true;
+      _playlist = null;
+    }),
+    onOpenPlaylist: (playlist) => setState(() {
+      _section = 2;
+      _playlist = playlist;
+      _likesSelected = false;
+    }),
   );
 
   Widget _sectionTitle(String title, String subtitle) => Column(
@@ -571,84 +522,6 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
     ],
-  );
-
-  Widget _featuredRecent(AppController c, Track track) => LayoutBuilder(
-    builder: (context, constraints) {
-      final compact = constraints.maxWidth <= 520;
-      final scale = MediaQuery.textScalerOf(context).scale(1);
-      return Material(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(8),
-          topRight: Radius.circular(3),
-          bottomRight: Radius.circular(8),
-          bottomLeft: Radius.circular(3),
-        ),
-        child: InkWell(
-          onTap: () => c.playTrack(track, context: c.recentTracks),
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: EdgeInsets.all(compact ? 12 : 20),
-            child: Row(
-              children: [
-                Artwork(track: track, size: compact ? 80 : 176, radius: 8),
-                SizedBox(width: compact ? 12 : 24),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'VUELVE A ESCUCHAR',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: Theme.of(context).colorScheme.primary,
-                          letterSpacing: 1.2,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        track.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.headlineSmall,
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        track.artist,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyLarge,
-                      ),
-                      SizedBox(height: compact ? 8 : 20),
-                      if (compact || scale >= 1.5)
-                        IconButton.filled(
-                          tooltip: 'Reproducir ${track.title}',
-                          constraints: const BoxConstraints.tightFor(
-                            width: 48,
-                            height: 48,
-                          ),
-                          onPressed: () =>
-                              c.playTrack(track, context: c.recentTracks),
-                          icon: const Icon(Icons.play_arrow),
-                        )
-                      else
-                        FilledButton.icon(
-                          onPressed: () =>
-                              c.playTrack(track, context: c.recentTracks),
-                          icon: const Icon(Icons.play_arrow),
-                          label: const Text('Reproducir', softWrap: false),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    },
   );
 
   Widget _nowPlayingPanel(AppController c) {
@@ -758,30 +631,21 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     );
   }
 
-  Widget _albumCard(AppController c, Track t) => InkWell(
-    borderRadius: BorderRadius.circular(16),
-    onTap: () => c.playTrack(t),
-    child: LayoutBuilder(
-      builder: (context, constraints) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _jamPlaybackBar() => Material(
+    color: Theme.of(context).colorScheme.surfaceContainerLow,
+    child: Padding(
+      padding: const EdgeInsets.all(12),
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 12,
+        runSpacing: 8,
         children: [
-          Artwork(track: t, size: constraints.maxWidth, radius: 16),
-          const SizedBox(height: 8),
-          Text(
-            t.title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            t.artist,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 14,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
+          const Icon(Icons.groups_outlined),
+          const Text('Reproducción controlada desde Jam'),
+          TextButton(
+            onPressed: () => _navigate(9),
+            child: const Text('Abrir Jam'),
           ),
         ],
       ),
