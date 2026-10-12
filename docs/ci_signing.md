@@ -16,8 +16,11 @@ compilar exige estos cuatro secretos del repositorio:
 | `ANDROID_KEY_PASSWORD` | Contraseña de esa clave |
 
 Se configuran en GitHub → repositorio → **Settings → Secrets and variables →
-Actions → New repository secret**. No se pudo comprobar qué nombres existen
-remotamente porque la sesión de GitHub CLI no está autenticada. El workflow
+Actions → New repository secret**. Los cuatro secretos se actualizaron y se
+comprobaron con GitHub CLI autenticado el 12 de octubre de 2026 en
+`kaz-py/auroraMusic`, utilizando la identidad local existente. Se validaron
+la keystore y el acceso a su clave sin exponer sus valores. No falta ninguno
+de los cuatro secretos Android. El workflow
 enumera solo los nombres ausentes y falla antes de firmar. Si se prefieren
 Environment Secrets, el propietario debe configurar un environment y asociarlo
 al job `build`; esta configuración usa Repository Secrets directamente.

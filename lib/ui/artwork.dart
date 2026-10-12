@@ -32,6 +32,16 @@ class Artwork extends StatelessWidget {
         height: size,
         child: track.artworkUrl == null
             ? placeholder
+            : track.artworkUrl!.startsWith('asset:')
+            ? Image.asset(
+                track.artworkUrl!.substring(6),
+                fit: BoxFit.cover,
+                cacheWidth: (size * MediaQuery.devicePixelRatioOf(context))
+                    .ceil()
+                    .clamp(48, 1024),
+                excludeFromSemantics: true,
+                errorBuilder: (_, _, _) => placeholder,
+              )
             : Image.network(
                 track.artworkUrl!,
                 fit: BoxFit.cover,

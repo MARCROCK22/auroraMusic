@@ -1,6 +1,7 @@
 #include "flutter_window.h"
 
 #include <optional>
+#include <flutter/standard_method_codec.h>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -27,6 +28,34 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
+  // The supplied studio design includes its own Flutter title bar. Keep native
+  // resizing while removing the duplicate OS caption; all controls use Win32.
+  const HWND host = GetHandle();
+  SetWindowLongPtr(host, GWL_STYLE, GetWindowLongPtr(host, GWL_STYLE) & ~WS_CAPTION);
+  SetWindowPos(host, nullptr, 0, 0, 0, 0,
+               SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+  window_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "aurora/window",
+      &flutter::StandardMethodCodec::GetInstance());
+  window_channel_->SetMethodCallHandler(
+      [host](const auto& call, auto result) {
+        if (call.method_name() == "minimize") {
+          ShowWindow(host, SW_MINIMIZE);
+        } else if (call.method_name() == "maximize") {
+          ShowWindow(host, IsZoomed(host) ? SW_RESTORE : SW_MAXIMIZE);
+        } else if (call.method_name() == "close") {
+          PostMessage(host, WM_CLOSE, 0, 0);
+        } else if (call.method_name() == "drag") {
+          ReleaseCapture();
+          PostMessage(host, WM_NCLBUTTONDOWN, HTCAPTION, GetMessagePos());
+        } else {
+          result->NotImplemented();
+          return;
+        }
+        result->Success();
+      });
+
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     // Native audio tests can keep their window hidden without stealing focus.
     wchar_t hidden[2] = {};
@@ -45,6 +74,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  window_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

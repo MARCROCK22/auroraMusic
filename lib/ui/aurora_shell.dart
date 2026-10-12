@@ -8,6 +8,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../app_controller.dart';
 import '../core/audio_backend.dart';
 import '../core/models.dart';
+import '../core/window_controls.dart';
+import '../jam/jam_controller.dart';
+import 'studio/studio_navigation.dart';
+import 'studio/studio_transport.dart';
+import 'studio/session_aside.dart';
+import 'studio/downloads_studio_page.dart';
 import 'lyrics_panel.dart';
 import 'artwork.dart';
 import 'dj_discovery_page.dart';
@@ -57,6 +63,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     with WidgetsBindingObserver {
   int _section = 0;
   bool _jamVisited = false;
+  JamController? _jam;
   bool _spotifySearch = false;
   MusicPlaylist? _playlist;
   bool _likesSelected = false;
@@ -106,10 +113,23 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _jam?.removeListener(_jamChanged);
     if (_analysisEnabled) _audio.setVisualizationEnabled(false);
     _search.dispose();
     _searchFocus.dispose();
     super.dispose();
+  }
+
+  void _jamChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _jamCreated(JamController controller) {
+    if (identical(_jam, controller)) return;
+    _jam?.removeListener(_jamChanged);
+    _jam = controller;
+    _jam?.addListener(_jamChanged);
+    _jamChanged();
   }
 
   void _navigate(int value) {
@@ -147,6 +167,18 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     );
     return CallbackShortcuts(
       bindings: {
+        const SingleActivator(LogicalKeyboardKey.digit1, control: true): () =>
+            _navigate(0),
+        const SingleActivator(LogicalKeyboardKey.digit2, control: true): () =>
+            _navigate(1),
+        const SingleActivator(LogicalKeyboardKey.digit3, control: true): () =>
+            _navigate(2),
+        const SingleActivator(LogicalKeyboardKey.digit4, control: true): () =>
+            _navigate(3),
+        const SingleActivator(LogicalKeyboardKey.keyV, control: true): () =>
+            _navigate(4),
+        const SingleActivator(LogicalKeyboardKey.keyL, control: true): () =>
+            _navigate(6),
         const SingleActivator(LogicalKeyboardKey.keyK, control: true): () {
           _navigate(1);
           WidgetsBinding.instance.addPostFrameCallback(
@@ -170,6 +202,14 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
               body: SafeArea(
                 child: Column(
                   children: [
+                    if (rail || WindowControls.supported)
+                      StudioTitleBar(
+                        onNavigate: _navigate,
+                        sessionText: _jam?.service.connected == true
+                            ? 'SESIÓN ESTUDIO · ${_jam!.service.invite?.endpoint ?? 'LOCAL'}'
+                            : 'SESIÓN ESTUDIO · SIN JAM',
+                        activeSession: _jam?.service.connected == true,
+                      ),
                     Expanded(
                       child: Row(
                         children: [
@@ -177,7 +217,8 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                           Expanded(
                             child: Column(
                               children: [
-                                _header(c, rail),
+                                if (!wide || ![0, 3, 6].contains(_section))
+                                  _header(c, rail),
                                 if (!c.ready || c.busy)
                                   const LinearProgressIndicator(minHeight: 2),
                                 if (c.error != null) _errorBanner(c),
@@ -187,18 +228,32 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                           ),
                           if (desktop &&
                               !c.jamPlaybackActive &&
+                              _section != 3 &&
                               _section != 4 &&
                               _section != 5 &&
                               _section != 6 &&
                               _section != 7)
-                            _nowPlayingPanel(c),
+                            StudioSessionAside(
+                              controller: c,
+                              jam: _jam,
+                              onJam: () => _navigate(9),
+                              onQueue: () => _navigate(
+                                _jam?.service.connected == true ? 9 : 5,
+                              ),
+                            ),
                         ],
                       ),
                     ),
                     if (c.jamPlaybackActive)
                       _jamPlaybackBar()
-                    else if (c.currentTrack != null)
-                      _miniPlayer(c, wide),
+                    else
+                      StudioTransport(
+                        controller: c,
+                        onLyrics: () => _showLyrics(c),
+                        onVinyl: () => _navigate(4),
+                        onQueue: () => _navigate(5),
+                        onOpenPlayer: () => _showPlayer(c),
+                      ),
                   ],
                 ),
               ),
@@ -232,6 +287,18 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   }
 
   Widget _sidebar(AppController c, bool wide) {
+    if (wide) {
+      return StudioSidebar(
+        controller: c,
+        selected: _section,
+        onNavigate: _navigate,
+        onPlaylist: (playlist) => setState(() {
+          _section = 2;
+          _playlist = playlist;
+          _likesSelected = false;
+        }),
+      );
+    }
     final colors = Theme.of(context).colorScheme;
     return Container(
       width: wide ? 216 : 76,
@@ -486,6 +553,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             child: JamPage(
               key: const ValueKey('persistent-jam-page'),
               controller: c,
+              onControllerReady: _jamCreated,
             ),
           ),
         ),
@@ -518,9 +586,16 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   }
 
   Widget _home(AppController c) => HomeMusicPage(
+    onSearchQuery: (query) {
+      _search.text = query;
+      _spotifySearch = false;
+      _navigate(1);
+      _submitSearch(c, query);
+    },
     controller: c,
     onSearch: () => _navigate(1),
     onDownloads: () => _navigate(3),
+    onVinyl: () => _navigate(4),
     onLikes: () => setState(() {
       _section = 2;
       _likesSelected = true;
@@ -544,113 +619,6 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       ),
     ],
   );
-
-  Widget _nowPlayingPanel(AppController c) {
-    final track = c.currentTrack;
-    final upcoming = c.queue.skip(c.queueIndex + 1).take(8).toList();
-    final colors = Theme.of(context).colorScheme;
-    return Container(
-      width: 300,
-      decoration: BoxDecoration(
-        color: colors.surfaceContainerLow,
-        border: Border(
-          left: BorderSide(color: colors.outlineVariant.withValues(alpha: .35)),
-        ),
-      ),
-      child: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          Text(
-            'AHORA SUENA',
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: colors.primary,
-              letterSpacing: 1.2,
-            ),
-          ),
-          const SizedBox(height: 16),
-          if (track == null)
-            _empty(
-              Icons.music_note_outlined,
-              'Nada en reproducción',
-              'Elige una canción de tu colección.',
-            )
-          else ...[
-            Center(child: Artwork(track: track, size: 240, radius: 8)),
-            const SizedBox(height: 16),
-            Text(
-              track.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              track.artist,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  tooltip: 'Anterior',
-                  onPressed: c.previous,
-                  icon: const Icon(Icons.skip_previous),
-                ),
-                _playButton(c, size: 44),
-                IconButton(
-                  tooltip: 'Siguiente',
-                  onPressed: c.next,
-                  icon: const Icon(Icons.skip_next),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-          ],
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'A continuación',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-              Text(
-                '${upcoming.length}',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          if (upcoming.isEmpty)
-            Text(
-              'La cola está vacía',
-              style: Theme.of(context).textTheme.bodySmall,
-            )
-          else
-            for (final item in upcoming)
-              ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Artwork(track: item, size: 40, radius: 5),
-                title: Text(
-                  item.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(
-                  item.artist,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                onTap: () => c.playQueueAt(c.queue.indexOf(item)),
-              ),
-        ],
-      ),
-    );
-  }
 
   Widget _jamPlaybackBar() => Material(
     color: Theme.of(context).colorScheme.surfaceContainerLow,
@@ -1148,155 +1116,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     );
   }
 
-  Widget _downloads(AppController c) {
-    final completed = c.downloads
-        .where((job) => job.status == DownloadStatus.completed)
-        .toList();
-    final pending = c.downloads
-        .where((job) => job.status != DownloadStatus.completed)
-        .toList();
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        Text(
-          'Carpeta de descargas',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: 6),
-        SelectableText(
-          c.downloadsDirectoryPath,
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Los cambios se aplican a las próximas descargas.',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            OutlinedButton.icon(
-              onPressed:
-                  c.canConfigureDownloadDirectory &&
-                      !c.configuringDownloadDirectory
-                  ? c.chooseDownloadDirectory
-                  : null,
-              icon: const Icon(Icons.drive_file_move_outline),
-              label: Text(
-                c.configuringDownloadDirectory
-                    ? 'Abriendo selector…'
-                    : 'Cambiar carpeta',
-              ),
-            ),
-            OutlinedButton.icon(
-              onPressed: c.openDownloadDirectory,
-              icon: const Icon(Icons.folder_open_outlined),
-              label: const Text('Abrir carpeta'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 28),
-        if (completed.isNotEmpty) ...[
-          _sectionTitle(
-            'Disponibles sin conexión',
-            '${completed.length} archivos',
-          ),
-          const SizedBox(height: 8),
-          ...completed.map((job) => _downloadRow(c, job)),
-          const SizedBox(height: 20),
-        ],
-        _sectionTitle('En cola', '${pending.length} descargas'),
-        if (pending.isEmpty && completed.isEmpty)
-          _empty(
-            Icons.download_for_offline_outlined,
-            'Aún no hay descargas',
-            'Elige Descargar audio en el menú de una canción. Puedes configurar la carpeta de destino arriba.',
-          )
-        else if (pending.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 12),
-            child: Text('No hay descargas pendientes.'),
-          )
-        else
-          ...pending.map((job) => _downloadRow(c, job)),
-        if (pending.isEmpty &&
-            completed.isEmpty &&
-            c.canConfigureDownloadDirectory)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: c.configuringDownloadDirectory
-                  ? null
-                  : c.chooseDownloadDirectory,
-              icon: const Icon(Icons.drive_file_move_outline),
-              label: const Text('Configurar carpeta'),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _downloadRow(AppController c, DownloadJob job) {
-    final status = switch (job.status) {
-      DownloadStatus.queued => 'En espera',
-      DownloadStatus.downloading =>
-        'Descargando · ${(job.progress * 100).round()} %',
-      DownloadStatus.completed => 'Disponible sin conexión',
-      DownloadStatus.failed => 'Descarga fallida',
-      DownloadStatus.cancelled => 'Cancelada',
-    };
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Artwork(track: job.track, size: 48, radius: 8),
-      title: Text(
-        job.track.title,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(status),
-          if (job.status == DownloadStatus.downloading)
-            LinearProgressIndicator(value: job.progress.clamp(0, 1)),
-          if (job.error != null)
-            Text(
-              job.error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-        ],
-      ),
-      trailing:
-          job.status == DownloadStatus.queued ||
-              job.status == DownloadStatus.downloading
-          ? IconButton(
-              tooltip: 'Cancelar descarga',
-              onPressed: () => c.cancelDownload(job),
-              icon: const Icon(Icons.close),
-            )
-          : job.status == DownloadStatus.failed ||
-                job.status == DownloadStatus.cancelled
-          ? IconButton(
-              tooltip: 'Reintentar descarga',
-              onPressed: () => c.retryDownload(job),
-              icon: const Icon(Icons.refresh),
-            )
-          : IconButton(
-              tooltip: 'Eliminar archivo descargado',
-              onPressed: () async {
-                final confirmed = await _confirm(
-                  'Eliminar descarga',
-                  'Se eliminará el archivo descargado de «${job.track.title}». Tus favoritos y listas se conservarán. Si está reproduciéndose, se detendrá.',
-                  confirmLabel: 'Eliminar archivo',
-                );
-                if (confirmed) await c.removeDownload(job);
-              },
-              icon: const Icon(Icons.delete_outline),
-            ),
-    );
-  }
+  Widget _downloads(AppController c) => DownloadsStudioPage(controller: c);
 
   Widget _settings(AppController c) {
     final sections = <({String title, String subtitle, List<Widget> children})>[
@@ -1684,213 +1504,6 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
           ),
         );
       },
-    );
-  }
-
-  Widget _miniPlayer(AppController c, bool wide) {
-    final t = c.currentTrack!;
-    return Material(
-      color: Theme.of(context).colorScheme.surfaceContainer,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
-            child: Row(
-              children: [
-                Text(
-                  _time(c.audio.position),
-                  style: Theme.of(context).textTheme.labelSmall,
-                ),
-                Expanded(child: _seekBar(c, compact: true)),
-                Text(
-                  _time(c.audio.duration),
-                  style: Theme.of(context).textTheme.labelSmall,
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 2, 16, 10),
-            child: Row(
-              children: [
-                if (!wide) ...[
-                  InkWell(
-                    onTap: () => _showPlayer(c),
-                    borderRadius: BorderRadius.circular(8),
-                    child: Artwork(track: t, size: 42, radius: 8),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: InkWell(
-                      onTap: () => _showPlayer(c),
-                      borderRadius: BorderRadius.circular(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            t.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          Text(
-                            t.artist,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  _playButton(c, size: 44),
-                  IconButton(
-                    tooltip: 'Siguiente',
-                    onPressed: c.next,
-                    icon: const Icon(Icons.skip_next),
-                  ),
-                  IconButton(
-                    tooltip: 'Letras',
-                    onPressed: c.currentTrack == null
-                        ? null
-                        : () => _showLyrics(c),
-                    icon: const Icon(Icons.mic_none_outlined),
-                  ),
-                ] else ...[
-                  Expanded(
-                    child: InkWell(
-                      onTap: () => _showPlayer(c),
-                      borderRadius: BorderRadius.circular(12),
-                      child: Row(
-                        children: [
-                          Artwork(track: t, size: wide ? 52 : 42, radius: 8),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  t.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                Text(
-                                  t.artist,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: wide ? 140 : 44,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        if (wide)
-                          IconButton(
-                            tooltip: 'Anterior',
-                            onPressed: c.previous,
-                            icon: const Icon(Icons.skip_previous),
-                          ),
-                        _playButton(c, size: 44),
-                        if (wide)
-                          IconButton(
-                            tooltip: 'Siguiente',
-                            onPressed: c.next,
-                            icon: const Icon(Icons.skip_next),
-                          ),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      reverse: true,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (!wide)
-                            IconButton(
-                              tooltip: 'Siguiente',
-                              onPressed: c.next,
-                              icon: const Icon(Icons.skip_next),
-                            ),
-                          if (wide)
-                            TextButton.icon(
-                              onPressed: () => _showLyrics(c),
-                              icon: const Icon(Icons.mic_none_outlined),
-                              label: const Text('Letras'),
-                            )
-                          else
-                            IconButton(
-                              tooltip: 'Letras',
-                              onPressed: c.currentTrack == null
-                                  ? null
-                                  : () => _showLyrics(c),
-                              icon: const Icon(Icons.mic_none_outlined),
-                            ),
-                          if (wide) ...[
-                            IconButton(
-                              tooltip: 'Favorito',
-                              onPressed: () => c.toggleFavorite(t),
-                              icon: Icon(
-                                c.favoriteIds.contains(t.id)
-                                    ? Icons.favorite
-                                    : Icons.favorite_border,
-                              ),
-                            ),
-                            IconButton(
-                              tooltip: 'Cola de reproducción',
-                              onPressed: () => _showQueue(c),
-                              icon: const Icon(Icons.queue_music),
-                            ),
-                            IconButton(
-                              tooltip: 'Ecualizador',
-                              onPressed: () => _showEq(c),
-                              icon: const Icon(Icons.equalizer),
-                            ),
-                            IconButton(
-                              tooltip: c.audio.volume == 0
-                                  ? 'Activar sonido'
-                                  : 'Silenciar',
-                              onPressed: () =>
-                                  c.setVolume(c.audio.volume == 0 ? .7 : 0),
-                              icon: Icon(
-                                c.audio.volume == 0
-                                    ? Icons.volume_off_outlined
-                                    : Icons.volume_up_outlined,
-                              ),
-                            ),
-                            SizedBox(
-                              width: MediaQuery.sizeOf(context).width < 1200
-                                  ? 60
-                                  : 100,
-                              child: Slider(
-                                value: c.audio.volume.clamp(0, 1),
-                                onChanged: c.setVolume,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 

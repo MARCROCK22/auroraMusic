@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../app_controller.dart';
 import '../core/models.dart';
 import '../lyrics/lyrics_service.dart';
+import 'artwork.dart';
+import 'studio/studio_symbols.dart';
 
 String _formatTime(Duration value) {
   final seconds = value.inSeconds;
@@ -45,6 +47,9 @@ class _LyricsPanelState extends State<LyricsPanel> {
   String? _trackId;
   int _request = 0;
   int _lastActive = -1;
+  int _offsetMs = 0;
+  int _mode = 0;
+  int _typeface = 0;
   Duration? _scrubPosition;
   String? _scrubTrackId;
   final Map<int, GlobalKey> _lineKeys = {};
@@ -61,6 +66,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
     _trackId = track?.id;
     _request++;
     _lastActive = -1;
+    _offsetMs = 0;
     _scrubPosition = null;
     _scrubTrackId = null;
     _lineKeys.clear();
@@ -153,29 +159,12 @@ class _LyricsPanelState extends State<LyricsPanel> {
     final lines = _result?.lines ?? const <LyricLine>[];
     return LayoutBuilder(
       builder: (context, constraints) {
-        final desktop = constraints.maxWidth >= 720;
-        final color = Theme.of(context).colorScheme;
-        final lyrics = Expanded(
-          child: ListenableBuilder(
-            listenable: widget.controller.audio,
-            builder: (context, _) {
-              final audio = widget.controller.audio;
-              final position = audio.position;
-              final active = lines.lastIndexWhere(
-                (line) => line.at <= position,
-              );
-              return Column(
-                children: [
-                  Expanded(child: _body(track, lines, active, position, media)),
-                  _playbackControls(),
-                ],
-              );
-            },
-          ),
-        );
-        final header = Row(
+        final desktop = constraints.maxWidth >= 900;
+        final colors = Theme.of(context).colorScheme;
+        final header = Wrap(
           children: [
-            Expanded(
+            Padding(
+              padding: const EdgeInsets.only(right: 16, top: 10),
               child: Text(
                 'Letras',
                 style: Theme.of(context).textTheme.titleLarge,
@@ -184,8 +173,14 @@ class _LyricsPanelState extends State<LyricsPanel> {
             IconButton(
               tooltip: 'Importar archivo LRC o TXT',
               onPressed: _loading ? null : _import,
-              icon: const Icon(Icons.file_open),
+              icon: const Icon(StudioSymbols.uploadFile),
             ),
+            if (!desktop)
+              IconButton(
+                tooltip: 'Ajustes de letras',
+                onPressed: _showOptions,
+                icon: const Icon(StudioSymbols.tune),
+              ),
             TextButton.icon(
               onPressed:
                   widget.onClose ?? () => Navigator.of(context).maybePop(),
@@ -194,59 +189,178 @@ class _LyricsPanelState extends State<LyricsPanel> {
             ),
           ],
         );
-        final artwork = track == null
-            ? const SizedBox.shrink()
-            : ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: SizedBox(
-                  width: desktop ? 260 : 72,
-                  height: desktop ? 260 : 72,
-                  child: _artwork(track),
-                ),
+        final lyrics = Expanded(
+          child: ListenableBuilder(
+            listenable: widget.controller.audio,
+            builder: (context, _) {
+              final position = widget.controller.audio.position;
+              final active = lines.lastIndexWhere(
+                (line) =>
+                    line.at.inMilliseconds <=
+                    position.inMilliseconds + _offsetMs,
               );
-        final trackInfo = track == null
-            ? const SizedBox.shrink()
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              return Column(
                 children: [
-                  const SizedBox(height: 14),
-                  Text(
-                    track.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    track.artist,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: color.onSurfaceVariant),
-                  ),
-                ],
-              );
-        if (desktop) {
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(26, 18, 26, 24),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                SizedBox(
-                  width: 310,
-                  child: SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        header,
-                        const SizedBox(height: 28),
-                        artwork,
-                        trackInfo,
-                      ],
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: colors.surfaceContainerLowest,
+                        border: Border(
+                          left: BorderSide(color: colors.outlineVariant),
+                          right: BorderSide(color: colors.outlineVariant),
+                        ),
+                        boxShadow: const [
+                          BoxShadow(color: Colors.black, offset: Offset(3, 4)),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (desktop)
+                            Padding(
+                              padding: const EdgeInsets.all(20),
+                              child: Wrap(
+                                alignment: WrapAlignment.spaceBetween,
+                                spacing: 16,
+                                runSpacing: 8,
+                                children: [
+                                  Text(
+                                    _result?.kind == LyricsKind.synced
+                                        ? 'LETRAS SINCRONIZADAS'
+                                        : 'ESTUDIO DE LETRAS',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      letterSpacing: .8,
+                                      color: colors.onSurfaceVariant,
+                                    ),
+                                  ),
+                                  Text(
+                                    _result?.kind == LyricsKind.synced
+                                        ? 'LRC SYNC ACTIVO'
+                                        : 'SIN MARCAS LRC',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: colors.primary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          Expanded(
+                            child: _body(track, lines, active, position, media),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
+                  if (desktop)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 24),
+                      child: _options(),
+                    ),
+                  _playbackControls(),
+                ],
+              );
+            },
+          ),
+        );
+        if (desktop) {
+          final leftWidth = (constraints.maxWidth * .40).clamp(310.0, 470.0);
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+            child: Column(
+              children: [
+                header,
+                const SizedBox(height: 28),
+                Expanded(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SizedBox(
+                        width: leftWidth,
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (track != null) ...[
+                                Container(
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: colors.surfaceContainerLow,
+                                    border: Border.all(
+                                      color: colors.outlineVariant,
+                                    ),
+                                    boxShadow: const [
+                                      BoxShadow(
+                                        color: Colors.black,
+                                        offset: Offset(3, 4),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Artwork(
+                                    track: track,
+                                    size: leftWidth - 34,
+                                    radius: 4,
+                                  ),
+                                ),
+                                const SizedBox(height: 20),
+                                Text(
+                                  track.title,
+                                  style: const TextStyle(
+                                    fontFamily: 'Newsreader',
+                                    fontSize: 36,
+                                    height: 1.12,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  '${track.artist}${track.album == null ? '' : ' · ${track.album}'}',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    color: colors.primary,
+                                  ),
+                                ),
+                                const SizedBox(height: 24),
+                              ],
+                              Text(
+                                'MODALIDAD DE VISUALIZACIÓN',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: colors.onSurfaceVariant,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              _modes(),
+                              const SizedBox(height: 24),
+                              Container(
+                                padding: const EdgeInsets.all(16),
+                                color: colors.surfaceContainerLow,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'NOTA DE PRODUCCIÓN & POÉTICA',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: colors.primary,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    const Text(
+                                      'No hay notas de producción disponibles en los metadatos de esta pista.',
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 30),
+                      lyrics,
+                    ],
+                  ),
                 ),
-                const SizedBox(width: 40),
-                lyrics,
               ],
             ),
           );
@@ -261,7 +375,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   child: Row(
                     children: [
-                      artwork,
+                      Artwork(track: track, size: 64, radius: 4),
                       const SizedBox(width: 14),
                       Expanded(
                         child: Text(
@@ -282,29 +396,116 @@ class _LyricsPanelState extends State<LyricsPanel> {
     );
   }
 
-  Widget _artwork(Track track) {
-    final url = track.artworkUrl;
-    if (url == null || url.isEmpty) {
-      return ColoredBox(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        child: Icon(
-          Icons.music_note,
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
+  Widget _modes({VoidCallback? refresh}) => Wrap(
+    spacing: 4,
+    runSpacing: 4,
+    children: [
+      for (var i = 0; i < 3; i++)
+        ChoiceChip(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+          label: Text(['Sincronizada', 'Tradicional', 'Traducción'][i]),
+          selected: _mode == i,
+          onSelected: (_) {
+            setState(() {
+              _mode = i;
+              _lastActive = -1;
+            });
+            refresh?.call();
+          },
         ),
-      );
-    }
-    return Image.network(
-      url,
-      fit: BoxFit.cover,
-      errorBuilder: (_, _, _) => ColoredBox(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        child: Icon(
-          Icons.music_note,
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
-        ),
+    ],
+  );
+
+  Widget _options({VoidCallback? refresh, bool includeModes = false}) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      if (includeModes) _modes(refresh: refresh),
+      Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          const Text('SINCRONÍA OFFSET:'),
+          OutlinedButton(
+            onPressed: () {
+              setState(() {
+                _offsetMs -= 500;
+                _lastActive = -1;
+              });
+              refresh?.call();
+            },
+            child: const Text('-0.5s'),
+          ),
+          Text(
+            '${_offsetMs >= 0 ? '+' : ''}${(_offsetMs / 1000).toStringAsFixed(2)}s',
+          ),
+          OutlinedButton(
+            onPressed: () {
+              setState(() {
+                _offsetMs += 500;
+                _lastActive = -1;
+              });
+              refresh?.call();
+            },
+            child: const Text('+0.5s'),
+          ),
+          IconButton(
+            tooltip: 'Restablecer sincronía',
+            onPressed: () {
+              setState(() {
+                _offsetMs = 0;
+                _lastActive = -1;
+              });
+              refresh?.call();
+            },
+            icon: const Icon(Icons.restart_alt),
+          ),
+        ],
       ),
-    );
-  }
+      const Text(
+        'Ajuste manual de esta pista, durante esta sesión.',
+        style: TextStyle(fontSize: 12),
+      ),
+      const SizedBox(height: 8),
+      Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          const Text('TIPOGRAFÍA:'),
+          for (var i = 0; i < 3; i++)
+            ChoiceChip(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(4),
+              ),
+              label: Text(['Serif Editorial', 'Grotesca', 'Máquina'][i]),
+              selected: _typeface == i,
+              onSelected: (_) {
+                setState(() => _typeface = i);
+                refresh?.call();
+              },
+            ),
+          TextButton.icon(
+            onPressed: _loading ? null : _import,
+            icon: const Icon(Icons.upload_file),
+            label: const Text('Cargar .LRC / .TXT'),
+          ),
+        ],
+      ),
+    ],
+  );
+
+  void _showOptions() => showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (_) => StatefulBuilder(
+      builder: (context, update) => SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: _options(includeModes: true, refresh: () => update(() {})),
+      ),
+    ),
+  );
 
   Widget _playbackControls() {
     final controller = widget.controller;
@@ -422,6 +623,17 @@ class _LyricsPanelState extends State<LyricsPanel> {
       );
     }
     if (_error != null) return _message(_error!, retry: () => _load(track));
+    if (_mode == 2) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: Text(
+            'Traducción pendiente; no disponible.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
     final result = _result;
     if (result == null || result.kind == LyricsKind.notFound) {
       return _message('No se encontraron letras.', retry: () => _load(track));
@@ -429,24 +641,31 @@ class _LyricsPanelState extends State<LyricsPanel> {
     if (result.kind == LyricsKind.instrumental) {
       return const Center(child: Text('Pista instrumental'));
     }
-    if (result.kind == LyricsKind.plain) {
+    if (result.kind == LyricsKind.plain || _mode == 1) {
       return SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            Text(
-              'Estas letras no tienen marcas de tiempo.',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+            if (result.kind == LyricsKind.plain)
+              Text(
+                'Estas letras no tienen marcas de tiempo.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
-            ),
             const SizedBox(height: 16),
             SelectableText(
-              result.text,
+              result.kind == LyricsKind.synced
+                  ? result.lines.map((line) => line.text).join('\n')
+                  : result.text,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontFamily: 'Newsreader',
+              style: TextStyle(
+                fontFamily: [
+                  'Newsreader',
+                  'Plus Jakarta Sans',
+                  'monospace',
+                ][_typeface],
                 fontSize: 24,
                 height: 1.65,
               ),
@@ -497,60 +716,86 @@ class _LyricsPanelState extends State<LyricsPanel> {
             key: key,
             liveRegion: highlighted,
             label: '${_formatTime(line.at)} ${line.text}',
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: () => widget.controller.seek(line.at),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 48),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 6,
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border(
+                  left: BorderSide(
+                    width: highlighted ? 6 : 0,
+                    color: highlighted
+                        ? Theme.of(context).colorScheme.primaryContainer
+                        : Colors.transparent,
+                  ),
+                ),
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => widget.controller.seek(
+                    Duration(
+                      milliseconds: (line.at.inMilliseconds - _offsetMs).clamp(
+                        0,
+                        1 << 60,
+                      ),
                     ),
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: 44,
-                          child: Text(
-                            _formatTime(line.at),
-                            style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                ),
+                  ),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 48),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 6,
+                      ),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 44,
+                            child: Text(
+                              _formatTime(line.at),
+                              style: Theme.of(context).textTheme.labelSmall
+                                  ?.copyWith(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                  ),
+                            ),
                           ),
-                        ),
-                        Expanded(
-                          child: Center(
-                            child: AnimatedDefaultTextStyle(
-                              duration: media.disableAnimations
-                                  ? Duration.zero
-                                  : const Duration(milliseconds: 180),
-                              curve: Curves.easeOut,
-                              style: TextStyle(
-                                fontFamily: 'Newsreader',
-                                fontSize: highlighted ? 34 : 25,
-                                height: 1.45,
-                                fontWeight: highlighted
-                                    ? FontWeight.w700
-                                    : FontWeight.w400,
-                                color: highlighted
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Theme.of(
-                                        context,
-                                      ).colorScheme.onSurfaceVariant,
-                              ),
-                              child: Text(
-                                line.text,
-                                textAlign: TextAlign.center,
+                          Expanded(
+                            child: Center(
+                              child: AnimatedDefaultTextStyle(
+                                duration: media.disableAnimations
+                                    ? Duration.zero
+                                    : const Duration(milliseconds: 180),
+                                curve: Curves.easeOut,
+                                style: TextStyle(
+                                  fontFamily: [
+                                    'Newsreader',
+                                    'Plus Jakarta Sans',
+                                    'monospace',
+                                  ][_typeface],
+                                  fontSize: highlighted ? 38 : 28,
+                                  fontStyle: highlighted
+                                      ? FontStyle.italic
+                                      : FontStyle.normal,
+                                  height: 1.45,
+                                  fontWeight: highlighted
+                                      ? FontWeight.w700
+                                      : FontWeight.w400,
+                                  color: highlighted
+                                      ? Theme.of(context).colorScheme.primary
+                                      : Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                ),
+                                child: Text(
+                                  line.text,
+                                  textAlign: TextAlign.left,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -576,12 +821,12 @@ class _LyricsPanelState extends State<LyricsPanel> {
             children: [
               TextButton.icon(
                 onPressed: retry,
-                icon: const Icon(Icons.refresh),
+                icon: const Icon(StudioSymbols.restartAlt),
                 label: const Text('Reintentar'),
               ),
               TextButton.icon(
                 onPressed: _import,
-                icon: const Icon(Icons.file_open),
+                icon: const Icon(StudioSymbols.uploadFile),
                 label: const Text('Importar LRC o TXT'),
               ),
             ],
