@@ -6,6 +6,7 @@ import '../app_controller.dart';
 import '../core/models.dart';
 import '../lyrics/lyrics_service.dart';
 import 'artwork.dart';
+import 'studio/studio_symbols.dart';
 
 String _formatTime(Duration value) {
   final seconds = value.inSeconds;
@@ -172,13 +173,13 @@ class _LyricsPanelState extends State<LyricsPanel> {
             IconButton(
               tooltip: 'Importar archivo LRC o TXT',
               onPressed: _loading ? null : _import,
-              icon: const Icon(Icons.file_open),
+              icon: const Icon(StudioSymbols.uploadFile),
             ),
             if (!desktop)
               IconButton(
                 tooltip: 'Ajustes de letras',
                 onPressed: _showOptions,
-                icon: const Icon(Icons.tune),
+                icon: const Icon(StudioSymbols.tune),
               ),
             TextButton.icon(
               onPressed:
@@ -307,7 +308,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
                                   track.title,
                                   style: const TextStyle(
                                     fontFamily: 'Newsreader',
-                                    fontSize: 44,
+                                    fontSize: 36,
                                     height: 1.12,
                                   ),
                                 ),
@@ -401,6 +402,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
     children: [
       for (var i = 0; i < 3; i++)
         ChoiceChip(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
           label: Text(['Sincronizada', 'Tradicional', 'Traducción'][i]),
           selected: _mode == i,
           onSelected: (_) {
@@ -473,6 +475,9 @@ class _LyricsPanelState extends State<LyricsPanel> {
           const Text('TIPOGRAFÍA:'),
           for (var i = 0; i < 3; i++)
             ChoiceChip(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(4),
+              ),
               label: Text(['Serif Editorial', 'Grotesca', 'Máquina'][i]),
               selected: _typeface == i,
               onSelected: (_) {
@@ -816,12 +821,12 @@ class _LyricsPanelState extends State<LyricsPanel> {
             children: [
               TextButton.icon(
                 onPressed: retry,
-                icon: const Icon(Icons.refresh),
+                icon: const Icon(StudioSymbols.restartAlt),
                 label: const Text('Reintentar'),
               ),
               TextButton.icon(
                 onPressed: _import,
-                icon: const Icon(Icons.file_open),
+                icon: const Icon(StudioSymbols.uploadFile),
                 label: const Text('Importar LRC o TXT'),
               ),
             ],

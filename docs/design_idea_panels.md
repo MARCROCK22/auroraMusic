@@ -25,7 +25,9 @@ automática. USB, CRC, escritura directa, respaldos y traducción se muestran co
 pendientes. Los modelos actuales no proporcionan notas de producción.
 
 Validación: `flutter analyze --no-pub` sin incidencias. Los 20 tests existentes de
-letras/reproductor y tres pruebas nuevas de archivos, offset/modos y descargas
+letras/reproductor y cuatro pruebas nuevas de archivos, offset/modos, descargas y capturas
 a 320 px con texto 200% pasan. Las letras usan un servicio simulado sin red.
 No se verificó reproducción física ni selectores nativos en dispositivos.
-Las capturas finales se generan después de integrar los recursos compartidos.
+Capturas con Newsreader, Plus Jakarta Sans y símbolos originales en
+`build/ui-review/studio-{downloads,lyrics}-{ancho}.png`, con fixtures offline.
+Descargas se revisa a 1286×1913, letras a 1600×1400 y ambas a 320×800 con texto 200%.

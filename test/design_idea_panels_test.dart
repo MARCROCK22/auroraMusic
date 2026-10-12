@@ -43,6 +43,8 @@ void main() {
       'Plus Jakarta Sans':
           'assets/fonts/plus_jakarta_sans/PlusJakartaSans-Variable.ttf',
       'MaterialIcons': 'fonts/MaterialIcons-Regular.otf',
+      'Aurora Symbols':
+          'assets/fonts/material_symbols_outlined/MaterialSymbolsOutlined.ttf',
     }.entries) {
       await (FontLoader(font.key)..addFont(rootBundle.load(font.value))).load();
     }
@@ -79,6 +81,7 @@ void main() {
       c.queue = [track];
       c.queueIndex = 0;
       await tester.runAsync(() => c.playQueueAt(0));
+      await c.audio.seek(const Duration(seconds: 8));
       await tester.binding.setSurfaceSize(const Size(1600, 1100));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(
@@ -167,6 +170,7 @@ void main() {
       c.queue = [illustrated];
       c.queueIndex = 0;
       await tester.runAsync(() => c.playQueueAt(0));
+      await c.audio.seek(const Duration(seconds: 8));
       c.downloads.add(
         DownloadJob(
           id: 'capture-active',
@@ -191,11 +195,17 @@ void main() {
       );
       addTearDown(() => tester.binding.setSurfaceSize(null));
       for (final page in ['downloads', 'lyrics']) {
-        for (final size in [const Size(1600, 1152), const Size(320, 800)]) {
+        for (final size in [
+          Size(
+            page == 'downloads' ? 1286 : 1600,
+            page == 'downloads' ? 1913 : 1400,
+          ),
+          const Size(320, 800),
+        ]) {
           await tester.binding.setSurfaceSize(size);
           await tester.pumpWidget(
             MaterialApp(
-              theme: auroraTheme(Brightness.dark, const Color(0xffea6b29)),
+              theme: auroraTheme(Brightness.dark, const Color(0xffe86927)),
               builder: (context, child) => MediaQuery(
                 data: MediaQuery.of(context).copyWith(
                   textScaler: TextScaler.linear(size.width == 320 ? 2 : 1),
@@ -205,14 +215,29 @@ void main() {
               home: Scaffold(
                 body: RepaintBoundary(
                   key: const ValueKey('studio-review'),
-                  child: page == 'downloads'
-                      ? DownloadsStudioPage(controller: c)
-                      : LyricsPanel(controller: c, service: FixtureLyrics()),
+                  child: ColoredBox(
+                    color: const Color(0xff151312),
+                    child: page == 'downloads'
+                        ? DownloadsStudioPage(controller: c)
+                        : LyricsPanel(controller: c, service: FixtureLyrics()),
+                  ),
                 ),
               ),
             ),
           );
+          await tester.runAsync(() async {
+            for (final widget in tester.widgetList<Image>(find.byType(Image))) {
+              await precacheImage(
+                widget.image,
+                tester.element(find.byKey(const ValueKey('studio-review'))),
+              );
+            }
+          });
           await tester.pumpAndSettle();
+          await tester.pump(const Duration(milliseconds: 200));
+          if (page == 'lyrics') {
+            expect(find.text('Primer verso'), findsOneWidget);
+          }
           await tester.runAsync(() async {
             final boundary = tester.renderObject<RenderRepaintBoundary>(
               find.byKey(const ValueKey('studio-review')),

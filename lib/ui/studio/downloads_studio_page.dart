@@ -6,6 +6,7 @@ import '../../app_controller.dart';
 import '../../core/models.dart';
 import '../../library/local_file_metadata.dart';
 import '../artwork.dart';
+import 'studio_symbols.dart';
 
 class DownloadsStudioPage extends StatefulWidget {
   const DownloadsStudioPage({super.key, required this.controller});
@@ -156,7 +157,7 @@ class _DownloadsStudioPageState extends State<DownloadsStudioPage> {
                                 ? c.chooseDownloadDirectory
                                 : null,
                             icon: const Icon(
-                              Icons.drive_file_move_outline,
+                              StudioSymbols.driveFileMove,
                               size: 18,
                             ),
                             label: Text(
@@ -167,7 +168,7 @@ class _DownloadsStudioPageState extends State<DownloadsStudioPage> {
                           ),
                           FilledButton.icon(
                             onPressed: c.openDownloadDirectory,
-                            icon: const Icon(Icons.open_in_new, size: 18),
+                            icon: const Icon(StudioSymbols.folder, size: 18),
                             label: Text(
                               c.canConfigureDownloadDirectory
                                   ? 'Explorador Windows'
@@ -258,16 +259,25 @@ class _DownloadsStudioPageState extends State<DownloadsStudioPage> {
               runSpacing: 8,
               children: [
                 ChoiceChip(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(4),
+                  ),
                   label: Text('Descargadas  ${complete.length}'),
                   selected: _tab == 0,
                   onSelected: (_) => setState(() => _tab = 0),
                 ),
                 ChoiceChip(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(4),
+                  ),
                   label: Text('En progreso  ${active.length}'),
                   selected: _tab == 1,
                   onSelected: (_) => setState(() => _tab = 1),
                 ),
                 ChoiceChip(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(4),
+                  ),
                   label: Text(
                     'Conflictos / Re-sincronizar  ${conflicts.length}',
                   ),
@@ -276,7 +286,7 @@ class _DownloadsStudioPageState extends State<DownloadsStudioPage> {
                 ),
                 TextButton.icon(
                   onPressed: c.importFiles,
-                  icon: const Icon(Icons.file_download_outlined),
+                  icon: const Icon(StudioSymbols.uploadFile),
                   label: const Text('Importar archivos externos'),
                 ),
               ],
@@ -288,13 +298,13 @@ class _DownloadsStudioPageState extends State<DownloadsStudioPage> {
               children: [
                 OutlinedButton.icon(
                   onPressed: c.importFiles,
-                  icon: const Icon(Icons.manage_search),
+                  icon: const Icon(StudioSymbols.findInPage),
                   label: const Text('Escanear nuevos archivos'),
                 ),
                 const Text('Selecciona los archivos que quieras importar.'),
                 OutlinedButton.icon(
                   onPressed: () => _pending('Exportar a USB'),
-                  icon: const Icon(Icons.usb),
+                  icon: const Icon(StudioSymbols.usb),
                   label: const Text('Exportar a USB · pendiente'),
                 ),
               ],
@@ -359,7 +369,7 @@ class _DownloadsStudioPageState extends State<DownloadsStudioPage> {
                   TextField(
                     decoration: const InputDecoration(
                       labelText: 'Filtrar por pista o formato',
-                      suffixIcon: Icon(Icons.search),
+                      suffixIcon: Icon(StudioSymbols.search),
                       border: OutlineInputBorder(),
                     ),
                     onChanged: (value) => setState(() => _filter = value),
@@ -590,7 +600,7 @@ class _DownloadsStudioPageState extends State<DownloadsStudioPage> {
         onPressed: () => widget.controller.playTrack(
           job.track.copyWith(localPath: job.localPath),
         ),
-        icon: const Icon(Icons.play_arrow),
+        icon: const Icon(StudioSymbols.playArrow),
       ),
     if (job.status == DownloadStatus.downloading ||
         job.status == DownloadStatus.queued)
@@ -604,13 +614,13 @@ class _DownloadsStudioPageState extends State<DownloadsStudioPage> {
       IconButton(
         tooltip: 'Reintentar descarga',
         onPressed: () => widget.controller.retryDownload(job),
-        icon: const Icon(Icons.refresh),
+        icon: const Icon(StudioSymbols.restartAlt),
       ),
     if (job.status == DownloadStatus.completed)
       IconButton(
         tooltip: 'Eliminar archivo descargado',
         onPressed: () => _delete(job),
-        icon: const Icon(Icons.delete_outline),
+        icon: const Icon(StudioSymbols.deleteOutline),
       ),
   ];
 
