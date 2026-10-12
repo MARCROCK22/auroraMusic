@@ -13,9 +13,11 @@ class StudioHomeIntroduction extends StatelessWidget {
     required this.controller,
     required this.onSearch,
     required this.onVinyl,
+    this.onSearchQuery,
   });
   final AppController controller;
   final VoidCallback onSearch, onVinyl;
+  final ValueChanged<String>? onSearchQuery;
 
   @override
   Widget build(BuildContext context) {
@@ -86,8 +88,7 @@ class StudioHomeIntroduction extends StatelessWidget {
                 () => showStudioPending(context, 'Simulación de cinta'),
               ),
               _mood(context, StudioSymbols.nightlife, 'Improvisación Jazz', () {
-                onSearch();
-                c.search('jazz');
+                _searchMood('jazz');
               }),
               _mood(
                 context,
@@ -96,8 +97,7 @@ class StudioHomeIntroduction extends StatelessWidget {
                 () => showStudioPending(context, 'Perfil de enfoque'),
               ),
               _mood(context, StudioSymbols.acUnit, 'Acústica Nórdica', () {
-                onSearch();
-                c.search('acústica nórdica');
+                _searchMood('acústica nórdica');
               }),
             ],
           ),
@@ -138,6 +138,15 @@ class StudioHomeIntroduction extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  void _searchMood(String query) {
+    if (onSearchQuery != null) {
+      onSearchQuery!(query);
+    } else {
+      onSearch();
+      controller.search(query);
+    }
   }
 
   Widget _mood(
@@ -226,7 +235,14 @@ class StudioHomeIntroduction extends StatelessWidget {
           runSpacing: 8,
           children: [
             OutlinedButton.icon(
-              onPressed: onVinyl,
+              onPressed: c.jamPlaybackActive
+                  ? null
+                  : () async {
+                      if (c.currentTrack?.id != track.id) {
+                        await c.playTrack(track, context: albumTracks);
+                      }
+                      if (context.mounted) onVinyl();
+                    },
               icon: const Icon(StudioSymbols.album, size: 18),
               label: const Text('Girar en Modo Vinilo'),
             ),

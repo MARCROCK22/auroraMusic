@@ -586,6 +586,12 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   }
 
   Widget _home(AppController c) => HomeMusicPage(
+    onSearchQuery: (query) {
+      _search.text = query;
+      _spotifySearch = false;
+      _navigate(1);
+      _submitSearch(c, query);
+    },
     controller: c,
     onSearch: () => _navigate(1),
     onDownloads: () => _navigate(3),
