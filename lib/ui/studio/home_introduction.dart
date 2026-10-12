@@ -226,7 +226,7 @@ class StudioHomeIntroduction extends StatelessWidget {
           label: Text(
             track.album == null
                 ? 'REPRODUCIR SELECCIÓN'
-                : 'REPRODUCIR ÁLBUM COMPLETO',
+                : 'REPRODUCIR PISTAS DISPONIBLES',
           ),
         ),
         const SizedBox(height: 12),
