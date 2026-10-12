@@ -63,11 +63,6 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: ./scripts/ci_android_signing.ps1 -Action Prepare
 
-          [IO.File]::WriteAllText(
-            (Join-Path $androidDirectory 'key.properties'),
-            $properties + "`n",
-            [Text.UTF8Encoding]::new($false)
-          )
 
       - name: Reconstruir bibliotecas WebP para páginas de 16 KB
         shell: pwsh

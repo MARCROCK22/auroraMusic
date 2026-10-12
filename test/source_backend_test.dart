@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:path/path.dart' as p;
 import 'package:aurora_music/sources/yt_dlp_source.dart';
 import 'package:aurora_music/core/models.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -56,7 +55,10 @@ void main() {
             pageUrl: 'https://youtu.be/abcdefghijk',
           ),
         );
-        expect(hit.input, p.normalize(cached.path));
+        expect(
+          await File(hit.input).resolveSymbolicLinks(),
+          await cached.resolveSymbolicLinks(),
+        );
         expect(downloads, 0);
 
         final sourceWithMismatch = YtDlpSource(
@@ -526,7 +528,10 @@ void main() {
             pageUrl: 'https://www.youtube.com/watch?v=abcdefghijk',
           ),
         );
-        expect(result.input, p.normalize(cached.path));
+        expect(
+          await File(result.input).resolveSymbolicLinks(),
+          await cached.resolveSymbolicLinks(),
+        );
         expect(result.duration, const Duration(minutes: 1));
 
         await expectLater(

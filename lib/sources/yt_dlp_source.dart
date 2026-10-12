@@ -1136,18 +1136,20 @@ class YtDlpSource extends SourceBackend {
           : protectedPath;
       final protected = effectivePath == null
           ? null
-          : p.normalize(File(effectivePath).absolute.path);
+          : await _canonicalFilePath(effectivePath);
       var bytesRemoved = 0;
       await for (final entity in cache.list(followLinks: false)) {
         if (entity is! File ||
-            !p.isWithin(cachePath, p.normalize(entity.absolute.path)) ||
             !RegExp(
               r'^[A-Za-z0-9_-]{11}\.audio$',
             ).hasMatch(p.basename(entity.path)) ||
             await FileSystemEntity.type(entity.path, followLinks: false) !=
-                FileSystemEntityType.file ||
-            (protected != null &&
-                p.equals(p.normalize(entity.absolute.path), protected))) {
+                FileSystemEntityType.file) {
+          continue;
+        }
+        final canonicalEntity = await entity.resolveSymbolicLinks();
+        if (!p.isWithin(cachePath, canonicalEntity) ||
+            (protected != null && p.equals(canonicalEntity, protected))) {
           continue;
         }
         final length = await entity.length();
@@ -1161,6 +1163,19 @@ class YtDlpSource extends SourceBackend {
       return bytesRemoved;
     } finally {
       _clearingCache = false;
+    }
+  }
+
+  Future<String> _canonicalFilePath(String path) async {
+    final file = File(path);
+    try {
+      return await file.resolveSymbolicLinks();
+    } on FileSystemException {
+      final absolute = p.normalize(file.absolute.path);
+      final parent = await Directory(
+        p.dirname(absolute),
+      ).resolveSymbolicLinks();
+      return p.join(parent, p.basename(absolute));
     }
   }
 

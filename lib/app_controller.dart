@@ -1703,9 +1703,12 @@ class AppController extends ChangeNotifier {
         );
         final file = File(localPath);
         final absolutePath = p.normalize(p.absolute(file.path));
+        final canonicalParent = await Directory(
+          p.dirname(absolutePath),
+        ).resolveSymbolicLinks();
         final expectedName = '${_safeDownloadId(job.track.id)}.mp3';
         final target = await file.resolveSymbolicLinks();
-        if (!p.equals(p.dirname(absolutePath), root) ||
+        if (!p.equals(canonicalParent, root) ||
             p.basename(absolutePath) != expectedName ||
             !p.equals(p.dirname(target), root) ||
             p.basename(target) != expectedName) {
