@@ -54,4 +54,9 @@ los avisos y cumplir la licencia al distribuir la adaptación.
 con respuestas inventadas; no realiza llamadas a Spotify ni usa tokens reales.
 Las pruebas cubren autenticación, expiración/401, cache, concurrencia, mapeo,
 paginación, entradas inválidas, errores y estados obsoletos del controlador.
-No se ha verificado la disponibilidad real de endpoints de Spotify.
+El 2026-10-12 se hizo una comprobación real aislada, fuera de la suite: las
+búsquedas de canciones, artistas, álbumes y playlists devolvieron tres elementos
+por tipo, y los detalles de artista, álbum y playlist devolvieron canciones con
+paginación disponible. No se reprodujo ni descargó audio, ni se registraron
+tokens o parámetros de autenticación. Es una comprobación puntual; no garantiza
+la disponibilidad futura de los endpoints privados.

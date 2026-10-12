@@ -1,8 +1,8 @@
 # Organización de Aurora
 
-Aurora usa Flutter y Dart para Windows y Android. Esta primera etapa mueve solo
-las recomendaciones y la persistencia a sus módulos; conserva las funciones,
-la API del controlador y el esquema SQLite versión 1.
+Aurora usa Flutter y Dart para Windows y Android. Las recomendaciones y la
+persistencia tienen módulos propios; Spotify aporta metadatos en un proveedor
+aislado. Se conserva el esquema SQLite versión 1.
 
 ```text
 lib/
@@ -17,6 +17,7 @@ lib/
     library_database.dart      # Biblioteca, favoritos, playlists e historial SQLite
   import/
     spotify_import.dart        # Lectura de exportaciones de Spotify existentes
+  metadata/spotify/            # Autenticación anónima, consultas, mapeo y estado de búsqueda
   lyrics/                      # Consulta y caché de letras
   ui/                          # Pantallas, reproductor, cola y diálogos
 test/                          # Pruebas unitarias y de widgets
@@ -28,17 +29,16 @@ El flujo sigue siendo interfaz → controlador → contratos/proveedores y base 
 datos. El DJ depende de los modelos compartidos, y la persistencia también;
 ninguno depende de widgets. Los proveedores de audio no deben consultar el DJ.
 
-La siguiente etapa incorporará metadatos en `lib/metadata/spotify/`, separados
-de `sources/`: Spotify describirá canciones, artistas, álbumes y playlists;
-yt-dlp y los archivos locales seguirán aportando el audio. Los modelos comunes
-permanecerán en `core/` cuando los necesiten varios módulos.
+`lib/metadata/spotify/` está separado de `sources/`: Spotify describe canciones,
+artistas, álbumes y playlists; yt-dlp y los archivos locales aportan el audio.
+Los modelos comunes permanecen en `core/` cuando los necesitan varios módulos.
 
 `aurora_shell.dart` reúne navegación y muchas pantallas, y `app_controller.dart`
 coordina numerosas funciones. La mejora de interfaz debe extraer los componentes
 que modifique a `ui/`, con datos y acciones recibidos del controlador, sin mover
 pantallas ajenas al trabajo ni introducir lógica del recomendador en widgets.
-La ampliación del DJ se hará en `dj/`, manteniendo su puntuación comprobable sin
-Flutter. No se agregan repositorios, fábricas ni capas de servicios duplicadas.
+La puntuación y filtros del DJ permanecen en `dj/`, comprobables sin Flutter.
+No se agregan repositorios, fábricas ni capas de servicios duplicadas.
 
 El historial actual registra la última reproducción de cada canción (hasta 100
 identificadores), no contadores, omisiones ni reproducciones completadas. Estas
