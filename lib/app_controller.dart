@@ -678,12 +678,23 @@ class AppController extends ChangeNotifier {
   Future<void> _playTrack(Track track, {List<Track>? context}) async {
     _playIntent = true;
     _expiryRetries = 0;
-    queue = List.of(context?.isNotEmpty == true ? context! : [track]);
     final remembered = {for (final item in tracks) item.id: item};
-    queue = queue.map((item) => remembered[item.id] ?? item).toList();
-    queueIndex = queue.indexWhere((item) => item.id == track.id);
+    final selected = remembered[track.id] ?? track;
+    final seen = <String>{};
+    queue = [];
+    for (final candidate in context?.isNotEmpty == true ? context! : [track]) {
+      final item = remembered[candidate.id] ?? candidate;
+      if (item.id != selected.id && recommendationTracksMatch(item, selected)) {
+        continue;
+      }
+      final keys = recommendationTrackKeys(item);
+      if (keys.any(seen.contains)) continue;
+      seen.addAll(keys);
+      queue.add(item);
+    }
+    queueIndex = queue.indexWhere((item) => item.id == selected.id);
     if (queueIndex < 0) {
-      queue.insert(0, track);
+      queue.insert(0, selected);
       queueIndex = 0;
     }
     _shuffleHistory.clear();
@@ -1416,6 +1427,7 @@ class AppController extends ChangeNotifier {
     );
     try {
       if (play) {
+        await _remember(track);
         await playTrack(track);
       } else {
         await addToQueue(track);
