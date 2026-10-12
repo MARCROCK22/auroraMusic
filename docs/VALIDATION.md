@@ -136,3 +136,16 @@ En un teléfono real y en Windows, comprobar con un archivo local y una fuente o
 - Distribución: instalar APK firmado con clave privada; verificar actualización conservando biblioteca. Extraer ZIP Windows en equipo limpio y ejecutar diagnóstico sin Python instalado.
 
 No se declara compatibilidad universal con modelos de auriculares ni certificación de hardware a partir de estas pruebas automatizadas.
+
+## Verificación integrada del 12 de octubre de 2026
+
+- `flutter analyze --no-pub`: sin incidencias.
+- `flutter test --no-pub`: **269 pruebas aprobadas**, incluyendo metadatos simulados, recomendaciones/filtros/deduplicación, gestos DJ, carruseles, Jam LAN/reconexión/permisos/sincronía, paneles y navegación persistente. Log: `build/aurora-final-integrated-tests.log`.
+- Windows release: `build/windows/x64/runner/Release/aurora_music.exe`. Log: `build/design-final-windows-build.log`.
+- Android ARM64 debug y release: `build/app/outputs/flutter-apk/app-debug.apk` y `app-release.apk`; logs `build/design-android-debug-build.log` y `build/design-final-android-release-build.log`.
+- APK release: `apksigner verify` aprobado, `debuggable=false` y **268 ELF ARM64** con segmentos LOAD de al menos 16 KB; ZIP también alineado. Log: `build/design-android-alignment.log`.
+- `scripts/test_ci_android_signing.ps1`: secretos ausentes, Base64 inválido, restauración, ACL y limpieza idempotente aprobados. Los cuatro Repository Secrets reales Android están configurados; se conserva la identidad existente.
+- Los workflows YAML conservan las traducciones remotas y la licencia MIT añadida por el propietario. La referencia del alias se corrigió a `secrets.ANDROID_KEY_ALIAS`; firma segura, limpieza y artefactos se mantienen. Las traducciones no sustituyen los controles de seguridad.
+- Capturas Flutter completas y offline en `build/ui-review/design_idea_shell/`: Inicio a 1286×1029, 1300×1029, 1286×1600 y 320×800 con texto al 200 %. Descargas y Letras: `build/ui-review/studio-*.png`. No son fondos del producto.
+- Los siete originales de `diseñoidea/` coinciden con el ZIP suministrado. No hubo migración de base de datos.
+- Cámara, sesiones entre dispositivos físicos, sincronía audible, controles Win32, Bluetooth y páginas de 16 KB en un teléfono requieren comprobación manual. Las pruebas automatizadas y compilaciones no certifican estos escenarios.
