@@ -154,7 +154,9 @@ class _SpotifyBrowserPanelState extends State<SpotifyBrowserPanel> {
               overflow: TextOverflow.ellipsis,
             ),
             subtitle: Text(
-              item.subtitle,
+              item.track == null
+                  ? item.subtitle
+                  : _trackDescription(item.track!),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
@@ -235,7 +237,7 @@ class _SpotifyBrowserPanelState extends State<SpotifyBrowserPanel> {
               overflow: TextOverflow.ellipsis,
             ),
             subtitle: Text(
-              '${track.artist}${track.album == null ? '' : ' · ${track.album}'}',
+              _trackDescription(track),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
@@ -277,6 +279,14 @@ class _SpotifyBrowserPanelState extends State<SpotifyBrowserPanel> {
             ),
     ),
   );
+
+  String _trackDescription(Track track) => [
+    track.artist,
+    if (track.album != null) track.album!,
+    if (track.duration > Duration.zero)
+      '${track.duration.inMinutes}:${(track.duration.inSeconds % 60).toString().padLeft(2, '0')}',
+    ...track.genres,
+  ].where((value) => value.isNotEmpty).join(' · ');
 
   Widget _empty(BuildContext context, String title, String description) =>
       Center(

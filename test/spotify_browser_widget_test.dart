@@ -4,6 +4,10 @@ import 'package:aurora_music/metadata/spotify/spotify_metadata_provider.dart';
 import 'package:aurora_music/ui/spotify_browser_panel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+import 'dart:io';
+import 'dart:ui' as ui;
 
 void main() {
   const track = Track(
@@ -18,6 +22,86 @@ void main() {
     name: 'Canción de prueba',
     subtitle: 'Artista de prueba',
     track: track,
+  );
+
+  testWidgets(
+    'review Spotify search and details screenshots use offline fixtures',
+    (tester) async {
+      for (final font in {
+        'Newsreader': 'assets/fonts/newsreader/Newsreader-Variable.ttf',
+        'Plus Jakarta Sans':
+            'assets/fonts/plus_jakarta_sans/PlusJakartaSans-Variable.ttf',
+        'MaterialIcons': 'fonts/MaterialIcons-Regular.otf',
+      }.entries) {
+        await (FontLoader(
+          font.key,
+        )..addFont(rootBundle.load(font.value))).load();
+      }
+      final browser = _FixtureBrowser();
+      addTearDown(browser.dispose);
+      browser.query = 'consulta de prueba';
+      browser.page = SpotifyMetadataPage(
+        items: [item],
+        total: 1,
+        offset: 0,
+        nextOffset: null,
+      );
+      tester.view.physicalSize = const Size(800, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark().copyWith(
+            textTheme: ThemeData.dark().textTheme.apply(
+              fontFamily: 'Plus Jakarta Sans',
+            ),
+          ),
+          home: Scaffold(
+            body: RepaintBoundary(
+              key: const ValueKey('spotify-review'),
+              child: SpotifyBrowserPanel(
+                browser: browser,
+                onQueue: (_) async {},
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final boundary = tester.renderObject<RenderRepaintBoundary>(
+        find.byKey(const ValueKey('spotify-review')),
+      );
+      Future<void> capture(String name) => tester
+          .runAsync(() async {
+            final snapshot = await boundary.toImage();
+            final bytes = await snapshot.toByteData(
+              format: ui.ImageByteFormat.png,
+            );
+            await Directory('build/ui-review').create(recursive: true);
+            await File(
+              'build/ui-review/$name.png',
+            ).writeAsBytes(bytes!.buffer.asUint8List());
+            snapshot.dispose();
+          })
+          .then((_) {});
+      await capture('spotify-search-800');
+      tester.view.physicalSize = const Size(320, 800);
+      browser.detail = SpotifyMetadataDetails(
+        entity: const SpotifyMetadataEntity(
+          type: SpotifyEntityType.album,
+          uri: 'spotify:album:fixture',
+          name: 'Álbum de prueba',
+          subtitle: 'Artista de prueba',
+        ),
+        tracks: [track],
+        total: 1,
+      );
+      browser.publish();
+      await tester.pumpAndSettle();
+      await capture('spotify-details-320');
+      expect(tester.takeException(), isNull);
+    },
   );
 
   testWidgets(

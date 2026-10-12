@@ -12,4 +12,6 @@ Las pantallas conservan el tema, navegación y controles de Aurora. La jerarquí
 
 Las tarjetas, recientes y recomendaciones muestran datos de la biblioteca; no se agregaron colecciones ficticias. Las pruebas usan fixtures sin cuentas ni llamadas reales a Spotify y verifican acciones, paginación, estados y layouts a 320 dp con texto al 200 %. `test/ui_test.dart` genera capturas de Inicio en `build/ui-review/home-1440.png` y `home-320.png` con la biblioteca de prueba.
 
+También se generan `dj-1440.png`, `dj-320.png`, `spotify-search-800.png` y `spotify-details-320.png`. Las capturas cargan las tipografías del repositorio y Material Icons. Los títulos largos de recientes reservan altura para texto ampliado. Las capturas de Spotify son del componente con fixtures y un tema oscuro de prueba; no usan un catálogo ni una cuenta personal.
+
 La comprobación por widgets no certifica audio físico, Bluetooth ni la presentación nativa en un dispositivo Android. Esas comprobaciones requieren hardware.

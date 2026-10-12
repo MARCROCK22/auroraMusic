@@ -124,6 +124,26 @@ void main() {
           ).writeAsBytes(bytes!.buffer.asUint8List());
           snapshot.dispose();
         });
+        await tester.dragUntilVisible(
+          find.text('Personalizar el DJ'),
+          find.byType(ListView).first,
+          const Offset(0, -250),
+        );
+        await tester.ensureVisible(find.text('Personalizar el DJ'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Personalizar el DJ'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await tester.runAsync(() async {
+          final snapshot = await boundary.toImage();
+          final bytes = await snapshot.toByteData(
+            format: ui.ImageByteFormat.png,
+          );
+          await File(
+            'build/ui-review/dj-${size.width.toInt()}.png',
+          ).writeAsBytes(bytes!.buffer.asUint8List());
+          snapshot.dispose();
+        });
         await tester.pumpWidget(const SizedBox.shrink());
       }
     },
@@ -743,7 +763,7 @@ void main() {
     );
     await mount(tester, const Size(320, 800), scale: 2);
     expect(audio.analysisEnabled, isFalse);
-    await tester.tap(find.text(controller.currentTrack!.title).first);
+    await tester.tap(find.byType(Artwork).last);
     await tester.pumpAndSettle();
     expect(find.text('AHORA SUENA'), findsOneWidget);
     expect(find.byTooltip('Letras'), findsNWidgets(2));

@@ -522,7 +522,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         )
       else
         SizedBox(
-          height: 204 + MediaQuery.textScalerOf(context).scale(44),
+          height: 180 + MediaQuery.textScalerOf(context).scale(72),
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: c.recentTracks.length,
