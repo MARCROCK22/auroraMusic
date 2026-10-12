@@ -38,6 +38,10 @@ y usa el proveedor existente y sus límites. Si no quedan resultados, la vista
 ofrece búsqueda y los controles de filtros, sin secciones de relleno.
 
 La composición de Inicio se delega a `HomeMusicPage` y la vista Jam a `JamPage`.
+Jam se monta en la primera visita y conserva su estado cuando se navega a otras
+vistas. Solo cerrar/salir explícitamente o desmontar el shell termina la sesión;
+las animaciones de la vista oculta se desactivan. Visitarla no abre sockets ni
+busca dispositivos hasta que el usuario crea, une o busca una sesión.
 Durante reproducción controlada desde Jam, el shell muestra ese estado con
 **Abrir Jam** y oculta el reproductor personal y su panel lateral para no mostrar
 la posición compartida como si perteneciera a una canción personal.

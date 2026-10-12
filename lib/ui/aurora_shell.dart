@@ -56,6 +56,7 @@ class AuroraShell extends ConsumerStatefulWidget {
 class _AuroraShellState extends ConsumerState<AuroraShell>
     with WidgetsBindingObserver {
   int _section = 0;
+  bool _jamVisited = false;
   bool _spotifySearch = false;
   MusicPlaylist? _playlist;
   bool _likesSelected = false;
@@ -117,6 +118,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     }
     setState(() {
       _section = value;
+      if (value == 9) _jamVisited = true;
       _playlist = null;
       _likesSelected = false;
     });
@@ -471,7 +473,26 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     ),
   );
 
-  Widget _content(AppController c) {
+  Widget _content(AppController c) => Stack(
+    fit: StackFit.expand,
+    children: [
+      Offstage(offstage: _section == 9, child: _page(c)),
+      if (_jamVisited)
+        Offstage(
+          key: const ValueKey('jam-session'),
+          offstage: _section != 9,
+          child: TickerMode(
+            enabled: _section == 9,
+            child: JamPage(
+              key: const ValueKey('persistent-jam-page'),
+              controller: c,
+            ),
+          ),
+        ),
+    ],
+  );
+
+  Widget _page(AppController c) {
     switch (_section) {
       case 1:
         return _searchPage(c);
@@ -490,7 +511,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       case 8:
         return DjDiscoveryPage(controller: c, onSearch: () => _navigate(1));
       case 9:
-        return JamPage(controller: c);
+        return const SizedBox.shrink();
       default:
         return _home(c);
     }

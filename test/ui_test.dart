@@ -12,6 +12,7 @@ import 'package:aurora_music/app_controller.dart';
 import 'package:aurora_music/core/models.dart';
 import 'package:aurora_music/main.dart';
 import 'package:aurora_music/ui/aurora_shell.dart';
+import 'package:aurora_music/ui/jam/jam_page.dart';
 
 import 'support/fakes.dart';
 
@@ -404,6 +405,30 @@ void main() {
     await tester.tap(find.byTooltip('DJ'));
     await tester.pumpAndSettle();
     expect(find.text('Descubre tu próxima canción'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Jam mounts lazily and keeps its State across navigation', (
+    tester,
+  ) async {
+    await mount(tester, const Size(1000, 900));
+    expect(find.byType(JamPage, skipOffstage: false), findsNothing);
+    expect(source.searchQueries, isEmpty);
+    await tester.tap(find.byTooltip('Jam'));
+    await tester.pumpAndSettle();
+    final firstState = tester.state(find.byType(JamPage));
+    await tester.tap(find.byTooltip('Inicio'));
+    await tester.pumpAndSettle();
+    expect(find.byType(JamPage), findsNothing);
+    expect(
+      tester.state(find.byType(JamPage, skipOffstage: false)),
+      same(firstState),
+    );
+    await tester.tap(find.byTooltip('Jam'));
+    await tester.pumpAndSettle();
+    expect(tester.state(find.byType(JamPage)), same(firstState));
+    expect(source.searchQueries, isEmpty);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
