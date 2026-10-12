@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
 import '../core/models.dart';
+import 'artwork.dart';
 
 class QueuePanel extends StatelessWidget {
   const QueuePanel({super.key, required this.controller});
@@ -231,11 +232,14 @@ class _QueueList extends StatelessWidget {
       ),
     ),
     title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-    subtitle: Text(track.artist, maxLines: 1, overflow: TextOverflow.ellipsis),
+    subtitle: Text(
+      '${track.artist} · ${_time(track.duration)}',
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+    ),
     trailing: Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(_time(track.duration)),
         PopupMenuButton<String>(
           tooltip: 'Acciones de la pista',
           onSelected: (action) {
@@ -259,28 +263,19 @@ class _Artwork extends StatelessWidget {
   final Track? track;
   @override
   Widget build(BuildContext context) {
-    final url = track?.artworkUrl;
-    if (url == null || url.isEmpty) {
-      return ColoredBox(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        child: Center(
-          child: Icon(
-            Icons.music_note,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-        ),
+    final item = track;
+    if (item != null) {
+      return LayoutBuilder(
+        builder: (context, size) =>
+            Artwork(track: item, size: size.maxWidth, radius: 0),
       );
     }
-    return Image.network(
-      url,
-      fit: BoxFit.cover,
-      errorBuilder: (_, _, _) => ColoredBox(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        child: Center(
-          child: Icon(
-            Icons.music_note,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Center(
+        child: Icon(
+          Icons.music_note,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
       ),
     );

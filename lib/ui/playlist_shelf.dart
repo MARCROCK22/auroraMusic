@@ -1,0 +1,80 @@
+import 'package:flutter/material.dart';
+
+import '../app_controller.dart';
+import '../core/models.dart';
+import 'artwork.dart';
+
+class PlaylistShelf extends StatelessWidget {
+  const PlaylistShelf({
+    super.key,
+    required this.controller,
+    required this.onOpen,
+  });
+  final AppController controller;
+  final ValueChanged<MusicPlaylist> onOpen;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text('Hechas por ti', style: Theme.of(context).textTheme.titleLarge),
+      const SizedBox(height: 12),
+      Wrap(
+        spacing: 16,
+        runSpacing: 16,
+        children: controller.playlists.map((playlist) {
+          final tracks = controller.tracks
+              .where((t) => playlist.trackIds.contains(t.id))
+              .take(4)
+              .toList();
+          return SizedBox(
+            width: 160,
+            child: Material(
+              color: Theme.of(context).colorScheme.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => onOpen(playlist),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (tracks.isEmpty)
+                        const SizedBox.square(
+                          dimension: 136,
+                          child: Icon(Icons.queue_music, size: 48),
+                        )
+                      else if (tracks.length < 4)
+                        Artwork(track: tracks.first, size: 136, radius: 8)
+                      else
+                        Wrap(
+                          children: tracks
+                              .map(
+                                (t) => Artwork(track: t, size: 68, radius: 0),
+                              )
+                              .toList(),
+                        ),
+                      const SizedBox(height: 12),
+                      Text(
+                        playlist.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${playlist.trackIds.length} canciones',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    ],
+  );
+}

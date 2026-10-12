@@ -9,6 +9,11 @@ import '../app_controller.dart';
 import '../core/audio_backend.dart';
 import '../core/models.dart';
 import 'lyrics_panel.dart';
+import 'artwork.dart';
+import 'dj_panel.dart';
+import 'playlist_shelf.dart';
+import 'spotify_browser_panel.dart';
+export 'artwork.dart';
 import 'spotify_import_dialog.dart';
 import 'spotify_match_dialog.dart';
 import 'vinyl_player.dart';
@@ -44,6 +49,7 @@ class AuroraShell extends ConsumerStatefulWidget {
 class _AuroraShellState extends ConsumerState<AuroraShell>
     with WidgetsBindingObserver {
   int _section = 0;
+  bool _spotifySearch = false;
   MusicPlaylist? _playlist;
   bool _likesSelected = false;
   final _search = TextEditingController();
@@ -516,7 +522,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         )
       else
         SizedBox(
-          height: 204 + MediaQuery.textScalerOf(context).scale(44),
+          height: 180 + MediaQuery.textScalerOf(context).scale(72),
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: c.recentTracks.length,
@@ -526,8 +532,19 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
           ),
         ),
       const SizedBox(height: 28),
-      _recommendations(c),
+      DjPanel(controller: c),
       const SizedBox(height: 28),
+      if (c.playlists.isNotEmpty) ...[
+        PlaylistShelf(
+          controller: c,
+          onOpen: (playlist) => setState(() {
+            _section = 2;
+            _playlist = playlist;
+            _likesSelected = false;
+          }),
+        ),
+        const SizedBox(height: 28),
+      ],
       _sectionTitle(
         'Tu colección',
         '${c.tracks.length} canciones · ${c.playlists.length} listas',
@@ -543,170 +560,6 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         ),
     ],
   );
-
-  Widget _recommendations(AppController c) {
-    final recommendations = c.recommendations;
-    final libraryIds = c.tracks.map((track) => track.id).toSet();
-    final personalized =
-        c.favoriteIds.any(libraryIds.contains) ||
-        c.playlists.any(
-          (playlist) => playlist.trackIds.any(libraryIds.contains),
-        ) ||
-        c.recentTracks.isNotEmpty;
-    final contextTracks = recommendations
-        .map((recommendation) => recommendation.track)
-        .toList();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _sectionTitle(
-          'Para ti',
-          personalized
-              ? 'Basado en tus favoritos, listas y escucha reciente'
-              : 'Aún no hay señales personales; elegimos de tu biblioteca',
-        ),
-        const SizedBox(height: 12),
-        if (recommendations.isEmpty)
-          _empty(
-            Icons.auto_awesome_outlined,
-            'Tu biblioteca está lista para crecer',
-            'Añade canciones reproducibles y aparecerán recomendaciones aquí.',
-          )
-        else
-          ...recommendations.map(
-            (recommendation) => ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-              leading: Artwork(
-                track: recommendation.track,
-                size: 48,
-                radius: 8,
-              ),
-              title: Text(
-                recommendation.track.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              subtitle: Text(
-                '${recommendation.track.artist} · ${recommendation.reason}',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              onTap: () =>
-                  c.playTrack(recommendation.track, context: contextTracks),
-              trailing: IconButton(
-                tooltip: 'Reproducir ${recommendation.track.title}',
-                onPressed: () =>
-                    c.playTrack(recommendation.track, context: contextTracks),
-                icon: const Icon(Icons.play_arrow_rounded),
-              ),
-            ),
-          ),
-        SwitchListTile.adaptive(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-          title: const Text('Incluir novedades de YouTube'),
-          subtitle: const Text(
-            'Hasta 2 búsquedas y 24 temas distintos por sesión.',
-          ),
-          value: c.personalDjIncludeDiscovery,
-          onChanged: c.setPersonalDjIncludeDiscovery,
-        ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: FilledButton.icon(
-            onPressed: c.personalDjActive
-                ? c.stopPersonalDj
-                : c.canStartPersonalDj
-                ? () => c.startPersonalDj(
-                    includeDiscovery: c.personalDjIncludeDiscovery,
-                  )
-                : null,
-            icon: Icon(
-              c.personalDjActive
-                  ? Icons.stop_circle_outlined
-                  : Icons.play_circle,
-            ),
-            label: Text(
-              c.personalDjActive
-                  ? 'Detener DJ personal · sin voz'
-                  : 'Iniciar DJ personal · sin voz',
-            ),
-          ),
-        ),
-        if (c.personalDjActive)
-          const Padding(
-            padding: EdgeInsets.only(top: 6, left: 8),
-            child: Text('El tema actual seguirá hasta terminar.'),
-          ),
-        if (c.personalDjError != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              'El DJ seguirá con tu biblioteca: ${c.personalDjError}',
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed:
-                c.discoveringRecommendations || !c.canDiscoverRecommendations
-                ? null
-                : c.discoverRecommendations,
-            icon: c.discoveringRecommendations
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.travel_explore),
-            label: Text(
-              c.discoveringRecommendations
-                  ? 'Buscando en YouTube…'
-                  : c.discoveredRecommendations.isEmpty
-                  ? 'Descubrir en YouTube'
-                  : 'Actualizar descubrimiento',
-            ),
-          ),
-        ),
-        if (c.recommendationDiscoveryError != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              'No se pudo buscar: ${c.recommendationDiscoveryError}',
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ),
-        if (c.discoveredRecommendations.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          _sectionTitle('Encontradas en YouTube', 'Búsqueda solicitada por ti'),
-          ...c.discoveredRecommendations.map(
-            (track) => ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-              leading: Artwork(track: track, size: 48, radius: 8),
-              title: Text(
-                track.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              subtitle: Text(
-                '${track.artist} · Resultado de YouTube',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              onTap: () =>
-                  c.playTrack(track, context: c.discoveredRecommendations),
-              trailing: IconButton(
-                tooltip: 'Reproducir ${track.title}',
-                onPressed: () =>
-                    c.playTrack(track, context: c.discoveredRecommendations),
-                icon: const Icon(Icons.play_arrow_rounded),
-              ),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
 
   Widget _sectionTitle(String title, String subtitle) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
@@ -926,7 +779,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 12,
+              fontSize: 14,
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
@@ -936,6 +789,47 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   );
 
   Widget _searchPage(AppController c) => Column(
+    children: [
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Wrap(
+            spacing: 8,
+            children: [
+              ChoiceChip(
+                label: const Text('Audio · YouTube'),
+                selected: !_spotifySearch,
+                onSelected: (_) => setState(() => _spotifySearch = false),
+              ),
+              ChoiceChip(
+                label: const Text('Metadatos · Spotify'),
+                selected: _spotifySearch,
+                onSelected: (_) => setState(() => _spotifySearch = true),
+              ),
+            ],
+          ),
+        ),
+      ),
+      Expanded(
+        child: _spotifySearch
+            ? SpotifyBrowserPanel(
+                onQueue: (track) => SpotifyMatchDialog.show(
+                  context,
+                  track: track,
+                  saveLabel: 'Añadir a la cola',
+                  playLabel: 'Reproducir',
+                  onSearch: () => c.findSpotifyMatches(track),
+                  onSave: (match, {required play}) =>
+                      c.importSpotifyMetadataMatch(track, match, play: play),
+                ),
+              )
+            : _audioSearchPage(c),
+      ),
+    ],
+  );
+
+  Widget _audioSearchPage(AppController c) => Column(
     children: [
       Padding(
         padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
@@ -1225,18 +1119,14 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                   'Una lista para cada momento',
                   'Crea una lista y reúne tus canciones favoritas.',
                 ),
-              ...c.playlists.map(
-                (playlist) => ListTile(
-                  leading: const Icon(Icons.queue_music),
-                  title: Text(playlist.name),
-                  subtitle: Text('${playlist.trackIds.length} canciones'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => setState(() {
+              if (c.playlists.isNotEmpty)
+                PlaylistShelf(
+                  controller: c,
+                  onOpen: (playlist) => setState(() {
                     _likesSelected = false;
                     _playlist = playlist;
                   }),
                 ),
-              ),
             ],
           ),
         ),
@@ -2984,54 +2874,6 @@ class _AmbientPainter extends CustomPainter {
   @override
   bool shouldRepaint(_AmbientPainter oldDelegate) =>
       oldDelegate.color != color || oldDelegate.animated != animated;
-}
-
-class Artwork extends StatelessWidget {
-  const Artwork({
-    super.key,
-    required this.track,
-    required this.size,
-    this.radius = 12,
-  });
-  final Track track;
-  final double size;
-  final double radius;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final placeholder = Container(
-      color: colors.primary.withValues(alpha: .10),
-      child: Center(
-        child: Icon(
-          Icons.music_note_rounded,
-          size: size * .35,
-          color: colors.primary,
-        ),
-      ),
-    );
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: track.artworkUrl == null
-            ? placeholder
-            : Image.network(
-                track.artworkUrl!,
-                fit: BoxFit.cover,
-                alignment: Alignment.center,
-                cacheWidth: (size * MediaQuery.devicePixelRatioOf(context))
-                    .ceil()
-                    .clamp(48, 1024),
-                excludeFromSemantics: true,
-                errorBuilder: (_, _, _) => placeholder,
-                loadingBuilder: (_, image, progress) =>
-                    progress == null ? image : placeholder,
-              ),
-      ),
-    );
-  }
 }
 
 class SpectrumView extends StatelessWidget {

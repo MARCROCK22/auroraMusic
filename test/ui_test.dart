@@ -2,6 +2,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+import 'dart:ui' as ui;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -70,12 +73,81 @@ void main() {
             size: size,
             textScaler: TextScaler.linear(scale),
           ),
-          child: const AuroraApp(),
+          child: const RepaintBoundary(
+            key: ValueKey('ui-review'),
+            child: AuroraApp(),
+          ),
         ),
       ),
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets(
+    'review screenshots use test library data at desktop and mobile sizes',
+    (tester) async {
+      for (final font in {
+        'Newsreader': 'assets/fonts/newsreader/Newsreader-Variable.ttf',
+        'Plus Jakarta Sans':
+            'assets/fonts/plus_jakarta_sans/PlusJakartaSans-Variable.ttf',
+        'MaterialIcons': 'fonts/MaterialIcons-Regular.otf',
+      }.entries) {
+        await (FontLoader(
+          font.key,
+        )..addFont(rootBundle.load(font.value))).load();
+      }
+      await tester.runAsync(
+        () => controller.playTrack(controller.tracks.first),
+      );
+      controller.playlists.add(
+        const MusicPlaylist(
+          id: 'review',
+          name: 'Mi colección',
+          trackIds: ['one', 'two'],
+        ),
+      );
+      for (final size in [const Size(1440, 900), const Size(320, 800)]) {
+        await mount(tester, size);
+        expect(tester.takeException(), isNull);
+        final boundary = tester.renderObject<RenderRepaintBoundary>(
+          find.byKey(const ValueKey('ui-review')),
+        );
+        await tester.runAsync(() async {
+          final snapshot = await boundary.toImage();
+          final bytes = await snapshot.toByteData(
+            format: ui.ImageByteFormat.png,
+          );
+          final directory = Directory('build/ui-review');
+          await directory.create(recursive: true);
+          await File(
+            '${directory.path}/home-${size.width.toInt()}.png',
+          ).writeAsBytes(bytes!.buffer.asUint8List());
+          snapshot.dispose();
+        });
+        await tester.dragUntilVisible(
+          find.text('Personalizar el DJ'),
+          find.byType(ListView).first,
+          const Offset(0, -250),
+        );
+        await tester.ensureVisible(find.text('Personalizar el DJ'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Personalizar el DJ'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await tester.runAsync(() async {
+          final snapshot = await boundary.toImage();
+          final bytes = await snapshot.toByteData(
+            format: ui.ImageByteFormat.png,
+          );
+          await File(
+            'build/ui-review/dj-${size.width.toInt()}.png',
+          ).writeAsBytes(bytes!.buffer.asUint8List());
+          snapshot.dispose();
+        });
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+    },
+  );
 
   testWidgets(
     'typing and repeated submission cannot duplicate a pending YouTube search',
@@ -647,7 +719,7 @@ void main() {
   });
 
   testWidgets(
-    'Queue duplicate songs keep distinct keys and select the tapped occurrence',
+    'Queue deduplicates playback context and selects the tapped song',
     (tester) async {
       final one = controller.tracks.firstWhere((track) => track.id == 'one');
       final two = controller.tracks.firstWhere((track) => track.id == 'two');
@@ -663,18 +735,18 @@ void main() {
         of: find.byType(ReorderableListView),
         matching: find.byType(ListTile),
       );
-      expect(rows, findsNWidgets(3));
+      expect(rows, findsNWidgets(2));
       expect(tester.takeException(), isNull);
       await tester.runAsync(() async {
-        await tester.tap(rows.at(2));
+        await tester.tap(rows.at(1));
         for (var attempt = 0; attempt < 200 && controller.busy; attempt++) {
           await Future<void>.delayed(const Duration(milliseconds: 10));
         }
       });
       expect(controller.busy, isFalse);
       await tester.pumpAndSettle();
-      expect(controller.queueIndex, 2);
-      expect(controller.queue.map((track) => track.id), ['one', 'two', 'one']);
+      expect(controller.queueIndex, 1);
+      expect(controller.queue.map((track) => track.id), ['one', 'two']);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },
@@ -691,7 +763,7 @@ void main() {
     );
     await mount(tester, const Size(320, 800), scale: 2);
     expect(audio.analysisEnabled, isFalse);
-    await tester.tap(find.text(controller.currentTrack!.title).first);
+    await tester.tap(find.byType(Artwork).last);
     await tester.pumpAndSettle();
     expect(find.text('AHORA SUENA'), findsOneWidget);
     expect(find.byTooltip('Letras'), findsNWidgets(2));

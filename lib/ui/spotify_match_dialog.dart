@@ -10,21 +10,32 @@ class SpotifyMatchDialog extends StatefulWidget {
     required this.track,
     required this.onSearch,
     required this.onSave,
+    this.saveLabel = 'Guardar',
+    this.playLabel = 'Guardar y reproducir',
   });
 
   final Track track;
   final Future<List<Track>> Function() onSearch;
   final Future<bool> Function(Track match, {required bool play}) onSave;
+  final String saveLabel;
+  final String playLabel;
 
   static Future<void> show(
     BuildContext context, {
     required Track track,
     required Future<List<Track>> Function() onSearch,
     required Future<bool> Function(Track match, {required bool play}) onSave,
+    String saveLabel = 'Guardar',
+    String playLabel = 'Guardar y reproducir',
   }) => showDialog<void>(
     context: context,
-    builder: (_) =>
-        SpotifyMatchDialog(track: track, onSearch: onSearch, onSave: onSave),
+    builder: (_) => SpotifyMatchDialog(
+      track: track,
+      onSearch: onSearch,
+      onSave: onSave,
+      saveLabel: saveLabel,
+      playLabel: playLabel,
+    ),
   );
 
   @override
@@ -121,7 +132,7 @@ class _SpotifyMatchDialogState extends State<SpotifyMatchDialog> {
           onPressed: _saving || _selected == null
               ? null
               : () => _save(play: false),
-          child: const Text('Guardar'),
+          child: Text(widget.saveLabel),
         ),
         FilledButton(
           onPressed: _saving || _selected == null
@@ -132,7 +143,7 @@ class _SpotifyMatchDialogState extends State<SpotifyMatchDialog> {
                   dimension: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text('Guardar y reproducir'),
+              : Text(widget.playLabel),
         ),
       ],
     );
