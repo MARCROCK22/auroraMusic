@@ -1,0 +1,20 @@
+Nuclear Spotify metadata adaptation
+
+Source: https://github.com/NuclearPlayer/nuclear-plugin-something
+Upstream commit: d0229207d27c998a8ca63a05c09329396a673828
+Upstream package: nuclear-plugin-something 0.3.0
+Author: nukeop (as declared in upstream package.json)
+License: AGPL-3.0-only; full unmodified text in LICENSE alongside this notice.
+
+Aurora's lib/metadata/spotify/spotify_auth.dart, spotify_models.dart and
+spotify_metadata_provider.dart adapt the auth.ts, totp.ts, client.ts, mappers.ts,
+index.ts and types.ts implementation to Dart. Modifications made 2026-10-12:
+anonymous remote-secret rotation, bounded transport/cache/concurrency, explicit
+pagination, sanitized errors, Aurora models, and injectable offline tests.
+The remote secret dictionary is fetched from the same publicly referenced
+source as upstream; no upstream encoded secrets are embedded in Aurora.
+
+The adapted source remains available in Aurora's source distribution under
+AGPL-3.0-only. Preserve this notice, LICENSE, and the corresponding source when
+distributing the adapted provider. These files are included in Flutter assets.
+No Nuclear or Spotify logo/artwork asset is copied from the plugin.
