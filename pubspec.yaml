@@ -44,6 +44,8 @@ dependencies:
   audio_service_win: ^0.0.3
   shared_preferences: ^2.5.5
   crypto: 3.0.7
+  zxing2: 0.2.4
+  mobile_scanner: 7.4.2
 
 dev_dependencies:
   integration_test:
