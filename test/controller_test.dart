@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:aurora_music/app_controller.dart';
 import 'package:aurora_music/core/models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -74,6 +75,21 @@ List<Track> _djLibrary([int count = 8]) => [
       pageUrl: 'https://youtu.be/dj-$i',
     ),
 ];
+
+Future<(AppController, List<Track>)> _controllerWithQueuedRecommendations({
+  required bool paused,
+}) async {
+  final tracks = _djLibrary();
+  final controller = await createTestController(tracks: tracks);
+  await controller.toggleFavorite(tracks.first);
+  final queue = [
+    tracks.first,
+    ...controller.recommendations.map((item) => item.track),
+  ];
+  await controller.playTrack(tracks.first, context: queue);
+  if (paused) await controller.pausePlayback();
+  return (controller, queue);
+}
 
 void main() {
   test(
@@ -416,6 +432,63 @@ void main() {
     },
   );
 
+  test('DJ starts over already queued recommendations while playing', () async {
+    final (controller, queue) = await _controllerWithQueuedRecommendations(
+      paused: false,
+    );
+    addTearDown(() => closeTestController(controller));
+    final audio = controller.audio as FakeAudio;
+    final loads = audio.loadCount;
+    final currentIndex = controller.queueIndex;
+    final currentTrack = controller.currentTrack;
+
+    expect(controller.recommendations, isNotEmpty);
+    expect(
+      controller.recommendations.every(
+        (item) => queue.any((track) => track.id == item.track.id),
+      ),
+      isTrue,
+    );
+    expect(controller.canStartPersonalDj, isTrue);
+    await controller.startPersonalDj();
+
+    expect(controller.personalDjActive, isTrue);
+    expect(controller.currentTrack, currentTrack);
+    expect(controller.queueIndex, currentIndex);
+    expect(
+      controller.queue.map((track) => track.id),
+      queue.map((track) => track.id),
+    );
+    expect(audio.loadCount, loads);
+    expect(audio.isPlaying, isTrue);
+  });
+
+  test('DJ starts over already queued recommendations while paused', () async {
+    final (controller, queue) = await _controllerWithQueuedRecommendations(
+      paused: true,
+    );
+    addTearDown(() => closeTestController(controller));
+    final audio = controller.audio as FakeAudio;
+    audio.position = const Duration(seconds: 37);
+    final loads = audio.loadCount;
+    final currentIndex = controller.queueIndex;
+    final currentTrack = controller.currentTrack;
+
+    expect(controller.canStartPersonalDj, isTrue);
+    await controller.startPersonalDj();
+
+    expect(controller.personalDjActive, isTrue);
+    expect(controller.currentTrack, currentTrack);
+    expect(controller.queueIndex, currentIndex);
+    expect(
+      controller.queue.map((track) => track.id),
+      queue.map((track) => track.id),
+    );
+    expect(audio.loadCount, loads);
+    expect(audio.position, const Duration(seconds: 37));
+    expect(audio.isPlaying, isFalse);
+  });
+
   test(
     'pausing during a DJ refill keeps it paused after results arrive',
     () async {
@@ -573,6 +646,7 @@ void main() {
     addTearDown(() => closeTestController(empty));
     await empty.startPersonalDj();
     await empty.discoverRecommendations();
+    expect(empty.canStartPersonalDj, isFalse);
     expect(empty.audio.isPlaying, isFalse);
     expect((empty.source as FakeSource).searchQueries, isEmpty);
   });
