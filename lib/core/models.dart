@@ -12,6 +12,7 @@ class Track {
     this.pageUrl,
     this.localPath,
     this.album,
+    this.genres = const [],
     this.spotifyUri,
     this.spotifyMatchPending = false,
   });
@@ -23,6 +24,7 @@ class Track {
   final String? pageUrl;
   final String? localPath;
   final String? album;
+  final List<String> genres;
   final String? spotifyUri;
   final bool spotifyMatchPending;
   bool get isPendingSpotifyMatch => spotifyMatchPending;
@@ -35,6 +37,7 @@ class Track {
     String? pageUrl,
     String? spotifyUri,
     bool? spotifyMatchPending,
+    List<String>? genres,
   }) => Track(
     id: id,
     title: title,
@@ -44,6 +47,7 @@ class Track {
     pageUrl: pageUrl ?? this.pageUrl,
     localPath: clearLocalPath ? null : localPath ?? this.localPath,
     album: album,
+    genres: genres ?? this.genres,
     spotifyUri: spotifyUri ?? this.spotifyUri,
     spotifyMatchPending: spotifyMatchPending ?? this.spotifyMatchPending,
   );
@@ -56,6 +60,7 @@ class Track {
     'pageUrl': pageUrl,
     'localPath': localPath,
     'album': album,
+    'genres': genres,
     'spotifyUri': spotifyUri,
     'spotifyMatchPending': spotifyMatchPending,
   };
@@ -70,6 +75,7 @@ class Track {
     pageUrl: json['pageUrl'] as String?,
     localPath: json['localPath'] as String?,
     album: json['album'] as String?,
+    genres: (json['genres'] as List?)?.whereType<String>().toList() ?? const [],
     spotifyUri: json['spotifyUri'] as String?,
     spotifyMatchPending: json['spotifyMatchPending'] as bool? ?? false,
   );
