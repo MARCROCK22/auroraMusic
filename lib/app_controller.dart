@@ -138,9 +138,39 @@ class AppController extends ChangeNotifier {
       recommendations.isNotEmpty;
   bool get personalDjActive => _personalDjActive;
   bool get personalDjIncludeDiscovery => _personalDjIncludeDiscovery;
-  bool get canStartPersonalDj =>
-      recommendations.isNotEmpty ||
-      (_personalDjIncludeDiscovery && discoveredRecommendations.isNotEmpty);
+  bool get canStartPersonalDj {
+    final queuedKeys = queue.expand(recommendationTrackKeys).toSet();
+    final hasUnqueuedRecommendation = [
+      ...recommendations.map((item) => item.track),
+      if (_personalDjIncludeDiscovery) ...discoveredRecommendations,
+    ].any((track) => !recommendationTrackKeys(track).any(queuedKeys.contains));
+    return hasUnqueuedRecommendation || _hasPlayableUpcomingQueue;
+  }
+
+  bool get _hasPlayableUpcomingQueue {
+    if (currentTrack == null ||
+        !(_playIntent || busy || audio.isPlaying || _loadedTrackId != null)) {
+      return false;
+    }
+    bool playable(Track track) =>
+        !track.isPendingSpotifyMatch &&
+        (track.isLocal || track.pageUrl != null);
+    if (shuffle) {
+      return queue.asMap().entries.any(
+        (entry) =>
+            entry.key != queueIndex &&
+            (repeat == RepeatMode.all || !_shufflePlayed.contains(entry.key)) &&
+            playable(entry.value),
+      );
+    }
+    if (queueIndex + 1 < queue.length) {
+      return queue.skip(queueIndex + 1).any(playable);
+    }
+    return repeat == RepeatMode.all &&
+        queue.asMap().entries.any(
+          (entry) => entry.key != queueIndex && playable(entry.value),
+        );
+  }
 
   String _recommendationTasteKey() {
     final sortedFavorites = favoriteIds.toList()..sort();
@@ -230,7 +260,9 @@ class AppController extends ChangeNotifier {
       seedTracks.add(track);
       if (seedTracks.length == 6) break;
     }
-    if (seedTracks.isEmpty) return;
+    if (seedTracks.isEmpty && !(preserveCurrent && _hasPlayableUpcomingQueue)) {
+      return;
+    }
     ++_personalDjGeneration;
     _personalDjActive = true;
     _personalDjIncludeDiscovery = includeDiscovery;
