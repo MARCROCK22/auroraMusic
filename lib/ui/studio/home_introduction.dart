@@ -53,7 +53,11 @@ class StudioHomeIntroduction extends StatelessWidget {
               'Madrugada acústica',
               style: Theme.of(context).textTheme.displayLarge?.copyWith(
                 fontStyle: FontStyle.italic,
-                fontSize: MediaQuery.sizeOf(context).width < 600 ? 38 : 56,
+                fontSize: MediaQuery.sizeOf(context).width <= 400
+                    ? 28
+                    : MediaQuery.sizeOf(context).width < 600
+                    ? 38
+                    : 56,
               ),
             ),
             StudioStamp(now, filled: true, color: colors.primary),
