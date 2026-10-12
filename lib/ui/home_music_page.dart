@@ -1,0 +1,273 @@
+import 'package:flutter/material.dart';
+
+import '../app_controller.dart';
+import '../core/models.dart';
+import 'artwork.dart';
+import 'dj_panel.dart';
+import 'horizontal_music_row.dart';
+import 'playlist_shelf.dart';
+import 'spotify_match_dialog.dart';
+
+class HomeMusicPage extends StatelessWidget {
+  const HomeMusicPage({
+    super.key,
+    required this.controller,
+    required this.onSearch,
+    required this.onDownloads,
+    required this.onLikes,
+    required this.onOpenPlaylist,
+  });
+  final AppController controller;
+  final VoidCallback onSearch, onDownloads, onLikes;
+  final ValueChanged<MusicPlaylist> onOpenPlaylist;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: controller,
+    builder: (context, _) {
+      final c = controller;
+      final recommendations = c.recommendations;
+      final recommendedTracks = recommendations.map((r) => r.track).toList();
+      final libraryIds = c.tracks.map((t) => t.id).toSet();
+      final personalized =
+          c.favoriteIds.any(libraryIds.contains) ||
+          c.playlists.any((p) => p.trackIds.any(libraryIds.contains)) ||
+          c.recentTracks.isNotEmpty;
+      final text = MediaQuery.textScalerOf(context);
+      return ListView(
+        padding: const EdgeInsets.all(24),
+        children: [
+          Text(
+            'Hola de nuevo',
+            style: Theme.of(
+              context,
+            ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ActionChip(
+                avatar: const Icon(Icons.download_outlined, size: 18),
+                label: const Text('Descargas locales'),
+                onPressed: onDownloads,
+              ),
+              ActionChip(
+                avatar: const Icon(Icons.favorite_border, size: 18),
+                label: const Text('Favoritos'),
+                onPressed: onLikes,
+              ),
+              ActionChip(
+                avatar: const Icon(Icons.search, size: 18),
+                label: const Text('Encontrar música'),
+                onPressed: onSearch,
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          if (c.recentTracks.isNotEmpty)
+            HorizontalMusicRow(
+              key: const ValueKey('home-recent'),
+              title: 'Tu música',
+              subtitle: 'Reanudá tu escucha',
+              itemCount: c.recentTracks.length,
+              itemHeight: 220 + text.scale(72),
+              itemBuilder: (context, index) => _TrackCard(
+                track: c.recentTracks[index],
+                actionLabel: 'Reanudar',
+                onPlay: () =>
+                    _play(context, c.recentTracks[index], c.recentTracks),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Tu historia empieza aquí',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Busca una canción o abre tus archivos para comenzar.',
+                  ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 28),
+          if (recommendations.isNotEmpty)
+            HorizontalMusicRow(
+              key: const ValueKey('home-recommendations'),
+              title: 'Para ti',
+              subtitle: personalized
+                  ? 'Basado en tus favoritos, listas y escucha reciente'
+                  : 'Aún no hay señales personales; elegimos de tu biblioteca',
+              itemCount: recommendations.length,
+              itemHeight: 228 + text.scale(136),
+              itemBuilder: (context, index) => _TrackCard(
+                track: recommendations[index].track,
+                reason: recommendations[index].reason,
+                actionLabel: 'Reproducir',
+                onPlay: () => _play(
+                  context,
+                  recommendations[index].track,
+                  recommendedTracks,
+                ),
+              ),
+            )
+          else ...[
+            Text('Para ti', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            Text(
+              c.tracks.isEmpty
+                  ? 'Añade canciones reproducibles y aparecerán recomendaciones aquí.'
+                  : 'No hay recomendaciones disponibles con tus filtros y escucha actual.',
+            ),
+          ],
+          const SizedBox(height: 16),
+          DjPanel(controller: c, showRecommendations: false),
+          if (c.discoveredRecommendations.isNotEmpty) ...[
+            const SizedBox(height: 24),
+            HorizontalMusicRow(
+              title: 'Encontradas en YouTube',
+              subtitle: 'Búsqueda solicitada por ti',
+              itemCount: c.discoveredRecommendations.length,
+              itemHeight: 220 + text.scale(72),
+              itemBuilder: (context, index) => _TrackCard(
+                track: c.discoveredRecommendations[index],
+                actionLabel: 'Reproducir',
+                onPlay: () => _play(
+                  context,
+                  c.discoveredRecommendations[index],
+                  c.discoveredRecommendations,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 28),
+          if (c.playlists.isNotEmpty) ...[
+            PlaylistShelf(
+              controller: c,
+              horizontal: true,
+              onOpen: onOpenPlaylist,
+            ),
+            const SizedBox(height: 28),
+          ],
+          if (c.tracks.isNotEmpty)
+            HorizontalMusicRow(
+              key: const ValueKey('home-library'),
+              title: 'Tu colección',
+              subtitle:
+                  '${c.tracks.length} canciones · ${c.playlists.length} listas',
+              itemCount: c.tracks.length,
+              itemHeight: 220 + text.scale(72),
+              itemBuilder: (context, index) => _TrackCard(
+                track: c.tracks[index],
+                actionLabel: 'Escuchar',
+                onPlay: () => _play(context, c.tracks[index], c.tracks),
+              ),
+            )
+          else
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: c.importFiles,
+                icon: const Icon(Icons.add),
+                label: const Text('Añadir música a tu biblioteca'),
+              ),
+            ),
+        ],
+      );
+    },
+  );
+
+  Future<void> _play(BuildContext context, Track track, List<Track> tracks) =>
+      track.isPendingSpotifyMatch
+      ? SpotifyMatchDialog.show(
+          context,
+          track: track,
+          onSearch: () => controller.findSpotifyMatches(track),
+          onSave: (match, {required play}) =>
+              controller.matchSpotifyTrack(track.id, match, play: play),
+        )
+      : controller.playTrack(track, context: tracks);
+}
+
+class _TrackCard extends StatelessWidget {
+  const _TrackCard({
+    required this.track,
+    required this.actionLabel,
+    required this.onPlay,
+    this.reason,
+  });
+  final Track track;
+  final String actionLabel;
+  final VoidCallback onPlay;
+  final String? reason;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Theme.of(context).colorScheme.surfaceContainerLow,
+    borderRadius: BorderRadius.circular(12),
+    child: InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onPlay,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Stack(
+              children: [
+                Artwork(track: track, size: 176, radius: 8),
+                Positioned(
+                  right: 8,
+                  bottom: 8,
+                  child: IconButton.filled(
+                    tooltip: track.isPendingSpotifyMatch
+                        ? 'Elegir audio para ${track.title}'
+                        : '$actionLabel ${track.title}',
+                    onPressed: onPlay,
+                    icon: Icon(
+                      track.isPendingSpotifyMatch
+                          ? Icons.link
+                          : Icons.play_arrow,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              track.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              track.artist,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            if (reason != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                reason!,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ],
+          ],
+        ),
+      ),
+    ),
+  );
+}
