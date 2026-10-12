@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../app_controller.dart';
 import '../core/models.dart';
 import 'artwork.dart';
+import 'studio/home_introduction.dart';
 import 'dj_panel.dart';
 import 'horizontal_music_row.dart';
 import 'playlist_shelf.dart';
@@ -16,10 +17,12 @@ class HomeMusicPage extends StatelessWidget {
     required this.onDownloads,
     required this.onLikes,
     required this.onOpenPlaylist,
+    this.onVinyl,
   });
   final AppController controller;
   final VoidCallback onSearch, onDownloads, onLikes;
   final ValueChanged<MusicPlaylist> onOpenPlaylist;
+  final VoidCallback? onVinyl;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -52,13 +55,12 @@ class HomeMusicPage extends StatelessWidget {
       return ListView(
         padding: const EdgeInsets.all(24),
         children: [
-          Text(
-            'Hola de nuevo',
-            style: Theme.of(
-              context,
-            ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700),
+          StudioHomeIntroduction(
+            controller: c,
+            onSearch: onSearch,
+            onVinyl: onVinyl ?? onSearch,
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 24),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -72,11 +74,6 @@ class HomeMusicPage extends StatelessWidget {
                 avatar: const Icon(Icons.favorite_border, size: 18),
                 label: const Text('Favoritos'),
                 onPressed: onLikes,
-              ),
-              ActionChip(
-                avatar: const Icon(Icons.search, size: 18),
-                label: const Text('Encontrar música'),
-                onPressed: onSearch,
               ),
             ],
           ),
@@ -93,23 +90,6 @@ class HomeMusicPage extends StatelessWidget {
                 actionLabel: 'Reanudar',
                 onPlay: () =>
                     _play(context, c.recentTracks[index], c.recentTracks),
-              ),
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Tu historia empieza aquí',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Busca una canción o abre tus archivos para comenzar.',
-                  ),
-                ],
               ),
             ),
           const SizedBox(height: 28),
