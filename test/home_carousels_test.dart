@@ -22,6 +22,10 @@ void main() {
       'Plus Jakarta Sans':
           'assets/fonts/plus_jakarta_sans/PlusJakartaSans-Variable.ttf',
       'MaterialIcons': 'fonts/MaterialIcons-Regular.otf',
+      'monospace':
+          'assets/fonts/plus_jakarta_sans/PlusJakartaSans-Variable.ttf',
+      'Aurora Symbols':
+          'assets/fonts/material_symbols_outlined/MaterialSymbolsOutlined.ttf',
     }.entries) {
       await (FontLoader(font.key)..addFont(rootBundle.load(font.value))).load();
     }
@@ -223,7 +227,13 @@ void main() {
         ),
       );
       expect(find.byType(HorizontalMusicRow), findsNothing);
-      await tester.tap(find.text('Encontrar música'));
+      await tester.scrollUntilVisible(
+        find.text('ENCONTRAR MÚSICA'),
+        240,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ENCONTRAR MÚSICA'));
       expect(searched, isTrue);
       expect(tester.takeException(), isNull);
     },
@@ -244,6 +254,12 @@ void main() {
         ),
         scale: 2,
       );
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('home-recommendations')),
+        240,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('home-recommendations')),
         findsOneWidget,

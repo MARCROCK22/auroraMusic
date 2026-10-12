@@ -42,73 +42,81 @@ void main() {
     },
   );
 
-  test('artwork accents tint distinct semantic surfaces in both themes', () {
-    final accents = <Color>[
-      const Color(0xffe86927), // orange
-      const Color(0xff3478c8), // blue
-      const Color(0xff28734a), // forest
-      const Color(0xffc45c2b), // terracotta
-      const Color(0xffa66b00), // amber
-      const Color(0xff7047a3), // purple
-    ];
-    for (final brightness in Brightness.values) {
-      final themes = accents
-          .map((accent) => auroraTheme(brightness, accent))
-          .toList();
-      final schemes = themes.map((theme) => theme.colorScheme).toList();
-      for (final scheme in schemes) {
-        expect(scheme.surface, isNot(scheme.surfaceContainerLow));
-        expect(scheme.surfaceContainerLow, isNot(scheme.surfaceContainer));
-        expect(scheme.surfaceContainer, isNot(scheme.surfaceContainerHigh));
+  test(
+    'dark studio surfaces stay neutral while both themes keep accessible accents',
+    () {
+      final accents = <Color>[
+        const Color(0xffe86927), // orange
+        const Color(0xff3478c8), // blue
+        const Color(0xff28734a), // forest
+        const Color(0xffc45c2b), // terracotta
+        const Color(0xffa66b00), // amber
+        const Color(0xff7047a3), // purple
+      ];
+      for (final brightness in Brightness.values) {
+        final themes = accents
+            .map((accent) => auroraTheme(brightness, accent))
+            .toList();
+        final schemes = themes.map((theme) => theme.colorScheme).toList();
+        for (final scheme in schemes) {
+          expect(scheme.surface, isNot(scheme.surfaceContainerLow));
+          expect(scheme.surfaceContainerLow, isNot(scheme.surfaceContainer));
+          expect(scheme.surfaceContainer, isNot(scheme.surfaceContainerHigh));
+          expect(
+            contrast(scheme.onSurface, scheme.surfaceContainerLow),
+            greaterThanOrEqualTo(4.5),
+          );
+          expect(
+            contrast(scheme.onSurface, scheme.surfaceContainer),
+            greaterThanOrEqualTo(4.5),
+          );
+          expect(
+            contrast(scheme.onSurface, scheme.surfaceContainerLowest),
+            greaterThanOrEqualTo(4.5),
+          );
+          expect(
+            contrast(scheme.onSurfaceVariant, scheme.surfaceContainerHigh),
+            greaterThanOrEqualTo(4.5),
+          );
+          expect(
+            contrast(scheme.onPrimaryContainer, scheme.primaryContainer),
+            greaterThanOrEqualTo(4.5),
+            reason: '$brightness selected navigation text',
+          );
+        }
+        final surfaceVariants = brightness == Brightness.dark ? 1 : 6;
         expect(
-          contrast(scheme.onSurface, scheme.surfaceContainerLow),
-          greaterThanOrEqualTo(4.5),
+          schemes.map((scheme) => scheme.surface).toSet(),
+          hasLength(surfaceVariants),
         );
         expect(
-          contrast(scheme.onSurface, scheme.surfaceContainer),
-          greaterThanOrEqualTo(4.5),
+          schemes.map((scheme) => scheme.surfaceContainer).toSet(),
+          hasLength(surfaceVariants),
+        );
+        expect(schemes.map((scheme) => scheme.primary).toSet(), hasLength(6));
+        double surfaceTintDistance(Color a, Color b) =>
+            ((a.r - b.r).abs() + (a.g - b.g).abs() + (a.b - b.b).abs()) * 255;
+        expect(
+          surfaceTintDistance(schemes.first.surface, schemes.last.surface),
+          brightness == Brightness.dark ? equals(0) : greaterThanOrEqualTo(8),
+          reason:
+              '$brightness artwork palettes should retain neutral studio surfaces',
+        );
+        expect(themes[0].cardTheme.color, schemes[0].surfaceContainerLow);
+        expect(
+          themes[0].inputDecorationTheme.fillColor,
+          schemes[0].surfaceContainer,
         );
         expect(
-          contrast(scheme.onSurface, scheme.surfaceContainerLowest),
-          greaterThanOrEqualTo(4.5),
+          themes[0].dialogTheme.backgroundColor,
+          schemes[0].surfaceContainerHigh,
         );
+        expect(themes[0].popupMenuTheme.color, schemes[0].surfaceContainerHigh);
         expect(
-          contrast(scheme.onSurfaceVariant, scheme.surfaceContainerHigh),
-          greaterThanOrEqualTo(4.5),
-        );
-        expect(
-          contrast(scheme.onPrimaryContainer, scheme.primaryContainer),
-          greaterThanOrEqualTo(4.5),
-          reason: '$brightness selected navigation text',
+          themes[0].listTileTheme.selectedColor,
+          schemes[0].onPrimaryContainer,
         );
       }
-      expect(schemes.map((scheme) => scheme.surface).toSet(), hasLength(6));
-      expect(
-        schemes.map((scheme) => scheme.surfaceContainer).toSet(),
-        hasLength(6),
-      );
-      expect(schemes.map((scheme) => scheme.primary).toSet(), hasLength(6));
-      double surfaceTintDistance(Color a, Color b) =>
-          ((a.r - b.r).abs() + (a.g - b.g).abs() + (a.b - b.b).abs()) * 255;
-      expect(
-        surfaceTintDistance(schemes.first.surface, schemes.last.surface),
-        greaterThanOrEqualTo(8),
-        reason: '$brightness artwork palettes should visibly tint app surfaces',
-      );
-      expect(themes[0].cardTheme.color, schemes[0].surfaceContainerLow);
-      expect(
-        themes[0].inputDecorationTheme.fillColor,
-        schemes[0].surfaceContainer,
-      );
-      expect(
-        themes[0].dialogTheme.backgroundColor,
-        schemes[0].surfaceContainerHigh,
-      );
-      expect(themes[0].popupMenuTheme.color, schemes[0].surfaceContainerHigh);
-      expect(
-        themes[0].listTileTheme.selectedColor,
-        schemes[0].onPrimaryContainer,
-      );
-    }
-  });
+    },
+  );
 }

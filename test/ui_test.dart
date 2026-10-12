@@ -17,6 +17,20 @@ import 'package:aurora_music/ui/jam/jam_page.dart';
 import 'support/fakes.dart';
 
 void main() {
+  setUpAll(() async {
+    for (final font in {
+      'Newsreader': 'assets/fonts/newsreader/Newsreader-Variable.ttf',
+      'Plus Jakarta Sans':
+          'assets/fonts/plus_jakarta_sans/PlusJakartaSans-Variable.ttf',
+      'monospace':
+          'assets/fonts/plus_jakarta_sans/PlusJakartaSans-Variable.ttf',
+      'Aurora Symbols':
+          'assets/fonts/material_symbols_outlined/MaterialSymbolsOutlined.ttf',
+      'MaterialIcons': 'fonts/MaterialIcons-Regular.otf',
+    }.entries) {
+      await (FontLoader(font.key)..addFont(rootBundle.load(font.value))).load();
+    }
+  });
   late AppController controller;
   late ProviderContainer container;
   late _TrackingAudio audio;
@@ -81,6 +95,17 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> reveal(WidgetTester tester, Finder target) async {
+    final outer = find
+        .descendant(
+          of: find.byType(ListView).first,
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    await tester.scrollUntilVisible(target, 240, scrollable: outer);
     await tester.pumpAndSettle();
   }
 
@@ -187,7 +212,9 @@ void main() {
       await mount(tester, size);
       expect(find.text('Inicio').first, findsOneWidget);
       expect(tester.takeException(), isNull);
-      if (size.width >= 600) {
+      if (size.width >= 1200) {
+        await tester.tap(find.byTooltip('Buscar').first);
+      } else if (size.width >= 600) {
         await tester.tap(find.byTooltip('Buscar música'));
       } else {
         await tester.tap(find.byTooltip('Buscar').last);
@@ -219,6 +246,7 @@ void main() {
   ) async {
     await mount(tester, const Size(800, 900));
 
+    await reveal(tester, find.byKey(const ValueKey('home-recommendations')));
     expect(find.text('Para ti'), findsOneWidget);
     expect(
       find.text('Aún no hay señales personales; elegimos de tu biblioteca'),
@@ -252,8 +280,7 @@ void main() {
 
     expect(controller.recommendations, isEmpty);
     expect(controller.canDiscoverRecommendations, isTrue);
-    await tester.drag(find.byType(ListView).first, const Offset(0, -1000));
-    await tester.pumpAndSettle();
+    await reveal(tester, find.text('Descubrir en YouTube'));
     await tester.tap(find.text('Descubrir en YouTube'));
     await tester.pumpAndSettle();
 
@@ -317,8 +344,7 @@ void main() {
       final currentId = controller.currentTrack?.id;
       final audioLoads = audio.loadCount;
       await mount(tester, const Size(800, 900));
-      await tester.drag(find.byType(ListView).first, const Offset(0, -1000));
-      await tester.pumpAndSettle();
+      await reveal(tester, find.text('Personalizar el DJ'));
       await tester.tap(find.text('Iniciar DJ personal · sin voz'));
       await tester.pumpAndSettle();
 
@@ -349,8 +375,8 @@ void main() {
         ),
       ];
       expect(source.searchQueries, isEmpty);
-      await tester.drag(find.byType(ListView).first, const Offset(0, -1000));
-      await tester.pumpAndSettle();
+      await reveal(tester, find.text('Personalizar el DJ'));
+      await reveal(tester, find.text('Descubrir en YouTube'));
       await tester.tap(find.text('Descubrir en YouTube'));
       await tester.pumpAndSettle();
 
@@ -378,16 +404,20 @@ void main() {
       'Cola de reproducción',
       'Ajustes',
     ]) {
+      await tester.ensureVisible(find.byTooltip(destination).first);
+      await tester.pumpAndSettle();
       await tester.tap(find.byTooltip(destination).first);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: destination);
     }
+    await tester.ensureVisible(find.byTooltip('Letras').first);
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Letras').first);
     await tester.pumpAndSettle();
     expect(find.text('Volver'), findsOneWidget);
     await tester.tap(find.text('Volver'));
     await tester.pumpAndSettle();
-    expect(find.text('Hola de nuevo'), findsOneWidget);
+    expect(find.text('Madrugada acústica'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -478,7 +508,7 @@ void main() {
     expect(find.text('Volver'), findsOneWidget);
     await tester.tap(find.text('Volver'));
     await tester.pumpAndSettle();
-    expect(find.text('Hola de nuevo'), findsOneWidget);
+    expect(find.text('Madrugada acústica'), findsOneWidget);
     await tester.tap(find.byTooltip('Ajustes'));
     await tester.pumpAndSettle();
     expect(find.text('Almacenamiento y biblioteca'), findsOneWidget);
@@ -497,6 +527,8 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.tap(find.byIcon(Icons.library_music_outlined).last);
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Me gusta'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Me gusta'));
     await tester.pumpAndSettle();
     expect(
@@ -509,14 +541,36 @@ void main() {
     await tester.tap(find.byTooltip('Descargas locales').last);
     await tester.pumpAndSettle();
     expect(find.text('Carpeta de descargas'), findsOneWidget);
-    final downloadsScroll = find.byType(ListView).first;
-    await tester.dragUntilVisible(
+    await tester.scrollUntilVisible(
       find.text('Cambiar carpeta'),
-      downloadsScroll,
-      const Offset(0, -240),
+      240,
+      scrollable: find.byType(Scrollable).first,
     );
+    await tester.pumpAndSettle();
     expect(find.text('Cambiar carpeta'), findsOneWidget);
-    expect(find.text('Abrir carpeta'), findsOneWidget);
+    final openLabel = controller.canConfigureDownloadDirectory
+        ? 'Explorador Windows'
+        : 'Abrir carpeta';
+    await tester.scrollUntilVisible(
+      find.text(openLabel),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text(openLabel), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.ancestor(
+              of: find.text(openLabel),
+              matching: find.byWidgetPredicate(
+                (widget) => widget is FilledButton,
+              ),
+            ),
+          )
+          .onPressed,
+      isNotNull,
+    );
     expect(find.text(controller.downloadsDirectoryPath), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
