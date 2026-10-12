@@ -43,6 +43,7 @@ dependencies:
   audio_session: ^0.2.4
   audio_service_win: ^0.0.3
   shared_preferences: ^2.5.5
+  crypto: 3.0.7
 
 dev_dependencies:
   integration_test:
@@ -69,6 +70,8 @@ flutter:
   uses-material-design: true
 
   assets:
+    - third_party/nuclear_spotify/LICENSE
+    - third_party/nuclear_spotify/NOTICE
     - assets/fonts/newsreader/OFL.txt
     - assets/fonts/plus_jakarta_sans/OFL.txt
 
