@@ -23,63 +23,116 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - name: Check out source
+      - name: Consultar la fuente
         uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - name: Set up JDK 21
+      - name: Configurar JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Android SDK
+      - name: Configurar el SDK de Android
         uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
 
-      - name: Install pinned Android SDK packages
+      - name: Instalar paquetes del SDK de Android
         shell: pwsh
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.1.0" "ndk;28.2.13676358" "cmake;3.22.1"
 
-      - name: Set up Flutter
+      - name: Configurar Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: 3.38.8
           channel: stable
           cache: true
 
+<<<<<<< HEAD
       - name: Check signing script with isolated fixtures
         shell: pwsh
         run: ./scripts/test_ci_android_signing.ps1
 
       - name: Verify signing secrets and restore release keystore
+=======
+      - name: Restaurar el almacén de claves de release
+>>>>>>> origin/main
         shell: pwsh
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+<<<<<<< HEAD
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: ./scripts/ci_android_signing.ps1 -Action Prepare
+=======
+          ANDROID_KEY_ALIAS: ${{ secrets.ALIAS_CLAVE_DE_ANDROID }}
+        run: |
+          $required = @(
+            'ANDROID_KEYSTORE_BASE64',
+            'ANDROID_STORE_PASSWORD',
+            'ANDROID_KEY_PASSWORD',
+            'ANDROID_KEY_ALIAS'
+          )
 
-      - name: Rebuild pinned FFmpeg WebP libraries for 16 KB pages
+          $missing = @(
+            $required | Where-Object {
+              [string]::IsNullOrWhiteSpace(
+                [Environment]::GetEnvironmentVariable($_)
+              )
+            }
+          )
+
+          if ($missing.Count -gt 0) {
+            throw "Faltan secretos de firma: $($missing -join ', ')"
+          }
+
+          $androidDirectory = Join-Path $env:GITHUB_WORKSPACE 'android'
+          $keystorePath = Join-Path $androidDirectory 'ci-release.jks'
+
+          [IO.File]::WriteAllBytes(
+            $keystorePath,
+            [Convert]::FromBase64String($env:ANDROID_KEYSTORE_BASE64)
+          )
+
+          $properties = @(
+            "storePassword=$($env:ANDROID_STORE_PASSWORD)"
+            "keyPassword=$($env:ANDROID_KEY_PASSWORD)"
+            "keyAlias=$($env:ANDROID_KEY_ALIAS)"
+            "storeFile=$($keystorePath -replace '\\', '/')"
+          ) -join "`n"
+>>>>>>> origin/main
+
+          [IO.File]::WriteAllText(
+            (Join-Path $androidDirectory 'key.properties'),
+            $properties + "`n",
+            [Text.UTF8Encoding]::new($false)
+          )
+
+      - name: Reconstruir bibliotecas WebP para páginas de 16 KB
         shell: pwsh
         run: |
           $sdk = $env:ANDROID_HOME
-          if ([string]::IsNullOrWhiteSpace($sdk)) { $sdk = $env:ANDROID_SDK_ROOT }
-          if ([string]::IsNullOrWhiteSpace($sdk)) { throw 'Android SDK path is not set by setup-android.' }
+          if ([string]::IsNullOrWhiteSpace($sdk)) {
+            $sdk = $env:ANDROID_SDK_ROOT
+          }
+          if ([string]::IsNullOrWhiteSpace($sdk)) {
+            throw 'No se encontró la ruta del SDK de Android.'
+          }
           ./scripts/rebuild_android_webp.ps1 -SdkDirectory $sdk
 
-      - name: Install Flutter dependencies
+      - name: Instalar dependencias de Flutter
         run: flutter pub get
 
-      - name: Analyze Dart code
+      - name: Analizar código Dart
         run: flutter analyze
 
-      - name: Run tests
+      - name: Ejecutar pruebas
         run: flutter test
 
+<<<<<<< HEAD
       - name: Build signed ARM64 release APK
         shell: pwsh
         env:
@@ -95,22 +148,41 @@ jobs:
         if: always()
         shell: pwsh
         run: ./scripts/ci_android_signing.ps1 -Action Cleanup
+=======
+      - name: Compilar APK release ARM64
+        run: flutter build apk --release --target-platform android-arm64
+>>>>>>> origin/main
 
-      - name: Verify signature, release manifest, and 16 KB alignment
+      - name: Verificar firma, manifiesto y alineación de 16 KB
         shell: pwsh
         run: |
           $apk = Join-Path $env:GITHUB_WORKSPACE 'build/app/outputs/flutter-apk/app-release.apk'
           $sdk = $env:ANDROID_HOME
-          if ([string]::IsNullOrWhiteSpace($sdk)) { $sdk = $env:ANDROID_SDK_ROOT }
-          if ([string]::IsNullOrWhiteSpace($sdk)) { throw 'Android SDK path is not set by setup-android.' }
+          if ([string]::IsNullOrWhiteSpace($sdk)) {
+            $sdk = $env:ANDROID_SDK_ROOT
+          }
+          if ([string]::IsNullOrWhiteSpace($sdk)) {
+            throw 'No se encontró la ruta del SDK de Android.'
+          }
+
           $buildTools = Join-Path $sdk 'build-tools/36.1.0'
           $cmdlineTools = Split-Path (Get-Command sdkmanager.bat -ErrorAction Stop).Source
+
           & (Join-Path $buildTools 'apksigner.bat') verify --verbose --print-certs $apk
-          if ($LASTEXITCODE -ne 0) { throw 'APK signature verification failed.' }
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Falló la verificación de la firma del APK.'
+          }
+
           $debuggable = & (Join-Path $cmdlineTools 'apkanalyzer.bat') manifest debuggable $apk
-          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect APK debuggable flag.' }
-          if ($debuggable.Trim() -ne 'false') { throw "Release APK is debuggable: $debuggable" }
+          if ($LASTEXITCODE -ne 0) {
+            throw 'No se pudo inspeccionar el APK.'
+          }
+          if ($debuggable.Trim() -ne 'false') {
+            throw "El APK de release permite depuración: $debuggable"
+          }
+
           ./scripts/verify_android_alignment.ps1 -Apk $apk -SdkDirectory $sdk
+<<<<<<< HEAD
 
       - name: Copy release APK and checksum
         shell: pwsh
@@ -188,3 +260,5 @@ jobs:
           path: build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
           compression-level: 0
+=======
+>>>>>>> origin/main
