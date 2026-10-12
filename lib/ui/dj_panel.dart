@@ -4,7 +4,12 @@ import 'artwork.dart';
 import 'dj_filters_panel.dart';
 
 class DjPanel extends StatelessWidget {
-  const DjPanel({super.key, required this.controller});
+  const DjPanel({
+    super.key,
+    required this.controller,
+    this.showRecommendations = true,
+  });
+  final bool showRecommendations;
   final AppController controller;
 
   @override
@@ -32,13 +37,14 @@ class DjPanel extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _sectionTitle(
-          context,
-          'Para ti',
-          personalized
-              ? 'Basado en tus favoritos, listas y escucha reciente'
-              : 'Aún no hay señales personales; elegimos de tu biblioteca',
-        ),
+        if (showRecommendations)
+          _sectionTitle(
+            context,
+            'Para ti',
+            personalized
+                ? 'Basado en tus favoritos, listas y escucha reciente'
+                : 'Aún no hay señales personales; elegimos de tu biblioteca',
+          ),
         const SizedBox(height: 12),
         Wrap(
           spacing: 8,
@@ -52,7 +58,7 @@ class DjPanel extends StatelessWidget {
         ),
         DjFiltersPanel(controller: c),
 
-        if (recommendations.isEmpty)
+        if (showRecommendations && recommendations.isEmpty)
           _empty(
             context,
             Icons.auto_awesome_outlined,
@@ -63,7 +69,7 @@ class DjPanel extends StatelessWidget {
                 ? 'Amplía tu selección o quita los filtros del DJ para encontrar más canciones.'
                 : 'Añade canciones reproducibles y aparecerán recomendaciones aquí.',
           )
-        else
+        else if (showRecommendations)
           ...recommendations.map(
             (recommendation) => ListTile(
               contentPadding: const EdgeInsets.symmetric(horizontal: 8),
@@ -167,7 +173,7 @@ class DjPanel extends StatelessWidget {
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ),
-        if (c.discoveredRecommendations.isNotEmpty) ...[
+        if (showRecommendations && c.discoveredRecommendations.isNotEmpty) ...[
           const SizedBox(height: 12),
           _sectionTitle(
             context,
