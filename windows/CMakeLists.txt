@@ -128,7 +128,9 @@ install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)
 
 # Every Flutter Windows build includes verified extraction/decoding tools.
-find_program(AURORA_POWERSHELL NAMES powershell)
+# Prefer the runner's PowerShell edition. Calling Windows PowerShell from pwsh
+# inherits an incompatible PSModulePath and can hide Get-FileHash.
+find_program(AURORA_POWERSHELL NAMES pwsh powershell)
 if(NOT AURORA_POWERSHELL)
   message(FATAL_ERROR "PowerShell is required to prepare Aurora's tools.")
 endif()

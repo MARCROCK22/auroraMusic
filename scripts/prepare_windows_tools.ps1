@@ -1,6 +1,9 @@
 [CmdletBinding()]
 param([Parameter(Mandatory=$true)][string]$Destination)
 $ErrorActionPreference = 'Stop'
+# A build can launch Windows PowerShell from a PowerShell 7 parent. Resolve its
+# own utility module explicitly instead of inheriting the parent's module path.
+Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1') -ErrorAction Stop
 $project = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $source = Join-Path $project 'tools/windows'
 $names = @('yt-dlp.exe','deno.exe','ffmpeg.exe','ffprobe.exe','tools.lock.json','binaries.sha256.json','licenses')
