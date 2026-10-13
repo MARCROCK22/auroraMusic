@@ -5,10 +5,24 @@ import 'package:flutter/services.dart';
 abstract final class WindowControls {
   static bool get supported => Platform.isWindows;
   static const _channel = MethodChannel('aurora/window');
-  static Future<bool> invoke(String operation) async {
+  static void setCloseConfirmation(Future<bool> Function()? confirm) {
+    if (!Platform.isWindows) return;
+    _channel.setMethodCallHandler(
+      confirm == null
+          ? null
+          : (call) async {
+              if (call.method == 'confirmClose') return confirm();
+              throw MissingPluginException();
+            },
+    );
+  }
+
+  static Future<bool> guardClose(bool enabled) => invoke('guardClose', enabled);
+
+  static Future<bool> invoke(String operation, [Object? arguments]) async {
     if (!Platform.isWindows) return false;
     try {
-      await _channel.invokeMethod<void>(operation);
+      await _channel.invokeMethod<void>(operation, arguments);
       return true;
     } on PlatformException {
       return false;

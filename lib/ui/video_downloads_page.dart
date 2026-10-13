@@ -62,6 +62,10 @@ class _VideoDownloadsPageState extends State<VideoDownloadsPage> {
         : uri.path == '/watch'
         ? uri.queryParameters['v']!
         : uri.pathSegments.last;
+    if (_jobs.any((job) => job.active && job.id.startsWith('$id-'))) {
+      setState(() => _validationError = 'Este video ya se está descargando.');
+      return;
+    }
     final job = _VideoDownload(
       '$id-${DateTime.now().microsecondsSinceEpoch}',
       uri,
@@ -97,8 +101,9 @@ class _VideoDownloadsPageState extends State<VideoDownloadsPage> {
         destination,
         jobId: job.id,
         onProgress: (value) {
-          if (mounted && job.active)
+          if (mounted && job.active) {
             setState(() => job.progress = value.clamp(0, 1));
+          }
         },
       );
       if (!mounted) return;
@@ -126,8 +131,11 @@ class _VideoDownloadsPageState extends State<VideoDownloadsPage> {
   Future<void> _cancel(_VideoDownload job) async {
     try {
       await widget.source.cancel(job.id);
-    } finally {
       if (mounted) setState(() => job.active = false);
+    } catch (_) {
+      if (mounted) {
+        setState(() => job.error = 'No se pudo cancelar la descarga.');
+      }
     }
   }
 

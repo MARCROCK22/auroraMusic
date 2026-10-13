@@ -208,6 +208,15 @@ class StudioSidebar extends StatelessWidget {
                     'Ctrl+2',
                   ),
                   _nav(context, 8, 'DJ', 'DJ', StudioSymbols.explore, ''),
+                  if (controller.usesOfficialYouTubeMusic)
+                    _nav(
+                      context,
+                      10,
+                      'YouTube Music',
+                      'YouTube Music',
+                      Icons.music_video_outlined,
+                      '',
+                    ),
                   _nav(
                     context,
                     2,
@@ -224,6 +233,15 @@ class StudioSidebar extends StatelessWidget {
                     StudioSymbols.downloadDone,
                     'Ctrl+4',
                   ),
+                  if (controller.usesOfficialYouTubeMusic)
+                    _nav(
+                      context,
+                      11,
+                      'Descargar vídeos',
+                      'Descargar vídeos',
+                      Icons.video_file_outlined,
+                      '',
+                    ),
                   const SizedBox(height: 20),
                   Tooltip(
                     message: controller.downloadsDirectoryPath,

@@ -1667,7 +1667,9 @@ class YtDlpSource extends SourceBackend {
           )
           .cast<File>()
           .toList();
-      if (outputs.length != 1 || await outputs.single.length() == 0) {
+      if (outputs.length != 1 ||
+          await outputs.single.length() == 0 ||
+          await outputs.single.length() > _maxAudioFileBytes) {
         throw StateError('La descarga no produjo un archivo de video válido.');
       }
       if (_cancelled.contains(jobId)) throw StateError('Descarga cancelada.');

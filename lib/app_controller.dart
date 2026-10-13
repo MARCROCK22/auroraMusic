@@ -64,7 +64,9 @@ class AppController extends ChangeNotifier {
       _youtubeMusicActive = true;
       youtubeMusicRequest = target;
       _controls?.updateTrack(null);
-      unawaited(audio.pause().catchError(_report));
+      if (audio.isPlaying || audio.isBuffering) {
+        unawaited(audio.pause().catchError(_report));
+      }
       _notify();
     } on ArgumentError catch (exception) {
       _report(exception);
@@ -668,7 +670,11 @@ class AppController extends ChangeNotifier {
       if (currentTrack != null) unawaited(_updateAccent(currentTrack!));
       await source.initializeUpdates(
         isPlaybackActive: () =>
-            audio.isPlaying || audio.isBuffering || busy || _jamPlaybackActive,
+            audio.isPlaying ||
+            audio.isBuffering ||
+            busy ||
+            _jamPlaybackActive ||
+            _youtubeMusicActive,
         onStatusChanged: _notify,
       );
     } catch (exception) {

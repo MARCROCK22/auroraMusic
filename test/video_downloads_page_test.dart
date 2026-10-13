@@ -55,9 +55,10 @@ void main() {
       find.byType(TextField),
       'https://music.youtube.com/watch?v=abcdefghijk',
     );
+    await tester.pump();
     await tester.tap(find.text('Descargar video'));
     await tester.pump();
-    expect(find.textContaining('público'), findsOneWidget);
+    expect(find.text('Usa un enlace HTTPS público de un video de YouTube.'), findsOneWidget);
     expect(requests, 0);
   });
 
@@ -75,12 +76,19 @@ void main() {
       find.byType(TextField),
       'https://www.youtube.com/watch?v=abcdefghijk',
     );
+    await tester.pump();
     await tester.tap(find.text('Descargar video'));
-    await tester.pumpAndSettle();
-    expect(requests, 1);
+    final deadline = DateTime.now().add(const Duration(seconds: 3));
+    while (find.text('abcdefghijk.mp4').evaluate().isEmpty &&
+        DateTime.now().isBefore(deadline)) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
+      await tester.pump();
+    }
+    await tester.pump();
+    expect(requests, 1, reason: find.byType(Text).evaluate().map((e) => (e.widget as Text).data).join(' | '));
     expect(find.text('abcdefghijk.mp4'), findsOneWidget);
     expect(
-      await File('${support.path}/downloads/videos/abcdefghijk.mp4').exists(),
+      File('${support.path}/downloads/videos/abcdefghijk.mp4').existsSync(),
       isTrue,
     );
   });

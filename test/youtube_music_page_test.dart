@@ -23,6 +23,7 @@ class FakeMusicPlatform extends YouTubeMusicPlatform {
   bool failReload = false;
   Completer<void>? initialization;
   Uri? initialUri;
+  Uri? navigatedUri;
 
   @override
   Future<void> initialize() async {
@@ -57,6 +58,11 @@ class FakeMusicPlatform extends YouTubeMusicPlatform {
     canGoForward = false;
     canGoBack = true;
     notifyListeners();
+  }
+
+  @override
+  Future<void> navigateTo(Uri uri) async {
+    navigatedUri = uri;
   }
 
   @override

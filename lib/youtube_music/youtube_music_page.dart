@@ -52,8 +52,18 @@ class YouTubeMusicPageState extends State<YouTubeMusicPage> {
     if (mounted) setState(() {});
   }
 
+  @override
+  void didUpdateWidget(covariant YouTubeMusicPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_view != null && oldWidget.initialUri != widget.initialUri) {
+      unawaited(
+        _run(() => _platform.navigateTo(widget.initialUri ?? youtubeMusicHome)),
+      );
+    }
+  }
+
   Future<void> _initialize() async {
-    final initialUri = widget.initialUri ?? youtubeMusicHome;
+    var initialUri = widget.initialUri ?? youtubeMusicHome;
     try {
       if (classifyYouTubeMusicNavigation(initialUri) !=
           YouTubeMusicNavigation.allow) {
@@ -63,6 +73,7 @@ class YouTubeMusicPageState extends State<YouTubeMusicPage> {
       }
       await _platform.initialize();
       if (!mounted) return;
+      initialUri = widget.initialUri ?? youtubeMusicHome;
       final view = _platform.buildView(initialUri);
       setState(() {
         _initializationError = null;

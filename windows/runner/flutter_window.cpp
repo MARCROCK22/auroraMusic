@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <flutter/standard_method_codec.h>
+#include <flutter/method_result_functions.h>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -38,13 +39,17 @@ bool FlutterWindow::OnCreate() {
       flutter_controller_->engine()->messenger(), "aurora/window",
       &flutter::StandardMethodCodec::GetInstance());
   window_channel_->SetMethodCallHandler(
-      [host](const auto& call, auto result) {
+      [this, host](const auto& call, auto result) {
         if (call.method_name() == "minimize") {
           ShowWindow(host, SW_MINIMIZE);
         } else if (call.method_name() == "maximize") {
           ShowWindow(host, IsZoomed(host) ? SW_RESTORE : SW_MAXIMIZE);
         } else if (call.method_name() == "close") {
           PostMessage(host, WM_CLOSE, 0, 0);
+        } else if (call.method_name() == "guardClose") {
+          const auto* enabled = call.arguments()
+              ? std::get_if<bool>(call.arguments()) : nullptr;
+          close_guard_enabled_ = enabled && *enabled;
         } else if (call.method_name() == "drag") {
           ReleaseCapture();
           PostMessage(host, WM_NCLBUTTONDOWN, HTCAPTION, GetMessagePos());
@@ -86,6 +91,28 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  // Cover both Aurora's title bar and system close shortcuts such as Alt+F4.
+  if (message == WM_CLOSE && close_guard_enabled_ && !close_confirmed_ &&
+      window_channel_) {
+    if (!close_request_pending_) {
+      close_request_pending_ = true;
+      window_channel_->InvokeMethod("confirmClose", nullptr,
+          std::make_unique<flutter::MethodResultFunctions<flutter::EncodableValue>>(
+              [this, hwnd](const flutter::EncodableValue* result) {
+                close_request_pending_ = false;
+                const auto* accepted = result ? std::get_if<bool>(result) : nullptr;
+                if (accepted && *accepted) {
+                  close_confirmed_ = true;
+                  PostMessage(hwnd, WM_CLOSE, 0, 0);
+                }
+              },
+              [this](const std::string&, const std::string&, const flutter::EncodableValue*) {
+                close_request_pending_ = false;
+              },
+              [this]() { close_request_pending_ = false; }));
+    }
+    return 0;
+  }
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =

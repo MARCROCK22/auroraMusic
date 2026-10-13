@@ -26,6 +26,8 @@ abstract class YouTubeMusicPlatform extends ChangeNotifier {
   Future<void> goBack();
   Future<void> goForward();
   Future<void> reload();
+  Future<void> navigateTo(Uri uri) async =>
+      throw UnsupportedError('Navigation is unavailable.');
 }
 
 class NativeYouTubeMusicPlatform extends YouTubeMusicPlatform {
@@ -40,6 +42,7 @@ class NativeYouTubeMusicPlatform extends YouTubeMusicPlatform {
   static Future<WebViewEnvironment>? _windowsEnvironment;
   bool _disposed = false;
   Uri _lastOfficialUri = youtubeMusicHome;
+  Uri? _pendingNavigation;
   int _historyRevision = 0;
 
   @override
@@ -150,6 +153,7 @@ class NativeYouTubeMusicPlatform extends YouTubeMusicPlatform {
       // Keep the native UA, normal persistent profile, TLS and media policy.
       // No user scripts, cookie access or media commands are used.
       initialSettings: InAppWebViewSettings(
+        isInspectable: kDebugMode,
         useShouldOverrideUrlLoading: true,
         useShouldInterceptRequest: true,
         supportMultipleWindows: true,
@@ -160,6 +164,16 @@ class NativeYouTubeMusicPlatform extends YouTubeMusicPlatform {
         _controller = controller;
         ready = true;
         _changed();
+        final pending = _pendingNavigation;
+        _pendingNavigation = null;
+        if (pending != null) {
+          unawaited(
+            navigateTo(pending).catchError((Object _) {
+              error = 'No se pudo abrir esa página de YouTube Music.';
+              _changed();
+            }),
+          );
+        }
       },
       shouldOverrideUrlLoading: (controller, action) async {
         if (action.isForMainFrame == false) return NavigationActionPolicy.ALLOW;
@@ -280,7 +294,7 @@ class NativeYouTubeMusicPlatform extends YouTubeMusicPlatform {
   bool _isPageRequest(WebResourceRequest request) =>
       defaultTargetPlatform == TargetPlatform.android
       ? request.isForMainFrame == true
-      : request.url?.toString() == _lastOfficialUri.toString();
+      : request.url.toString() == _lastOfficialUri.toString();
 
   @override
   Future<void> goForward() async {
@@ -289,6 +303,25 @@ class NativeYouTubeMusicPlatform extends YouTubeMusicPlatform {
       await controller.goForward();
       await _history();
     }
+  }
+
+  @override
+  Future<void> navigateTo(Uri uri) async {
+    if (_disposed) return;
+    if (classifyYouTubeMusicNavigation(uri) != YouTubeMusicNavigation.allow) {
+      throw ArgumentError('Usa una página oficial HTTPS de YouTube Music.');
+    }
+    _lastOfficialUri = uri;
+    error = null;
+    notice = null;
+    loading = true;
+    _changed();
+    final controller = _controller;
+    if (controller == null) {
+      _pendingNavigation = uri;
+      return;
+    }
+    await controller.loadUrl(urlRequest: URLRequest(url: WebUri.uri(uri)));
   }
 
   @override
