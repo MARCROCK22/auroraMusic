@@ -4,6 +4,7 @@ import 'models.dart';
 abstract class SourceBackend {
   bool get usesOfficialYouTubeMusic => false;
   bool get usesYouTubeWebAudio => false;
+  bool get supportsOnlineMetadataSearch => false;
 
   bool get supportsExperimentalProgressivePlayback => false;
 

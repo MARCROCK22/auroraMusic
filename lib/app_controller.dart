@@ -236,7 +236,7 @@ class AppController extends ChangeNotifier {
   );
   bool get canDiscoverRecommendations =>
       !usesOfficialYouTubeMusic &&
-      !usesYouTubeWebAudio &&
+      (!usesYouTubeWebAudio || source.supportsOnlineMetadataSearch) &&
       (strongestTasteArtist(
                 library: tracks,
                 favoriteIds: favoriteIds,
@@ -315,7 +315,10 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> discoverRecommendations() async {
-    if (usesOfficialYouTubeMusic || usesYouTubeWebAudio) return;
+    if (usesOfficialYouTubeMusic ||
+        (usesYouTubeWebAudio && !source.supportsOnlineMetadataSearch)) {
+      return;
+    }
     if (discoveringRecommendations || _disposed) return;
     final seed =
         strongestTasteArtist(
@@ -377,7 +380,9 @@ class AppController extends ChangeNotifier {
     if (_jamPlaybackActive) return;
     if (personalDjActive) return;
     includeDiscovery =
-        includeDiscovery && !usesOfficialYouTubeMusic && !usesYouTubeWebAudio;
+        includeDiscovery &&
+        !usesOfficialYouTubeMusic &&
+        (!usesYouTubeWebAudio || source.supportsOnlineMetadataSearch);
     final preserveCurrent =
         currentTrack != null &&
         (_playIntent || busy || audio.isPlaying || _loadedTrackId != null);
@@ -450,7 +455,10 @@ class AppController extends ChangeNotifier {
   }
 
   void setPersonalDjIncludeDiscovery(bool value) {
-    value = value && !usesOfficialYouTubeMusic && !usesYouTubeWebAudio;
+    value =
+        value &&
+        !usesOfficialYouTubeMusic &&
+        (!usesYouTubeWebAudio || source.supportsOnlineMetadataSearch);
     if (_personalDjIncludeDiscovery == value) return;
     _personalDjIncludeDiscovery = value;
     _notify();
@@ -888,7 +896,11 @@ class AppController extends ChangeNotifier {
                 .toList()
           : await source.search(query.trim(), limit: _searchLimit);
       if (usesYouTubeWebAudio && result.length < _searchLimit) {
-        final linked = await source.search(query.trim(), limit: _searchLimit);
+        if (generation == _searchGeneration) searchResults = result;
+        final linked = await source.search(
+          query.trim(),
+          limit: _searchLimit - result.length,
+        );
         final seen = result.map((track) => track.id).toSet();
         result.addAll(linked.where((track) => seen.add(track.id)));
       }
@@ -1768,7 +1780,7 @@ class AppController extends ChangeNotifier {
   Future<List<Track>> findSpotifyMatches(Track track) async {
     if (usesOfficialYouTubeMusic) return [];
     if (usesYouTubeWebAudio) {
-      return _nativeLibrary
+      final matches = _nativeLibrary
           .where(
             (item) =>
                 recommendationTracksMatch(item, track) ||
@@ -1779,6 +1791,19 @@ class AppController extends ChangeNotifier {
           )
           .take(3)
           .toList();
+      if (matches.length < 3 && source.supportsOnlineMetadataSearch) {
+        final remote = await source.search(
+          '${track.title} ${track.artist}',
+          limit: 3 - matches.length,
+        );
+        matches.addAll(
+          remote.where(
+            (item) =>
+                !matches.any((saved) => recommendationTracksMatch(saved, item)),
+          ),
+        );
+      }
+      return matches;
     }
     return source.search('${track.title} ${track.artist}', limit: 3);
   }

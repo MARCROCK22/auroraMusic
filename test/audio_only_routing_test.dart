@@ -65,11 +65,16 @@ Future<AppController> _controller(
   bool audioOnly = false,
   FakeSource? utility,
   LibraryDatabase? database,
+  Future<List<Track>> Function(String query, {int limit})? metadataSearch,
 }) async {
   SharedPreferences.setMockInitialValues({});
   final app = AppController(
     audio: audio,
-    source: WebMusicSource(utility ?? FakeSource(), audioOnly: audioOnly),
+    source: WebMusicSource(
+      utility ?? FakeSource(),
+      audioOnly: audioOnly,
+      metadataSearch: metadataSearch,
+    ),
     database: database ?? LibraryDatabase(NativeDatabase.memory()),
     preferences: await SharedPreferences.getInstance(),
     supportDirectory: await Directory.systemTemp.createTemp('audio_routing_'),
@@ -517,6 +522,115 @@ void main() {
       expect(app.currentTrack?.id, linked.id);
       expect(database.saveCalls, writes + 1);
       expect((await database.readTracks()).single.title, observed.title);
+    },
+  );
+
+  test(
+    'optional website metadata merges with library without yt-dlp listing',
+    () async {
+      final audio = _InitializationAudio(), utility = FakeSource();
+      final queries = <String>[];
+      const saved = Track(
+        id: 'yt:abcdefghijk',
+        title: 'Known Song',
+        artist: 'Known Artist',
+        pageUrl: 'https://youtu.be/abcdefghijk',
+      );
+      const remote = Track(
+        id: 'website-result',
+        title: 'Known New Song',
+        artist: 'Known Artist',
+        pageUrl: 'https://youtu.be/lmnopqrstuv?si=discarded',
+      );
+      final app = await _controller(
+        audio,
+        audioOnly: true,
+        utility: utility,
+        metadataSearch: (String query, {int limit = 20}) async {
+          queries.add(query);
+          return [saved, remote];
+        },
+      );
+      await app.database.saveTrack(saved);
+      await app.initialize(mediaControls: false);
+      await app.search('Known', limit: 3);
+      expect(app.searchResults.map((track) => track.id), [
+        saved.id,
+        'yt:lmnopqrstuv',
+      ]);
+      expect(
+        app.searchResults.last.pageUrl,
+        'https://music.youtube.com/watch?v=lmnopqrstuv',
+      );
+      expect(queries, ['Known']);
+      expect(app.canDiscoverRecommendations, isTrue);
+      await app.search('https://youtu.be/wxyz1234567');
+      expect(queries, ['Known']);
+      expect(app.searchResults.single.id, 'yt:wxyz1234567');
+      expect(utility.searchQueries, isEmpty);
+      expect(utility.resolved, isEmpty);
+    },
+  );
+
+  test(
+    'website metadata failure keeps matching library results and reports error',
+    () async {
+      final app = await _controller(
+        _InitializationAudio(),
+        audioOnly: true,
+        metadataSearch: (String query, {int limit = 20}) async =>
+            throw StateError('Synthetic website search unavailable'),
+      );
+      const saved = Track(
+        id: 'yt:abcdefghijk',
+        title: 'Known Song',
+        artist: 'Known Artist',
+      );
+      await app.database.saveTrack(saved);
+      await app.initialize(mediaControls: false);
+      await app.search('Known');
+      expect(app.searchResults.single.id, saved.id);
+      expect(app.error, contains('Synthetic website search unavailable'));
+      expect(app.searching, isFalse);
+    },
+  );
+
+  test(
+    'website results cannot inject local files or signed media URLs',
+    () async {
+      final source = WebMusicSource(
+        FakeSource(),
+        audioOnly: true,
+        metadataSearch: (String query, {int limit = 20}) async => const [
+          Track(
+            id: 'local-injected',
+            title: 'Invalid',
+            artist: 'Artist',
+            localPath: 'synthetic.mp3',
+          ),
+          Track(
+            id: 'signed-media',
+            title: 'Invalid',
+            artist: 'Artist',
+            pageUrl:
+                'https://rr1.googlevideo.com/videoplayback?token=synthetic',
+          ),
+          Track(
+            id: 'public-watch',
+            title: 'Real Public Metadata',
+            artist: 'Real Artist',
+            pageUrl: 'https://youtu.be/abcdefghijk',
+          ),
+        ],
+      );
+      addTearDown(source.dispose);
+      final result = await source.search('Song');
+      expect(result.single.id, 'yt:abcdefghijk');
+      expect(result.single.localPath, isNull);
+      expect(
+        result.single.pageUrl,
+        'https://music.youtube.com/watch?v=abcdefghijk',
+      );
     },
   );
 }
