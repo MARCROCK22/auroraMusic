@@ -81,33 +81,79 @@ untrusted destination is never contacted.
 
 ## Android integration
 
-The library exposes `YoutubeDL.UpdateChannel.NIGHTLY`, but its built-in updater
-downloads without SHA-256 verification and removes the current directory before
-copying the new file. Its recovery installs the packaged default rather than
-the previous updated file. See [the library update
+`AuroraYtDlpUpdater.kt` owns Android nightly installation. Aurora does not call
+the library's built-in updater: it downloads without SHA-256 verification and
+removes the current directory before copying the new file. Its recovery
+installs the packaged default rather than the previous updated file. See [the library update
 API](https://github.com/yausername/youtubedl-android/blob/master/library/src/main/java/com/yausername/youtubedl_android/YoutubeDL.kt)
 and [updater
 implementation](https://github.com/yausername/youtubedl-android/blob/master/library/src/main/java/com/yausername/youtubedl_android/YoutubeDLUpdater.kt).
 
-Use the official nightly `yt-dlp` zipimport asset with the same metadata,
-checksum, idle guard and daily-check policy. Stage beside the active file,
-retain a backup and replace only while native extraction is serialized.
-Startup integrity validation must accept a persisted, verified nightly hash;
-checking only the packaged hash would undo every runtime update on restart.
-Keep the packaged resource as fallback without changing Python, QuickJS or
-FFmpeg at runtime. Nightly updates do not change the bundled native runtime.
+Before the first native source operation, `MainActivity.initialize()` calls
+`installBundle()` and then initializes the bundled Python/QuickJS and FFmpeg.
+The updater verifies the APK resource against the bundled hash. An installed
+file matching the persisted `installedHash`, with `installedVersion` at least
+the bundled version, survives restarts. If those checks fail, initialization
+can restore the hash-verified previous file or reinstall the packaged payload.
+Only the interpreted `yt-dlp` payload changes at runtime; Python, QuickJS and
+FFmpeg remain the native runtimes supplied in the APK.
+
+The native `updateNightly` channel method uses the official nightly API and
+requires exactly one `yt-dlp` and `SHA2-256SUMS` asset at the expected release
+URLs. It validates the checksum, Python shebang and required zipimport/EJS
+entries. Release metadata, checksums and notices are capped at 1 MiB; the
+payload is capped at 32 MiB. Notices are downloaded from the release's exact
+source commit before installation. HTTP uses normal TLS verification, manual
+redirects to the official GitHub hosts, and 15-second connect/read timeouts.
+Each response body also has a 90-second deadline.
+
+Extraction holds the shared native source lock for reading. Installation takes
+its write lock and rechecks `AuroraPlaybackService.playbackActive`; if extraction
+or playback is active it defers replacement. The updater verifies the previous
+file against its persisted hash, writes a synced backup, and commits the
+previous hash/version and pending hash before replacing the target with
+`Os.rename`. It runs a version probe through the bundled Python environment
+before committing the new installed hash/version and source commit. Installation
+failure attempts to restore the verified backup. The native state lives in
+`aurora-ytdlp-nightly` preferences, and the interpreted files live under
+`noBackupFilesDir/youtubedl-android/yt-dlp/`.
+
+On both platforms, `YtDlpSource.initializeUpdates()` schedules a first check
+after 20 seconds and subsequent opportunities every six hours. A persisted
+24-hour allowance limits actual network checks, including failed checks. The
+controller's idle check includes playing, buffering, busy work and Jam playback;
+active source operations also defer checks. Status reports distinguish updates,
+verified current versions, throttling, deferral and failure.
 
 ## HTTP failures and validation
 
 A nightly update can repair extractor breakage but cannot promise to remove
-YouTube access limits. HTTP 429 indicates service-side rate limiting; repeated
-automatic retries make it worse. HTTP 403 on a media URL can require a fresh
-extraction and the original extraction headers, cookies and network context.
-Use a bounded retry and optional user-imported session only; do not expose
-signed media URLs or cookie values in diagnostics. See the [official
+YouTube access limits. `YouTubeRequestPolicy` permits at most two concurrent
+source requests, spaces starts by at least one second, and queues at most eight
+additional requests. Identical listing/resolution work shares an in-flight
+future. Listing results have a five-minute cache; resolved audio retains the
+extraction headers and is reused only with at least two minutes of cache life
+remaining. These request limits are separate from the updater's daily allowance.
+
+HTTP 429, verification/rate-limit responses and an unexplained HTTP 403 start a
+15-minute cooldown. The cooldown timestamp is persisted across app restarts;
+queued work rechecks it before starting. Aurora does not retry these denials,
+switch clients/accounts/network routes, or recommend changing sessions to
+bypass a restriction. Local music remains available during the cooldown.
+
+A 403 alone is not evidence that a media URL expired. Refresh for a 403 requires
+an elapsed `expire`/`expires` timestamp from the resolved URL; an internal cache
+TTL is not expiration evidence. Other transient connection failures have a
+separate bounded recovery path. Playback recovery permits at most two attempts,
+waits two then four seconds, preserves the resume position, and cancels when
+the queue occurrence or playback intent changes. A denial during recovery
+stops further attempts. Eligible transient extraction failures permit one retry
+after two seconds, still subject to request spacing and cooldown.
+
+Do not expose signed media URLs or session values in diagnostics. The [official
 FAQ](https://github.com/yt-dlp/yt-dlp/wiki/FAQ#i-extracted-a-video-url-but-it-does-not-play-on-another-machine--in-my-web-browser)
-and [YouTube cookie
-guidance](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies).
+explains why extracted URLs depend on their original headers and network
+context, and identifies HTTP 429 as service-side rate limiting.
 
 `flutter test --no-pub test/ytdlp_updater_test.dart` covers installation,
 persisted cadence, hash mismatch, rollback, locked files, initial/delayed busy
@@ -116,3 +162,7 @@ recovery, corrupt backups and redirect rejection/limits offline.
 `dart analyze lib/sources/ytdlp_updater.dart test/ytdlp_updater_test.dart` checks
 the new Dart code. Real playback, native background controls and signed Android
 release distribution need separate device/package validation.
+Android `NightlyIntegrityTest.kt` covers official checksum parsing, ambiguous
+checksums, payload hash mismatches and missing Python/EJS entries. Those JVM
+checks do not verify native filesystem crash recovery, preference commit
+failures, version-probe cancellation or device playback during an update.
