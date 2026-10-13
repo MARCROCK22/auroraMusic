@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'models.dart';
 
 abstract class AudioBackend extends ChangeNotifier {
+  bool get supportsEqualizer => true;
+  bool get supportsVisualization => true;
   String? get lastError;
   bool get isPlaying;
   bool get isBuffering;

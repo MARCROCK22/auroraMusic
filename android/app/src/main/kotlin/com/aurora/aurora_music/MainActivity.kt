@@ -17,9 +17,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
-import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
@@ -29,6 +27,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.FutureTask
+import java.util.concurrent.locks.ReentrantReadWriteLock
 
 class MainActivity : FlutterActivity() {
     // Keep the Dart queue and its native channel alive during background playback.
@@ -37,22 +36,20 @@ class MainActivity : FlutterActivity() {
         FlutterEngineCache.getInstance().get("aurora-playback")
     private val sourceWorkers = ThreadPoolExecutor(2, 2, 0, TimeUnit.MILLISECONDS, ArrayBlockingQueue<Runnable>(8))
     private val controls = Executors.newSingleThreadExecutor()
-    private val pcmReads = Executors.newFixedThreadPool(2)
-    private val stderrReaders = Executors.newFixedThreadPool(2)
     private val timeouts = Executors.newSingleThreadScheduledExecutor()
     private val main = Handler(Looper.getMainLooper())
     private val jobs = ConcurrentHashMap<String, String>()
     private val validationProcesses = ConcurrentHashMap<String, Process>()
     private val cancelledDownloads = ConcurrentHashMap.newKeySet<String>()
     private val timedOutDownloads = ConcurrentHashMap.newKeySet<String>()
-    private val pcm = ConcurrentHashMap<String, Process>()
-    private val pcmErrors = ConcurrentHashMap<String, StringBuilder>()
+    private val sourceLock = ReentrantReadWriteLock()
+    private val nightlyUpdater by lazy { AuroraYtDlpUpdater(applicationContext, sourceLock) }
     private var initialized = false
 
     @Synchronized private fun initialize() {
-        if (initialized) return
+        if (initialized && !nightlyUpdater.requiresRecovery) return
         try {
-            installBundledYtDlp()
+            nightlyUpdater.installBundle()
             YoutubeDL.init(applicationContext)
             FFmpeg.init(applicationContext)
         } catch (error: Exception) {
@@ -63,31 +60,6 @@ class MainActivity : FlutterActivity() {
         initialized = true
     }
 
-    private fun installBundledYtDlp() {
-        val payload = resources.openRawResource(R.raw.ytdlp).use { it.readBytes() }
-        val expectedHash = "1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6"
-        if (sha256(payload) != expectedHash) throw IOException("Bundled yt-dlp integrity check failed")
-
-        val directory = File(noBackupFilesDir, "youtubedl-android/yt-dlp")
-        val target = File(directory, "yt-dlp")
-        if (target.isFile && target.inputStream().use { sha256(it.readBytes()) } == expectedHash) return
-        if (!directory.exists() && !directory.mkdirs()) throw IOException("Unable to prepare yt-dlp directory")
-
-        val temporary = File.createTempFile(".yt-dlp-", ".tmp", directory)
-        try {
-            FileOutputStream(temporary).use { stream ->
-                stream.write(payload)
-                stream.fd.sync()
-            }
-            Os.rename(temporary.absolutePath, target.absolutePath)
-        } catch (error: Exception) {
-            temporary.delete()
-            throw IOException("Unable to install bundled yt-dlp", error)
-        }
-    }
-
-    private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
-        .digest(bytes).joinToString("") { "%02x".format(it.toInt() and 0xff) }
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
         FlutterEngineCache.getInstance().put("aurora-playback", engine)
@@ -115,6 +87,8 @@ class MainActivity : FlutterActivity() {
                 return@setMethodCallHandler
             }
             val work = Runnable {
+                val readLock = call.method != "updateNightly"
+                if (readLock) sourceLock.readLock().lock()
                 try {
                     val job = call.argument<String>("jobId")
                     if (call.method == "cacheAudio" || call.method == "progressiveAudio") {
@@ -131,15 +105,16 @@ class MainActivity : FlutterActivity() {
                             } else validateYouTube(target)
                             val request = request(target, call.argument<String>("cookieFile"))
                             request.addOption("--dump-single-json")
+                            request.addOption("--skip-download")
                             if (call.method == "resolve" || call.method == "progressiveInfo") {
                                 request.addOption("--no-playlist")
-                                request.addOption("-f", if (call.method == "progressiveInfo") "bestaudio[ext=webm][protocol=https]/bestaudio/best" else "bestaudio/best")
+                                request.addOption("-f", if (call.method == "progressiveInfo") "bestaudio[ext=webm][protocol=https]/bestaudio/best" else "bestaudio[protocol=https]/bestaudio")
                             } else {
                                 request.addOption("--flat-playlist")
                                 request.addOption("--playlist-end", (call.argument<Int>("limit") ?: 20).coerceIn(1, 200))
                             }
                             val internalId = UUID.randomUUID().toString()
-                            val progressiveJob = if (call.method == "progressiveInfo") requireNotNull(job) else null
+                            val progressiveJob = if (call.method == "progressiveInfo" || call.method == "resolve") requireNotNull(job) else null
                             if (progressiveJob != null) {
                                 check(!cancelledDownloads.contains(progressiveJob)) { "Descarga cancelada" }
                                 require(jobs.putIfAbsent(progressiveJob, internalId) == null) { "Descarga duplicada" }
@@ -221,6 +196,30 @@ class MainActivity : FlutterActivity() {
                             validateProgressiveDecode(file, requireNotNull(job))
                             "ok"
                         }
+                        "exportCachedAudio" -> {
+                            val input = File(requireNotNull(call.argument<String>("path"))).canonicalFile
+                            val directory = File(requireNotNull(call.argument<String>("directory"))).canonicalFile
+                            val cache = File(filesDir, "yt-dlp-audio").canonicalFile
+                            require(isWithin(input, cache) && isRegularFileNoFollow(input) && input.length() in 1..(512L * 1024 * 1024)) { "Archivo de cache invalido" }
+                            require(isWithin(directory, filesDir.canonicalFile) || isWithin(directory, cacheDir.canonicalFile) || isWithin(directory, getExternalFilesDir(null)?.canonicalFile ?: filesDir.canonicalFile)) { "Destino fuera del almacenamiento de la app" }
+                            val jobId = requireNotNull(job)
+                            check(!cancelledDownloads.contains(jobId)) { "Descarga cancelada" }
+                            val output = File(directory, "audio.mp3")
+                            require(!output.exists())
+                            val builder = ProcessBuilder(
+                                File(applicationInfo.nativeLibraryDir, "libffmpeg.so").absolutePath,
+                                "-nostdin", "-v", "error", "-i", input.absolutePath,
+                                "-map", "0:a:0", "-vn", "-codec:a", "libmp3lame", "-q:a", "0", "-n", output.absolutePath,
+                            ).redirectErrorStream(true)
+                            val packages = File(noBackupFilesDir, "youtubedl-android/packages")
+                            builder.environment()["LD_LIBRARY_PATH"] = "${packages.absolutePath}/ffmpeg/usr/lib:${packages.absolutePath}/python/usr/lib"
+                            try {
+                                runAudioCheck(builder, 1800, jobId)
+                                check(!cancelledDownloads.contains(jobId)) { "Descarga cancelada" }
+                                audioDuration(output)
+                            } finally { cancelledDownloads.remove(jobId) }
+                            null
+                        }
                         "download" -> {
                             validateYouTube(target)
                             val directory = File(requireNotNull(call.argument<String>("directory"))).canonicalFile
@@ -236,101 +235,44 @@ class MainActivity : FlutterActivity() {
                             request.addOption("-x")
                             request.addOption("--audio-format", "mp3")
                             request.addOption("--audio-quality", "0")
+                            request.addOption("--max-filesize", "512M")
                             request.addOption("-o", File(directory, "audio.%(ext)s").absolutePath)
+                            val watchdog = timeouts.schedule(Runnable {
+                                timedOutDownloads.add(job)
+                                try { YoutubeDL.destroyProcessById(internalId) } catch (_: Exception) { }
+                            }, 30, TimeUnit.MINUTES)
                             try {
                                 YoutubeDL.execute(request, internalId) { progress, _, _ ->
                                     if (cancelledDownloads.contains(job)) YoutubeDL.destroyProcessById(internalId)
                                     main.post { source.invokeMethod("progress", mapOf("jobId" to job, "progress" to (progress / 100.0).coerceIn(0.0, 1.0))) }
                                 }
                                 check(!cancelledDownloads.contains(job)) { "Descarga cancelada" }
-                            } finally { jobs.remove(job); cancelledDownloads.remove(job) }
+                                check(!timedOutDownloads.contains(job)) { "La descarga supero 30 minutos" }
+                                val file = File(directory, "audio.mp3")
+                                require(isRegularFileNoFollow(file) && file.length() in 1..(512L * 1024 * 1024)) { "Descarga incompleta" }
+                                audioDuration(file)
+                            } finally { watchdog.cancel(false); jobs.remove(job); cancelledDownloads.remove(job); timedOutDownloads.remove(job) }
                             null
                         }
-                        "diagnose" -> YoutubeDL.execute(request("").apply { addOption("--version") }).out.trim() + " · Python / QuickJS / FFmpeg integrados"
+                        "updateNightly" -> nightlyUpdater.checkForUpdate(
+                            canInstall = { !AuroraPlaybackService.playbackActive },
+                            probeVersion = { probeVersion() },
+                        )
+                        "diagnose" -> probeVersion() + " · Python / QuickJS / FFmpeg integrados · " + android.os.Build.SUPPORTED_ABIS.first()
                         else -> throw IllegalArgumentException("Método no disponible")
                     }
                     main.post { result.success(answer) }
                 } catch (error: Exception) { main.post { result.error("SOURCE_ERROR", redact(error.message), null) } }
                 catch (error: LinkageError) { main.post { result.error("SOURCE_ERROR", redact(error.message), null) } }
+                finally { if (readLock) sourceLock.readLock().unlock() }
             }
             try { sourceWorkers.execute(work) }
             catch (_: RejectedExecutionException) { result.error("SOURCE_BUSY", "La fuente está ocupada. Inténtalo nuevamente.", null) }
         }
-        MethodChannel(engine.dartExecutor.binaryMessenger, "aurora/pcm").setMethodCallHandler { call, result ->
-            val lane = if (call.method == "read") pcmReads else controls
-            lane.execute {
-                try {
-                    initialize()
-                    val answer: Any? = when(call.method) {
-                        "start" -> {
-                            val input = requireNotNull(call.argument<String>("input"))
-                            val uri = Uri.parse(input)
-                            val loopback = uri.scheme == "http" && uri.host == "127.0.0.1" &&
-                                uri.port in 1..65535 && uri.userInfo == null && uri.query == null &&
-                                uri.fragment == null && uri.path?.matches(Regex("/aurora-progressive/[a-f0-9]{64}")) == true
-                            require(uri.scheme == "https" || loopback || File(input).isFile) { "Fuente de audio inválida" }
-                            val args = mutableListOf(File(applicationInfo.nativeLibraryDir, "libffmpeg.so").absolutePath, "-nostdin", "-v", "error")
-                            val headers = call.argument<Map<String,String>>("headers") ?: emptyMap()
-                            if (uri.scheme == "https") {
-                                args.addAll(listOf("-rw_timeout", "15000000", "-tls_verify", "1", "-ca_file", File(noBackupFilesDir,"youtubedl-android/packages/python/usr/etc/tls/cert.pem").absolutePath))
-                                if(headers.isNotEmpty()) {
-                                    require(headers.all { (k,v) -> k.matches(Regex("[A-Za-z0-9-]+")) && !v.contains('\r') && !v.contains('\n') })
-                                    args.addAll(listOf("-headers", headers.entries.joinToString("") { "${it.key}: ${it.value}\r\n" }))
-                                }
-                            }
-                            val offset = (call.argument<Number>("offsetMs")?.toLong() ?: 0).coerceAtLeast(0)
-                            if (loopback) args.addAll(listOf("-rw_timeout", "120000000"))
-                            args.addAll(listOf("-ss", (offset/1000.0).toString(), "-i", input, "-vn", "-f", "f32le", "-acodec", "pcm_f32le", "-ar", "48000", "-ac", "2", "pipe:1"))
-                            val builder = ProcessBuilder(args)
-                            val packages = File(noBackupFilesDir,"youtubedl-android/packages")
-                            builder.environment()["LD_LIBRARY_PATH"] = "${packages.absolutePath}/ffmpeg/usr/lib:${packages.absolutePath}/python/usr/lib"
-                            val process = builder.start()
-                            val id = UUID.randomUUID().toString()
-                            pcm[id] = process
-                            val errors = StringBuilder()
-                            pcmErrors[id] = errors
-                            stderrReaders.execute {
-                                try {
-                                    process.errorStream.bufferedReader().useLines { lines ->
-                                        lines.forEach { synchronized(errors) { if(errors.length<4096) errors.append(it).append('\n') } }
-                                    }
-                                } catch (_: IOException) {
-                                    // stop/seek closes the stream while this worker is reading.
-                                }
-                            }
-                            mapOf("sessionId" to id)
-                        }
-                        "read" -> {
-                            val id = requireNotNull(call.argument<String>("sessionId"))
-                            val process = requireNotNull(pcm[id]) { "Sesión terminada" }
-                            val size = (call.argument<Int>("maxBytes") ?: 65536).coerceIn(8,65536)
-                            val bytes = ByteArray(size)
-                            val count = process.inputStream.read(bytes)
-                            if(count < 0) {
-                                val code = process.waitFor()
-                                pcm.remove(id)
-                                val errors = pcmErrors.remove(id)
-                                if(code != 0) throw IllegalStateException("FFmpeg: ${errors?.toString()}")
-                                ByteArray(0)
-                            } else bytes.copyOf(count)
-                        }
-                        "stop" -> {
-                            val id = call.argument<String>("sessionId")
-                            pcm.remove(id)?.let { it.destroy(); it.inputStream.close(); it.errorStream.close() }
-                            pcmErrors.remove(id)
-                            null
-                        }
-                        else -> throw IllegalArgumentException("Método PCM no disponible")
-                    }
-                    main.post { result.success(answer) }
-                } catch(error: Exception) { main.post { result.error("PCM_ERROR",redact(error.message),null) } }
-                catch(error: LinkageError) { main.post { result.error("PCM_ERROR",redact(error.message),null) } }
-            }
-        }
     }
     private fun request(target: String, cookiePath: String? = null) = YoutubeDLRequest(target).apply {
         addOption("--ignore-config"); addOption("--no-plugin-dirs"); addOption("--no-remote-components"); addOption("--no-warnings")
-        addOption("--socket-timeout", "15"); addOption("--retries", "2")
+        addOption("--socket-timeout", "15"); addOption("--retries", "0"); addOption("--fragment-retries", "0"); addOption("--extractor-retries", "0")
         if (cookiePath != null) {
             val cookies = File(cookiePath).canonicalFile
             require(isWithin(cookies, filesDir.canonicalFile) && cookies.isFile && cookies.length() in 1..1048576) { "Archivo de sesión inválido" }
@@ -347,6 +289,14 @@ class MainActivity : FlutterActivity() {
     private fun validateYouTube(value: String) {
         val uri = Uri.parse(value)
         require(uri.scheme == "https" && uri.host in setOf("youtube.com","www.youtube.com","music.youtube.com","m.youtube.com","youtu.be") && uri.userInfo == null && (uri.port == -1 || uri.port == 443)) { "Usa un enlace HTTPS de YouTube" }
+    }
+    private fun probeVersion(): String {
+        val id = UUID.randomUUID().toString()
+        val watchdog = timeouts.schedule(Runnable {
+            try { YoutubeDL.destroyProcessById(id) } catch (_: Exception) { }
+        }, 20, TimeUnit.SECONDS)
+        return try { YoutubeDL.execute(request("").apply { addOption("--version") }, id).out.trim() }
+        finally { watchdog.cancel(false) }
     }
     private fun audioDuration(file: File): Long {
         val hasAudioTrack = try {

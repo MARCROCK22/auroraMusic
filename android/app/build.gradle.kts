@@ -159,6 +159,7 @@ tasks.named("preBuild").configure {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     implementation("androidx.media3:media3-exoplayer:1.11.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.11.1")
     implementation("androidx.media3:media3-session:1.11.1")

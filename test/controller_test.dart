@@ -873,7 +873,7 @@ void main() {
   test(
     'expired remote audio is re-extracted once and resumes position',
     () async {
-      final source = FakeSource();
+      final source = FakeSource()..expiredStream = true;
       final audio = FakeAudio();
       final controller = await createTestController(
         source: source,

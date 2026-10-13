@@ -12,6 +12,7 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'audio/media_controls.dart';
+import 'audio/android_music_audio.dart';
 import 'core/audio_backend.dart';
 import 'core/models.dart';
 import 'core/source_backend.dart';
@@ -39,6 +40,7 @@ class AppController extends ChangeNotifier {
   final Directory supportDirectory;
   MediaControls? _controls;
   StreamSubscription<void>? _completedSubscription;
+  StreamSubscription<String>? _nativeActions;
   bool _disposed = false;
   bool ready = false;
   bool busy = false;
@@ -542,13 +544,28 @@ class AppController extends ChangeNotifier {
         }
       }
       await audio.initialize();
+      eqEnabled = eqEnabled && audio.supportsEqualizer;
       audio.setVolume(preferences.getDouble('volume') ?? 0.75);
       audio.setEqualizer(eqEnabled, eqGains);
       audio.addListener(_audioChanged);
       _completedSubscription = audio.completed.listen(
         (_) => unawaited(_onCompleted()),
       );
-      if (mediaControls) {
+      if (audio is AndroidMusicAudio) {
+        final native = audio as AndroidMusicAudio;
+        _nativeActions = native.mediaActions.listen((action) {
+          if (_jamPlaybackActive) return;
+          final task = switch (action) {
+            'next' => next(),
+            'previous' => previous(),
+            'play' => resumePlayback(),
+            'pause' => pausePlayback(),
+            'stop' => stopPlayback(),
+            _ => Future<void>.value(),
+          };
+          unawaited(task.catchError(_report));
+        });
+      } else if (mediaControls) {
         try {
           _controls = MediaControls(
             audio: audio,
@@ -567,6 +584,11 @@ class AppController extends ChangeNotifier {
         }
       }
       if (currentTrack != null) unawaited(_updateAccent(currentTrack!));
+      await source.initializeUpdates(
+        isPlaybackActive: () =>
+            audio.isPlaying || audio.isBuffering || busy || _jamPlaybackActive,
+        onStatusChanged: _notify,
+      );
     } catch (exception) {
       _report(exception);
     } finally {
@@ -604,6 +626,14 @@ class AppController extends ChangeNotifier {
         _expiryRetries < _maxStreamRecoveryAttempts &&
         _isRecoverableStreamError(audioError)) {
       unawaited(_recoverExpiredStream());
+    } else if (audioError != null &&
+        _usingRemote &&
+        !(currentTrack != null && source.isExpiredStream(currentTrack!)) &&
+        RegExp(
+          r'429|403|forbidden|not a bot|confirm you',
+          caseSensitive: false,
+        ).hasMatch(audioError)) {
+      source.reportPlaybackFailure(audioError);
     }
     if (audio.isPlaying &&
         DateTime.now().difference(_lastSnapshot).inSeconds >= 5) {
@@ -613,10 +643,21 @@ class AppController extends ChangeNotifier {
     _notify();
   }
 
-  bool _isRecoverableStreamError(String message) => RegExp(
-    r'403|410|Forbidden|expired|termin[oó] antes de completar|premature\s+(?:eof|end)|timed?\s*out|timeout|socketexception|httpexception|connection\s+(?:reset|closed|aborted)|broken\s+pipe|unexpected\s+eof',
-    caseSensitive: false,
-  ).hasMatch(message);
+  bool _isRecoverableStreamError(String message) {
+    if (RegExp(
+      r'429|not a bot|confirm you|blocked',
+      caseSensitive: false,
+    ).hasMatch(message)) {
+      return false;
+    }
+    if (RegExp(r'403|forbidden', caseSensitive: false).hasMatch(message)) {
+      return currentTrack != null && source.isExpiredStream(currentTrack!);
+    }
+    return RegExp(
+      r'410|expired|termin[oó] antes de completar|premature\s+(?:eof|end)|timed?\s*out|timeout|socketexception|httpexception|connection\s+(?:reset|closed|aborted)|network_connection_(?:failed|timeout)|broken\s+pipe|unexpected\s+eof',
+      caseSensitive: false,
+    ).hasMatch(message);
+  }
 
   void _notify() {
     if (!_disposed) notifyListeners();
@@ -837,6 +878,14 @@ class AppController extends ChangeNotifier {
       await _remember(readyTrack);
       if (generation != _playGeneration || _disposed) return;
       _controls?.updateTrack(readyTrack);
+      if (audio is AndroidMusicAudio) {
+        await (audio as AndroidMusicAudio).updateMetadata(
+          id: readyTrack.id,
+          title: readyTrack.title,
+          artist: readyTrack.artist,
+          artworkUrl: readyTrack.artworkUrl,
+        );
+      }
       await database.recordPlay(track.id);
       if (generation != _playGeneration || _disposed) return;
       recentTracks = [
@@ -850,7 +899,7 @@ class AppController extends ChangeNotifier {
     } finally {
       if (generation == _playGeneration) {
         _pendingResolveVideoId = null;
-        busy = false;
+        busy = _recovering && fromRecovery;
         _notify();
         if (_personalDjActive &&
             _loadedTrackId == track.id &&
@@ -929,15 +978,13 @@ class AppController extends ChangeNotifier {
         : _resumePosition;
     if (trackId == null || _playGeneration == 0) return;
     _recovering = true;
+    busy = true;
+    _notify();
     _resumePosition = resumePosition;
     try {
       while (_expiryRetries < _maxStreamRecoveryAttempts) {
         _expiryRetries++;
-        if (_expiryRetries > 1) {
-          await Future<void>.delayed(
-            Duration(milliseconds: 250 * (_expiryRetries - 1)),
-          );
-        }
+        await Future<void>.delayed(Duration(seconds: 2 * _expiryRetries));
         if (recoveryGeneration != _recoveryGeneration ||
             occurrence != queueIndex ||
             currentTrack?.id != trackId ||
@@ -946,6 +993,7 @@ class AppController extends ChangeNotifier {
           return;
         }
         _resumePosition = resumePosition;
+        source.invalidateResolvedAudio(currentTrack!);
         await _playCurrent(fromRecovery: true);
         if (recoveryGeneration != _recoveryGeneration ||
             occurrence != queueIndex ||
@@ -962,9 +1010,20 @@ class AppController extends ChangeNotifier {
           _notify();
           return;
         }
+        if (error != null &&
+            RegExp(
+              r'429|403|bloqueo|rechaz|limit',
+              caseSensitive: false,
+            ).hasMatch(error!)) {
+          break;
+        }
       }
     } finally {
-      if (recoveryGeneration == _recoveryGeneration) _recovering = false;
+      if (recoveryGeneration == _recoveryGeneration) {
+        _recovering = false;
+        busy = false;
+        _notify();
+      }
     }
   }
 
@@ -1841,6 +1900,7 @@ class AppController extends ChangeNotifier {
   }
 
   void setEqualizerEnabled(bool value) {
+    if (!audio.supportsEqualizer) return;
     eqEnabled = value;
     audio.setEqualizer(value, eqGains);
     unawaited(preferences.setBool('eqEnabled', value));
@@ -2066,7 +2126,10 @@ class AppController extends ChangeNotifier {
         throw StateError('La carpeta de sesión está fuera de Aurora.');
       }
       copy = File(
-        p.join(target, 'youtube-${DateTime.now().microsecondsSinceEpoch}.txt'),
+        p.join(
+          target,
+          'youtube-${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(0x100000000)}.txt',
+        ),
       );
       await copy.writeAsBytes(bytes, flush: true);
       final previous = source.cookieFile;
@@ -2202,6 +2265,7 @@ class AppController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    unawaited(_nativeActions?.cancel());
     ++_playGeneration;
     ++_searchGeneration;
     _sleepTimer?.cancel();

@@ -243,9 +243,11 @@ class StudioSessionAside extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  'Ecualizador real · simulación de válvula y cinta pendiente',
-                  style: TextStyle(fontSize: 10),
+                Text(
+                  c.audio.supportsEqualizer
+                      ? 'Ecualizador real · simulación de válvula y cinta pendiente'
+                      : 'El dispositivo no ofrece un ecualizador compatible.',
+                  style: const TextStyle(fontSize: 10),
                 ),
                 const SizedBox(height: 16),
                 Row(
@@ -307,7 +309,9 @@ class StudioSessionAside extends StatelessWidget {
                     style: TextStyle(fontSize: 12),
                   ),
                   value: c.eqEnabled,
-                  onChanged: c.setEqualizerEnabled,
+                  onChanged: c.audio.supportsEqualizer
+                      ? c.setEqualizerEnabled
+                      : null,
                 ),
               ],
             ),

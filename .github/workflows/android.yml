@@ -101,6 +101,13 @@ jobs:
         shell: pwsh
         run: ./scripts/ci_android_signing.ps1 -Action Cleanup
 
+      - name: Test native Android integrity checks
+        working-directory: android
+        shell: pwsh
+        run: |
+          ./gradlew.bat :app:testDebugUnitTest -Ptarget-platform=android-arm64
+          if ($LASTEXITCODE -ne 0) { throw 'Native Android tests failed.' }
+
       - name: Verificar firma, manifiesto y alineación de 16 KB
         shell: pwsh
         run: |

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_controller.dart';
 import 'audio/music_audio.dart';
+import 'audio/android_music_audio.dart';
 import 'library/library_database.dart';
 import 'sources/yt_dlp_source.dart';
 import 'ui/aurora_shell.dart';
@@ -38,7 +40,7 @@ class _AuroraBootstrapState extends State<AuroraBootstrap> {
     await directory.create(recursive: true);
     final database = await LibraryDatabase.open();
     final controller = AppController(
-      audio: MusicAudio(),
+      audio: Platform.isAndroid ? AndroidMusicAudio() : MusicAudio(),
       source: YtDlpSource(preferences),
       database: database,
       preferences: preferences,

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -8,14 +9,27 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/models.dart';
 import '../core/source_backend.dart';
 import 'progressive_audio_relay.dart';
+import 'youtube_request_policy.dart';
+import 'ytdlp_updater.dart';
 
 class YtDlpSource extends SourceBackend {
   YtDlpSource(
     this._preferences, {
     Future<Duration?> Function(File)? audioDuration,
     bool? androidOverride,
+    YouTubeRequestPolicy? requestPolicy,
+    DateTime Function()? now,
   }) : _audioDurationOverride = audioDuration {
     _androidOverride = androidOverride;
+    _requests = requestPolicy ?? YouTubeRequestPolicy();
+    _now = now ?? DateTime.now;
+    final cooldown = _preferences.getInt('youtubeCooldownUntil');
+    if (cooldown != null) {
+      _requests.restoreCooldown(DateTime.fromMillisecondsSinceEpoch(cooldown));
+    }
+    _requests.onBlocked = (until) => unawaited(
+      _preferences.setInt('youtubeCooldownUntil', until.millisecondsSinceEpoch),
+    );
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'progress') {
         final args = call.arguments as Map;
@@ -26,12 +40,131 @@ class YtDlpSource extends SourceBackend {
   final SharedPreferences _preferences;
   final Future<Duration?> Function(File)? _audioDurationOverride;
   late final bool? _androidOverride;
+  late final YouTubeRequestPolicy _requests;
+  late final DateTime Function() _now;
+  final Map<String, ({ResolvedAudio audio, DateTime expires})> _streamCache =
+      {};
+  final Map<String, Future<ResolvedAudio>> _streamRequests = {};
+  final Map<String, ({List<Track> tracks, DateTime expires})> _listingCache =
+      {};
+  final Map<String, Future<List<Track>>> _listingRequests = {};
+  int get requestsStarted => _requests.requestsStarted;
+  YtDlpUpdater? _updater;
+  Future<void>? _updateTask;
+  Timer? _firstUpdate, _updateTimer;
+  Directory? _updateDirectory;
+  bool _toolsRecoveryFailed = false;
+  bool Function() _playbackActive = () => false;
+  void Function() _onUpdate = () {};
+  @override
+  String? toolUpdateMessage;
+  @override
+  bool get updatingTools => _updateTask != null;
+
+  @override
+  Future<void> initializeUpdates({
+    required bool Function() isPlaybackActive,
+    required void Function() onStatusChanged,
+  }) async {
+    _playbackActive = isPlaybackActive;
+    _onUpdate = onStatusChanged;
+    _updateDirectory = await getApplicationSupportDirectory();
+    if (!_isAndroid && Platform.isWindows && toolDirectory != null) {
+      _configureUpdater();
+      final recovered = await _updater!.recoverPendingInstallation();
+      if (recovered.status == YtDlpUpdateStatus.failed) {
+        _toolsRecoveryFailed = true;
+        throw StateError(
+          recovered.error ?? 'Repara la carpeta de yt-dlp antes de reproducir.',
+        );
+      }
+    }
+    _firstUpdate?.cancel();
+    _updateTimer?.cancel();
+    _firstUpdate = Timer(
+      const Duration(seconds: 20),
+      () => unawaited(checkForUpdates()),
+    );
+    _updateTimer = Timer.periodic(
+      const Duration(hours: 6),
+      (_) => unawaited(checkForUpdates()),
+    );
+  }
+
+  void _configureUpdater() {
+    final directory = toolDirectory;
+    if (directory == null || _updateDirectory == null) return;
+    final executable = File(p.join(directory, 'yt-dlp.exe'));
+    if (_updater?.executable.path == executable.path) return;
+    _updater = YtDlpUpdater(
+      executable: executable,
+      stateFile: File(
+        p.join(
+          _updateDirectory!.path,
+          'yt-dlp-updates',
+          '${sha256.convert(utf8.encode(p.normalize(executable.absolute.path).toLowerCase()))}.json',
+        ),
+      ),
+      canUpdate: () =>
+          !_disposed && !_playbackActive() && _activeOperations == 0,
+    );
+  }
+
+  @override
+  Future<void> checkForUpdates() {
+    if (_disposed || _playbackActive() || _activeOperations > 0) {
+      return Future.value();
+    }
+    return _updateTask ??= _checkForUpdates().whenComplete(() {
+      _updateTask = null;
+      _onUpdate();
+    });
+  }
+
+  Future<void> _checkForUpdates() async {
+    try {
+      final YtDlpUpdateResult result;
+      if (_isAndroid) {
+        final data =
+            jsonDecode(await _invokeNative('updateNightly', {})) as Map;
+        result = YtDlpUpdateResult(
+          YtDlpUpdateStatus.values.byName(data['status'] as String),
+          version: data['version'] as String?,
+          error: data['error'] as String?,
+        );
+      } else if (Platform.isWindows) {
+        _configureUpdater();
+        if (_updater == null) return;
+        result = await _updater!.checkForUpdate();
+      } else {
+        return;
+      }
+      toolUpdateMessage = switch (result.status) {
+        YtDlpUpdateStatus.updated =>
+          'yt-dlp nightly ${result.version} actualizado y verificado.',
+        YtDlpUpdateStatus.upToDate =>
+          'yt-dlp nightly ${result.version}: versión actual verificada.',
+        YtDlpUpdateStatus.throttled =>
+          'Nightly: se comprueba como máximo una vez cada 24 horas.',
+        YtDlpUpdateStatus.deferred =>
+          'Actualización pospuesta hasta que termine la reproducción o la solicitud.',
+        YtDlpUpdateStatus.failed =>
+          result.error ??
+              'No se pudo actualizar yt-dlp; se conserva la versión anterior.',
+      };
+    } catch (_) {
+      toolUpdateMessage =
+          'No se pudo comprobar nightly. La versión instalada se conserva.';
+    }
+  }
+
   bool get _isAndroid => _androidOverride ?? Platform.isAndroid;
   static const _channel = MethodChannel('aurora/source');
   final Map<String, Process> _jobs = {};
   final Map<String, Set<String>> _resolveJobs = {};
   final Set<String> _startingJobs = {};
   final Set<String> _cancelled = {};
+  int _resolveCancellation = 0;
   final Map<String, void Function(double)> _progress = {};
   int _activeOperations = 0;
   bool _clearingCache = false;
@@ -44,11 +177,12 @@ class YtDlpSource extends SourceBackend {
 
   @override
   bool get supportsExperimentalProgressivePlayback =>
-      Platform.isWindows || _isAndroid;
+      Platform.isWindows && !_isAndroid;
 
   @override
   void setExperimentalProgressivePlayback(bool enabled) {
-    _experimentalProgressive = enabled;
+    _experimentalProgressive =
+        enabled && supportsExperimentalProgressivePlayback;
   }
 
   @override
@@ -75,6 +209,12 @@ class YtDlpSource extends SourceBackend {
   }
 
   Future<T> _operation<T>(Future<T> Function() execute) async {
+    if (_updater?.isInstalling ?? false) await _updateTask;
+    if (_toolsRecoveryFailed) {
+      throw StateError(
+        'No se pudo recuperar yt-dlp. Repara o vuelve a configurar la carpeta de herramientas.',
+      );
+    }
     if (_disposed) throw StateError('La fuente de audio esta cerrada.');
     if (_changingCookie) {
       throw StateError('Espera a que termine el cambio de sesión.');
@@ -171,6 +311,14 @@ class YtDlpSource extends SourceBackend {
     '--no-plugin-dirs',
     '--no-remote-components',
     '--no-warnings',
+    '--socket-timeout',
+    '15',
+    '--retries',
+    '0',
+    '--extractor-retries',
+    '0',
+    '--fragment-retries',
+    '0',
   ];
   static const _maxCachedAudioBytes = 512 * 1024 * 1024;
   static const _maxAudioFileBytes = _maxCachedAudioBytes;
@@ -189,7 +337,7 @@ class YtDlpSource extends SourceBackend {
     if (normalized.contains('429') ||
         normalized.contains('not a bot') ||
         normalized.contains('confirm you')) {
-      return 'YouTube limitó temporalmente las solicitudes o pide verificar la sesión. Espera unos minutos y vuelve a intentar. Puedes importar o renovar tu sesión opcional en Ajustes; esto no garantiza quitar el límite. Los archivos locales siguen disponibles.';
+      return 'YouTube limitó temporalmente las solicitudes o detectó un posible bloqueo. Aurora detendrá los reintentos durante 15 minutos. Los archivos locales siguen disponibles.';
     }
     if (normalized.contains('video unavailable') ||
         normalized.contains('private video') ||
@@ -197,7 +345,7 @@ class YtDlpSource extends SourceBackend {
       return 'Este contenido de YouTube no está disponible públicamente. Prueba otro enlace.';
     }
     if (normalized.contains('403') || normalized.contains('forbidden')) {
-      return 'YouTube rechazó el acceso al audio (403). Vuelve a intentar para renovar el enlace.';
+      return 'YouTube rechazó el acceso al audio (403). Esto no demuestra que el enlace haya vencido. Aurora detendrá los reintentos durante 15 minutos.';
     }
     if (normalized.contains('cookie')) {
       return 'YouTube rechazó el archivo de sesión. Renueva tu sesión opcional en Ajustes.';
@@ -217,7 +365,20 @@ class YtDlpSource extends SourceBackend {
       'progressiveInfo',
       'progressiveAudio',
     }.contains(method)) {
-      return _operation(() => _invokeNative(method, arguments));
+      return _operation(
+        () => _requests.run(
+          () {
+            final jobId = arguments['jobId'] as String?;
+            if (jobId != null) _throwIfResolveCancelled(jobId);
+            return _invokeNative(method, arguments);
+          },
+          retryTransient: const {
+            'search',
+            'playlist',
+            'resolve',
+          }.contains(method),
+        ),
+      );
     }
     return _invokeNative(method, arguments);
   }
@@ -245,6 +406,7 @@ class YtDlpSource extends SourceBackend {
     try {
       return (await _channel.invokeMethod<String>(method, arguments)) ?? '';
     } on PlatformException catch (error) {
+      _requests.recordFailure(error.message ?? '');
       throw StateError(sourceError(error.message ?? 'Error de la fuente.'));
     }
   }
@@ -282,6 +444,14 @@ class YtDlpSource extends SourceBackend {
       }
     }
     await _preferences.setString('toolDirectory', absolute);
+    if (_updateDirectory != null) {
+      _configureUpdater();
+      final recovered = await _updater!.recoverPendingInstallation();
+      _toolsRecoveryFailed = recovered.status == YtDlpUpdateStatus.failed;
+      if (_toolsRecoveryFailed) {
+        throw StateError(recovered.error ?? 'No se pudo recuperar yt-dlp.');
+      }
+    }
   }
 
   Future<String> _run(
@@ -290,7 +460,13 @@ class YtDlpSource extends SourceBackend {
     void Function(double)? onProgress,
   }) async {
     return _operation(
-      () => _runWindows(arguments, jobId: jobId, onProgress: onProgress),
+      () => arguments.contains('--version')
+          ? _runWindows(arguments, jobId: jobId, onProgress: onProgress)
+          : _requests.run(
+              () =>
+                  _runWindows(arguments, jobId: jobId, onProgress: onProgress),
+              retryTransient: jobId == null,
+            ),
     );
   }
 
@@ -376,6 +552,7 @@ class YtDlpSource extends SourceBackend {
         throw StateError('La respuesta supera el límite permitido.');
       }
       if (code != 0) {
+        _requests.recordFailure(errors.toString());
         throw StateError('yt-dlp: ${sourceError(errors.toString().trim())}');
       }
       return output.toString();
@@ -425,9 +602,36 @@ class YtDlpSource extends SourceBackend {
     );
   }
 
-  Future<List<Track>> _listing(String target, int limit, String method) async {
+  Future<List<Track>> _listing(String target, int limit, String method) {
+    final key = '$method:$limit:$target';
+    final cached = _listingCache[key];
+    if (cached != null && _now().isBefore(cached.expires)) {
+      return Future.value(List.of(cached.tracks));
+    }
+    return _listingRequests.putIfAbsent(key, () {
+      final future = _fetchListing(target, limit, method).then((tracks) {
+        if (_listingCache.length >= 64) {
+          _listingCache.remove(_listingCache.keys.first);
+        }
+        _listingCache[key] = (
+          tracks: List.unmodifiable(tracks),
+          expires: _now().add(const Duration(minutes: 5)),
+        );
+        return tracks;
+      });
+      return future.whenComplete(() {
+        _listingRequests.remove(key);
+      });
+    });
+  }
+
+  Future<List<Track>> _fetchListing(
+    String target,
+    int limit,
+    String method,
+  ) async {
     final String raw;
-    if (Platform.isAndroid) {
+    if (_isAndroid) {
       raw = await _native(method, {'target': target, 'limit': limit});
     } else {
       raw = await _run([
@@ -467,8 +671,12 @@ class YtDlpSource extends SourceBackend {
       _listing(validateYouTube(url.toString()).toString(), 200, 'playlist');
   @override
   Future<ResolvedAudio> resolve(Track track) async {
+    final cancellation = _resolveCancellation;
     final progressiveEnabled = _experimentalProgressive;
     await _closeProgressive();
+    if (_isAndroid && cancellation != _resolveCancellation) {
+      throw StateError('Resolución cancelada.');
+    }
     if (track.isLocal && await File(track.localPath!).exists()) {
       return ResolvedAudio(input: track.localPath!, duration: track.duration);
     }
@@ -671,105 +879,94 @@ class YtDlpSource extends SourceBackend {
     }
   });
 
-  Future<ResolvedAudio> _resolveAndroidAudio(
-    Track track,
-    String target,
-  ) => _operation(() async {
+  Future<ResolvedAudio> _resolveAndroidAudio(Track track, String target) {
     final uri = Uri.parse(target);
     final targetId = uri.host == 'youtu.be'
-        ? (uri.pathSegments.isEmpty ? null : uri.pathSegments.first)
+        ? uri.pathSegments.firstOrNull
         : uri.queryParameters['v'];
-    final isYouTubeId = track.id.startsWith('yt:');
-    final videoId = isYouTubeId ? track.id.substring(3) : targetId ?? '';
-    if (!_videoIdPattern.hasMatch(videoId)) {
-      throw ArgumentError('El identificador del video no es v\u00e1lido.');
-    }
-    if (isYouTubeId && targetId != videoId) {
+    final videoId = track.id.startsWith('yt:')
+        ? track.id.substring(3)
+        : targetId ?? '';
+    if (!_videoIdPattern.hasMatch(videoId) || targetId != videoId) {
       throw ArgumentError(
         'El identificador del video no coincide con el enlace.',
       );
     }
-    final jobId = 'resolve-$videoId-${DateTime.now().microsecondsSinceEpoch}';
+    final cached = _streamCache[videoId];
+    if (cached != null &&
+        _now().add(const Duration(minutes: 2)).isBefore(cached.expires)) {
+      return Future.value(cached.audio);
+    }
+    return _streamRequests.putIfAbsent(videoId, () {
+      final future = _fetchAndroidStream(track, target, videoId);
+      return future.whenComplete(() {
+        _streamRequests.remove(videoId);
+      });
+    });
+  }
+
+  Future<ResolvedAudio> _fetchAndroidStream(
+    Track track,
+    String target,
+    String videoId,
+  ) async {
+    final jobId = 'resolve-$videoId-${_now().microsecondsSinceEpoch}';
     _resolveJobs.putIfAbsent(videoId, () => <String>{}).add(jobId);
     _startingJobs.add(jobId);
     try {
-      final cache = await _audioCacheDirectory();
-      final cachePath = await cache.resolveSymbolicLinks();
-      final cached = File(p.join(cachePath, '$videoId.audio'));
-      final cachedDuration = await _cachedAudioDuration(
-        cached,
-        expectedDuration: track.duration,
-      );
+      final raw = await _native('resolve', {'target': target, 'jobId': jobId});
       _throwIfResolveCancelled(jobId);
-      if (cachedDuration != null) {
-        await cached.setLastModified(DateTime.now());
-        await _pruneAudioCache(cache, protect: cached);
-        _throwIfResolveCancelled(jobId);
-        return ResolvedAudio(input: cached.path, duration: cachedDuration);
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      final input = data['url'] as String?;
+      final uri = input == null ? null : Uri.tryParse(input);
+      if (uri == null ||
+          uri.scheme != 'https' ||
+          uri.host.isEmpty ||
+          uri.userInfo.isNotEmpty) {
+        throw StateError('No hay una URL HTTPS reproducible disponible.');
       }
-      final cachedType = await FileSystemEntity.type(
-        cached.path,
-        followLinks: false,
+      final headers = <String, String>{};
+      for (final entry in (data['http_headers'] as Map? ?? {}).entries) {
+        final name = entry.key.toString(), value = entry.value.toString();
+        if (!RegExp(r'^[A-Za-z0-9-]+$').hasMatch(name) ||
+            value.contains('\r') ||
+            value.contains('\n')) {
+          throw StateError('La fuente devolvió cabeceras de audio inválidas.');
+        }
+        // Credentials stay in the resolver; only ordinary stream headers cross.
+        if (const {
+          'cookie',
+          'authorization',
+          'proxy-authorization',
+        }.contains(name.toLowerCase())) {
+          continue;
+        }
+        headers[name] = value;
+      }
+      final duration = (data['duration'] as num?)?.toDouble();
+      final audio = ResolvedAudio(
+        input: input!,
+        headers: headers,
+        duration: duration != null && duration.isFinite && duration > 0
+            ? Duration(milliseconds: (duration * 1000).round())
+            : track.duration,
       );
-      if (cachedType != FileSystemEntityType.notFound) {
-        if (cachedType != FileSystemEntityType.file) {
-          throw StateError('El archivo de audio en cach\u00e9 no es seguro.');
-        }
-        await cached.delete();
-      }
-      await _pruneAudioCache(cache);
-      final staging = await cache.createTemp('.aurora-yt-$videoId-');
-      try {
-        final durationMs = int.tryParse(
-          await _native('cacheAudio', {
-            'target': target,
-            'videoId': videoId,
-            'directory': staging.path,
-            'jobId': jobId,
-          }),
+      final expirySeconds = int.tryParse(
+        uri.queryParameters['expire'] ?? uri.queryParameters['expires'] ?? '',
+      );
+      final expires = expirySeconds == null
+          ? _now().add(const Duration(minutes: 10))
+          : DateTime.fromMillisecondsSinceEpoch(expirySeconds * 1000);
+      if (!expires.isAfter(_now())) {
+        throw StateError(
+          'La fuente devolvió una URL de audio vencida. No se inició la reproducción.',
         );
-        if (durationMs == null || durationMs <= 0) {
-          throw StateError(
-            'La descarga de audio est\u00e1 incompleta o no es v\u00e1lida.',
-          );
-        }
-        final outputs = await staging
-            .list(followLinks: false)
-            .where(
-              (entity) =>
-                  entity is File &&
-                  RegExp(
-                    r'^audio\.[A-Za-z0-9]{1,8}$',
-                  ).hasMatch(p.basename(entity.path)),
-            )
-            .toList();
-        if (outputs.length != 1 || outputs.single is! File) {
-          throw StateError(
-            'La descarga no produjo un \u00fanico archivo de audio.',
-          );
-        }
-        final downloaded = outputs.single as File;
-        if (await downloaded.length() == 0 ||
-            await downloaded.length() > _maxAudioFileBytes) {
-          throw StateError(
-            'La descarga de audio est\u00e1 incompleta o no es v\u00e1lida.',
-          );
-        }
-        final duration = Duration(milliseconds: durationMs);
-        _throwIfResolveCancelled(jobId);
-        if (!_durationMatches(duration, track.duration)) {
-          throw StateError(
-            'La duraci\u00f3n del audio descargado no coincide con el video.',
-          );
-        }
-        await downloaded.rename(cached.path);
-        _throwIfResolveCancelled(jobId);
-        await _pruneAudioCache(cache, protect: cached);
-        _throwIfResolveCancelled(jobId);
-        return ResolvedAudio(input: cached.path, duration: duration);
-      } finally {
-        if (await staging.exists()) await staging.delete(recursive: true);
       }
+      if (_streamCache.length >= 32) {
+        _streamCache.remove(_streamCache.keys.first);
+      }
+      _streamCache[videoId] = (audio: audio, expires: expires);
+      return audio;
     } finally {
       _startingJobs.remove(jobId);
       final jobs = _resolveJobs[videoId];
@@ -777,7 +974,34 @@ class YtDlpSource extends SourceBackend {
       if (jobs?.isEmpty ?? false) _resolveJobs.remove(videoId);
       _cancelled.remove(jobId);
     }
-  });
+  }
+
+  String? _videoId(Track track) {
+    final page = Uri.tryParse(track.pageUrl ?? '');
+    return page?.host == 'youtu.be'
+        ? page?.pathSegments.firstOrNull
+        : page?.queryParameters['v'];
+  }
+
+  @override
+  void invalidateResolvedAudio(Track track) =>
+      _streamCache.remove(_videoId(track));
+
+  @override
+  bool isExpiredStream(Track track) {
+    final cached = _streamCache[_videoId(track)];
+    if (cached == null) return false;
+    final uri = Uri.tryParse(cached.audio.input);
+    final seconds = int.tryParse(
+      uri?.queryParameters['expire'] ?? uri?.queryParameters['expires'] ?? '',
+    );
+    return seconds != null &&
+        !_now().isBefore(DateTime.fromMillisecondsSinceEpoch(seconds * 1000));
+  }
+
+  @override
+  void reportPlaybackFailure(String message) =>
+      _requests.recordFailure(message);
 
   static bool _durationMatches(Duration actual, Duration expected) =>
       expected <= Duration.zero ||
@@ -1274,13 +1498,38 @@ class YtDlpSource extends SourceBackend {
       destination.parent.path,
     ).createTemp('.aurora-');
     try {
-      if (Platform.isAndroid) {
+      if (_cancelled.contains(jobId)) throw StateError('Descarga cancelada.');
+      if (_isAndroid) {
         if (onProgress != null) _progress[jobId] = onProgress;
-        await _native('download', {
-          'target': target,
-          'directory': temp.path,
-          'jobId': jobId,
-        });
+        final legacy = _updateDirectory == null
+            ? null
+            : File(
+                p.join(
+                  _updateDirectory!.path,
+                  'yt-dlp-audio',
+                  '${_videoId(track)}.audio',
+                ),
+              );
+        if (legacy != null &&
+            await _cachedAudioDuration(
+                  legacy,
+                  expectedDuration: track.duration,
+                ) !=
+                null) {
+          await _operation(
+            () => _invokeNative('exportCachedAudio', {
+              'path': legacy.path,
+              'directory': temp.path,
+              'jobId': jobId,
+            }),
+          );
+        } else {
+          await _native('download', {
+            'target': target,
+            'directory': temp.path,
+            'jobId': jobId,
+          });
+        }
       } else {
         await _run(
           [
@@ -1309,10 +1558,12 @@ class YtDlpSource extends SourceBackend {
         throw StateError('La descarga no produjo audio.');
       }
       if (await destination.exists()) throw StateError('El destino ya existe.');
+      if (_cancelled.contains(jobId)) throw StateError('Descarga cancelada.');
       await file.rename(destination.path);
       onProgress?.call(1);
     } finally {
       _progress.remove(jobId);
+      _cancelled.remove(jobId);
       if (await temp.exists()) await temp.delete(recursive: true);
     }
   }
@@ -1322,6 +1573,7 @@ class YtDlpSource extends SourceBackend {
     if (jobId == 'resolve:$_progressiveVideoId') await _closeProgressive();
     if (_isAndroid) {
       if (jobId.startsWith('resolve:')) {
+        _resolveCancellation++;
         final videoId = jobId.substring('resolve:'.length);
         final activeIds = (_resolveJobs[videoId] ?? const <String>{}).toList();
         _cancelled.addAll(activeIds);
@@ -1329,6 +1581,7 @@ class YtDlpSource extends SourceBackend {
           await _channel.invokeMethod('cancel', {'jobId': activeId});
         }
       } else {
+        _cancelled.add(jobId);
         await _channel.invokeMethod('cancel', {'jobId': jobId});
       }
       return;
@@ -1354,7 +1607,7 @@ class YtDlpSource extends SourceBackend {
 
   @override
   Future<String> diagnose() async {
-    if (Platform.isAndroid) {
+    if (_isAndroid) {
       return _native('diagnose', {});
     }
     final version = await _run(['--version']);
@@ -1364,6 +1617,8 @@ class YtDlpSource extends SourceBackend {
   @override
   void dispose() {
     _disposed = true;
+    _firstUpdate?.cancel();
+    _updateTimer?.cancel();
     unawaited(_closeProgressive().catchError((Object _) {}));
     if (_isAndroid) {
       for (final jobId in _startingJobs.toList()) {

@@ -26,6 +26,7 @@ import 'spotify_import_dialog.dart';
 import 'spotify_match_dialog.dart';
 import 'vinyl_player.dart';
 import 'queue_panel.dart';
+import 'offline_settings_panel.dart';
 
 const _sections = [
   'Inicio',
@@ -99,6 +100,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   void _syncVisualization() {
     final c = ref.read(controllerProvider);
     final enabled =
+        c.audio.supportsVisualization &&
         _playerOpen &&
         _foreground &&
         c.audio.isPlaying &&
@@ -1190,24 +1192,36 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         ],
       ),
       (
-        title: 'Reproducción experimental',
-        subtitle: 'Descarga mientras se reproduce',
+        title: 'Música sin conexión',
+        subtitle: 'Descargas explícitas y archivos locales',
         children: [
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Descargar mientras se reproduce'),
-            subtitle: Text(
-              c.source.supportsExperimentalProgressivePlayback
-                  ? 'Empieza antes; puede esperar en zonas aún no descargadas o fallar. La descarga completa sigue siendo la opción estable.'
-                  : 'No disponible para esta fuente o plataforma.',
-            ),
-            value: c.experimentalProgressivePlayback,
-            onChanged: c.source.supportsExperimentalProgressivePlayback
-                ? c.setExperimentalProgressivePlayback
-                : null,
+          OfflineSettingsPanel(
+            controller: c,
+            onManage: () => _navigate(3),
+            onSearch: () => _navigate(1),
           ),
         ],
       ),
+      if (c.source.supportsExperimentalProgressivePlayback)
+        (
+          title: 'Reproducción experimental',
+          subtitle: 'Descarga mientras se reproduce',
+          children: [
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Descargar mientras se reproduce'),
+              subtitle: Text(
+                c.source.supportsExperimentalProgressivePlayback
+                    ? 'Empieza antes; puede esperar en zonas aún no descargadas o fallar. La descarga completa sigue siendo la opción estable.'
+                    : 'No disponible para esta fuente o plataforma.',
+              ),
+              value: c.experimentalProgressivePlayback,
+              onChanged: c.source.supportsExperimentalProgressivePlayback
+                  ? c.setExperimentalProgressivePlayback
+                  : null,
+            ),
+          ],
+        ),
       (
         title: 'Identidad y tema',
         subtitle: 'Ajusta la apariencia de Aurora',
@@ -1266,7 +1280,9 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       ),
       (
         title: 'Ecualizador',
-        subtitle: c.eqEnabled
+        subtitle: !c.audio.supportsEqualizer
+            ? 'El dispositivo no ofrece un ecualizador compatible'
+            : c.eqEnabled
             ? 'Ecualizador activado'
             : 'Ecualizador desactivado',
         children: [
@@ -1274,7 +1290,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             contentPadding: EdgeInsets.zero,
             title: const Text('Activar ecualizador'),
             value: c.eqEnabled,
-            onChanged: c.setEqualizerEnabled,
+            onChanged: c.audio.supportsEqualizer ? c.setEqualizerEnabled : null,
           ),
           Wrap(
             spacing: 8,
@@ -1282,7 +1298,9 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             children: ['Plano', 'Graves', 'Vocal', 'Rock']
                 .map(
                   (name) => OutlinedButton(
-                    onPressed: () => c.applyEqPreset(name),
+                    onPressed: c.audio.supportsEqualizer
+                        ? () => c.applyEqPreset(name)
+                        : null,
                     child: Text(name),
                   ),
                 )
@@ -1393,8 +1411,32 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                   c.diagnosing ? 'Comprobando…' : 'Comprobar configuración',
                 ),
               ),
+              OutlinedButton.icon(
+                onPressed:
+                    c.source.updatingTools ||
+                        c.busy ||
+                        c.audio.isPlaying ||
+                        c.audio.isBuffering
+                    ? null
+                    : c.source.checkForUpdates,
+                icon: const Icon(Icons.system_update_alt),
+                label: Text(
+                  c.source.updatingTools
+                      ? 'Comprobando nightly…'
+                      : 'Comprobar yt-dlp nightly',
+                ),
+              ),
             ],
           ),
+          const SizedBox(height: 8),
+          const Text(
+            'Nightly se comprueba automáticamente como máximo cada 24 horas, cuando no se reproduce música. Python, QuickJS y FFmpeg en Android se actualizan con la app.',
+          ),
+          if (c.source.toolUpdateMessage != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(c.source.toolUpdateMessage!),
+            ),
           if (c.diagnostics != null)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 16),
@@ -1973,7 +2015,9 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                 title: const Text('Activar ecualizador'),
                 subtitle: const Text('Ajusta el sonido para tus auriculares.'),
                 value: player.eqEnabled,
-                onChanged: player.setEqualizerEnabled,
+                onChanged: player.audio.supportsEqualizer
+                    ? player.setEqualizerEnabled
+                    : null,
               ),
               const SizedBox(height: 16),
               Wrap(
@@ -1982,7 +2026,9 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                 children: ['Plano', 'Graves', 'Vocal', 'Rock']
                     .map(
                       (name) => OutlinedButton(
-                        onPressed: () => player.applyEqPreset(name),
+                        onPressed: player.audio.supportsEqualizer
+                            ? () => player.applyEqPreset(name)
+                            : null,
                         child: Text(name),
                       ),
                     )

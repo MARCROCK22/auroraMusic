@@ -170,7 +170,9 @@ void main() {
     audio.position = const Duration(seconds: 12);
     audio.lastError = 'premature EOF';
     audio.notifyListeners();
-    await Future<void>.delayed(const Duration(milliseconds: 1));
+    while (source.resolved.length < 2) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
     await controller.stopPlayback();
     pending.complete(const ResolvedAudio(input: 'https://example.test/one'));
     await _settle(controller);
@@ -226,10 +228,9 @@ void main() {
     audio.failedLoadsRemaining = 1;
     audio.lastError = 'SocketException: connection timed out';
     audio.notifyListeners();
-    await _settle(controller);
-
-    audio.lastError = 'SocketException: connection timed out';
-    audio.notifyListeners();
+    while (audio.failedLoadsRemaining > 0) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
     await controller.togglePlayback();
     await Future<void>.delayed(const Duration(milliseconds: 300));
 

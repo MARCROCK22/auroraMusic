@@ -16,6 +16,18 @@ abstract class SourceBackend {
   Future<List<Track>> search(String query, {int limit = 20});
   Future<List<Track>> importPlaylist(Uri url);
   Future<ResolvedAudio> resolve(Track track);
+
+  /// Called before a bounded retry of an expired or interrupted stream.
+  void invalidateResolvedAudio(Track track) {}
+  void reportPlaybackFailure(String message) {}
+  bool isExpiredStream(Track track) => false;
+  String? get toolUpdateMessage => null;
+  bool get updatingTools => false;
+  Future<void> initializeUpdates({
+    required bool Function() isPlaybackActive,
+    required void Function() onStatusChanged,
+  }) async {}
+  Future<void> checkForUpdates() async {}
   Future<void> download(
     Track track,
     File destination, {

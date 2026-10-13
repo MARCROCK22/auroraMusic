@@ -321,19 +321,7 @@ void main() {
     await mount(tester, const Size(800, 900));
     await tester.tap(find.byIcon(Icons.tune).last);
     await tester.pumpAndSettle();
-    final switchTile = tester.widget<SwitchListTile>(
-      find.ancestor(
-        of: find.text('Descargar mientras se reproduce').last,
-        matching: find.byType(SwitchListTile),
-      ),
-    );
-
-    expect(switchTile.value, isFalse);
-    expect(switchTile.onChanged, isNull);
-    expect(
-      find.text('No disponible para esta fuente o plataforma.'),
-      findsOneWidget,
-    );
+    expect(find.text('Descargar mientras se reproduce'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 

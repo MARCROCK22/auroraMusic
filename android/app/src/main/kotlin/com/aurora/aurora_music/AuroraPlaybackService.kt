@@ -22,8 +22,13 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.TransferListener
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.google.common.util.concurrent.Futures
@@ -31,6 +36,7 @@ import com.google.common.util.concurrent.ListenableFuture
 import kotlin.math.ln
 import kotlin.math.pow
 import kotlin.math.roundToInt
+import java.util.concurrent.atomic.AtomicLong
 
 /** One native player. Flutter owns the queue, repeat, shuffle and track resolution. */
 @UnstableApi
@@ -50,6 +56,8 @@ class AuroraPlaybackService : MediaSessionService() {
     private var completed = false
     private var failure: String? = null
     private var metadata = MediaMetadata.EMPTY
+    private var networkBytes = AtomicLong(0)
+    private var networkRequests = AtomicLong(0)
     private var equalizer: Equalizer? = null
     private var userVolume = 0.8f
     private var preamp = 1f
@@ -64,7 +72,9 @@ class AuroraPlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        player = ExoPlayer.Builder(this).build().apply {
+        player = ExoPlayer.Builder(this).setLoadControl(androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMs(15000, 30000, 1500, 3000)
+            .setTargetBufferBytes(8 * 1024 * 1024).setPrioritizeTimeOverSizeThresholds(false).build()).build().apply {
             setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
                 .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             setHandleAudioBecomingNoisy(true)
@@ -217,10 +227,28 @@ class AuroraPlaybackService : MediaSessionService() {
         expectedDuration = duration
         completed = false
         failure = null
+        networkBytes = AtomicLong(0)
+        networkRequests = AtomicLong(0)
+        val transferred = networkBytes
+        val requests = networkRequests
         val uri = if (parsed.scheme == null) Uri.fromFile(java.io.File(input)) else parsed
         val http = DefaultHttpDataSource.Factory().setDefaultRequestProperties(headers)
             .setAllowCrossProtocolRedirects(false)
-        val factory = DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http))
+        val transfer = object : TransferListener {
+            override fun onTransferInitializing(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
+            override fun onTransferStart(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) { if (isNetwork) requests.incrementAndGet() }
+            override fun onBytesTransferred(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean, bytesTransferred: Int) { if (isNetwork) transferred.addAndGet(bytesTransferred.toLong()) }
+            override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
+        }
+        val factory = DefaultMediaSourceFactory(DefaultDataSource.Factory(this, http).setTransferListener(transfer))
+            .setLoadErrorHandlingPolicy(object : DefaultLoadErrorHandlingPolicy(1) {
+                override fun getRetryDelayMsFor(info: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
+                    val denied = generateSequence(info.exception as Throwable) { it.cause }
+                        .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
+                        .any { it.responseCode == 403 || it.responseCode == 429 }
+                    return if (denied) C.TIME_UNSET else super.getRetryDelayMsFor(info)
+                }
+            })
         val item = MediaItem.Builder().setMediaId("aurora-$generation").setUri(uri)
             .setMediaMetadata(metadata).build()
         player.setMediaSource(factory.createMediaSource(item), start)
@@ -277,6 +305,7 @@ class AuroraPlaybackService : MediaSessionService() {
         "volume" to userVolume.toDouble(), "error" to failure,
         "supportsEqualizer" to (equalizer != null),
         "eqFrequencies" to (if (equalizer != null) eqFrequencies else emptyList<Double>()),
+        "audioNetworkRequests" to networkRequests.get(), "audioNetworkBytes" to networkBytes.get(),
     )
     private fun publishState() {
         playbackActive = player.playWhenReady || player.isPlaying || player.playbackState == Player.STATE_BUFFERING

@@ -10,9 +10,9 @@ import 'package:integration_test/integration_test.dart';
 import 'package:path_provider/path_provider.dart';
 
 // Official Media3 demo fixture, independent of YouTube and yt-dlp:
-// https://github.com/androidx/media/blob/release/demos/main/src/main/assets/media.exolist.json
+// https://github.com/androidx/media/blob/release/demos/cast/src/main/java/androidx/media3/demo/cast/DemoUtil.java
 const _fixture =
-    'https://storage.googleapis.com/exoplayer-test-media-0/play.mp3';
+    'https://storage.googleapis.com/exoplayer-test-media-1/mp3/Keys_To_The_Kingdom.mp3';
 
 Future<void> _waitFor(AndroidMusicAudio audio, bool Function() ready) async {
   final deadline = DateTime.now().add(const Duration(seconds: 15));
@@ -73,11 +73,14 @@ void main() {
           ).invokeMapMethod<String, dynamic>('state');
           expect(state!['audioNetworkRequests'], greaterThan(0));
           expect(state['audioNetworkBytes'], greaterThan(0));
+          expect(state['audioNetworkBytes'], lessThan(8882875));
           expect(await _cacheBytes(cache), before);
           expect(completions, 0);
 
           await audio.pause();
           await _waitFor(audio, () => !audio.isPlaying);
+          // Position events are sampled every 250 ms; let the paused sample arrive.
+          await Future<void>.delayed(const Duration(milliseconds: 350));
           final pausedAt = audio.position;
           await Future<void>.delayed(const Duration(milliseconds: 500));
           expect(

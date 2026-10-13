@@ -102,6 +102,17 @@ class FakeAudio extends AudioBackend {
 }
 
 class FakeSource extends SourceBackend {
+  bool expiredStream = false;
+  final playbackFailures = <String>[];
+  @override
+  bool isExpiredStream(Track track) => expiredStream;
+  @override
+  void reportPlaybackFailure(String message) => playbackFailures.add(message);
+  @override
+  void invalidateResolvedAudio(Track track) {
+    expiredStream = false;
+  }
+
   Completer<List<Track>>? pendingSearch;
   final searchQueries = <String>[];
   final searchLimits = <int>[];

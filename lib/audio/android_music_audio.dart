@@ -31,7 +31,9 @@ class AndroidMusicAudio extends AudioBackend {
   List<double> _eqFrequencies = const [];
 
   // Native EQ availability depends on the device; FFT is not exposed.
+  @override
   bool get supportsEqualizer => _supportsEqualizer;
+  @override
   bool get supportsVisualization => false;
   Stream<String> get mediaActions => _mediaActions.stream;
 
