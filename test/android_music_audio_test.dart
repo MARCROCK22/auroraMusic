@@ -159,8 +159,11 @@ void main() {
       final subscription = audio.mediaActions.listen(actions.add);
       await emit({'type': 'action', 'generation': 1, 'action': 'next'});
       await emit({'type': 'action', 'generation': 1, 'action': 'previous'});
+      await emit({'type': 'action', 'generation': 1, 'action': 'play'});
+      await emit({'type': 'action', 'generation': 1, 'action': 'pause'});
+      await emit({'type': 'action', 'generation': 1, 'action': 'stop'});
       await emit({'type': 'action', 'generation': 0, 'action': 'next'});
-      expect(actions, ['next', 'previous']);
+      expect(actions, ['next', 'previous', 'play', 'pause', 'stop']);
       await audio.updateMetadata(id: 'track', title: 'Song', artist: 'Artist');
       expect(calls.last.method, 'metadata');
       expect(calls.last.arguments, containsPair('title', 'Song'));
@@ -184,6 +187,38 @@ void main() {
       expect(audio.isBuffering, false);
       expect(audio.isPlaying, false);
       expect(audio.lastError, contains('network failure'));
+    },
+  );
+
+  test(
+    'exposes native EQ availability and passes eight bounded gains',
+    () async {
+      audio.setEqualizer(true, [5]);
+      expect(calls.last.method, 'initialize');
+      await emit({
+        'type': 'state',
+        'generation': 0,
+        'supportsEqualizer': true,
+        'eqFrequencies': [60, 170, 310, 600, 1000, 3000, 6000, 12000],
+      });
+      expect(audio.supportsEqualizer, true);
+      expect(audio.eqFrequencies.length, 8);
+      audio.setEqualizer(true, [20, -20, double.nan, 3]);
+      await Future<void>.delayed(Duration.zero);
+      expect(calls.last.method, 'equalizer');
+      expect(calls.last.arguments, {
+        'enabled': true,
+        'gainsDb': [12.0, -12.0, 0.0, 3.0, 0.0, 0.0, 0.0, 0.0],
+      });
+      await emit({
+        'type': 'state',
+        'generation': 0,
+        'supportsEqualizer': false,
+        'eqFrequencies': <num>[],
+      });
+      expect(audio.supportsEqualizer, false);
+      expect(audio.eqFrequencies, isEmpty);
+      expect(audio.lastError, null);
     },
   );
 }
