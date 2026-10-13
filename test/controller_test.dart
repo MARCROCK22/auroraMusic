@@ -895,6 +895,36 @@ void main() {
       expect(source.resolved.length, 2);
     },
   );
+  test(
+    '429 stops playback recovery even when the cached URL expired',
+    () async {
+      final source = FakeSource()..expiredStream = true;
+      final audio = FakeAudio();
+      final controller = await createTestController(
+        source: source,
+        audio: audio,
+      );
+      addTearDown(() => closeTestController(controller));
+      await controller.playTrack(first);
+      audio.lastError = 'HTTP 429 Too Many Requests';
+      audio.notifyListeners();
+      expect(source.resolved, ['one']);
+      expect(source.playbackFailures, ['HTTP 429 Too Many Requests']);
+      expect(controller.busy, false);
+    },
+  );
+  test('status digits in an audio path never report a YouTube block', () async {
+    final source = FakeSource();
+    final audio = FakeAudio();
+    final controller = await createTestController(source: source, audio: audio);
+    addTearDown(() => closeTestController(controller));
+    await controller.playTrack(first);
+    audio.lastError = 'Cannot inspect audio403.webm';
+    audio.notifyListeners();
+    expect(source.playbackFailures, isEmpty);
+    expect(source.resolved, ['one']);
+    expect(controller.error, 'Cannot inspect audio403.webm');
+  });
 
   test(
     'reordering duplicate queue entries preserves the selected occurrence',

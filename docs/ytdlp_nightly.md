@@ -136,7 +136,7 @@ extraction headers and is reused only with at least two minutes of cache life
 remaining. These request limits are separate from the updater's daily allowance.
 
 HTTP 429, verification/rate-limit responses and an unexplained HTTP 403 start a
-15-minute cooldown. The cooldown timestamp is persisted across app restarts;
+1-minute cooldown. The cooldown timestamp is persisted across app restarts;
 queued work rechecks it before starting. Aurora does not retry these denials,
 switch clients/accounts/network routes, or recommend changing sessions to
 bypass a restriction. Local music remains available during the cooldown.

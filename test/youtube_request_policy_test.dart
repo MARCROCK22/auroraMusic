@@ -25,6 +25,71 @@ void main() {
       );
     },
   );
+  test('IDs and URL parameters never masquerade as HTTP failures', () {
+    for (final message in [
+      '[youtube] abc429xyzAB: video unavailable',
+      '[youtube] aa-429-bbbb: extraction failed',
+      'Cannot inspect audio403.webm',
+      'Cannot inspect https://host/429/audio?status=403',
+      'Cannot inspect https://host/502/audio',
+    ]) {
+      expect(
+        YouTubeRequestPolicy.classify(message),
+        isNot(
+          anyOf(
+            YouTubeFailure.blocked,
+            YouTubeFailure.accessDenied,
+            YouTubeFailure.transient,
+          ),
+        ),
+        reason: message,
+      );
+    }
+    expect(
+      YouTubeRequestPolicy.classify('HTTP Error 403: Forbidden'),
+      YouTubeFailure.accessDenied,
+    );
+    expect(
+      YouTubeRequestPolicy.classify('response code: 429'),
+      YouTubeFailure.blocked,
+    );
+    expect(
+      YouTubeRequestPolicy.classify('statusCode=503'),
+      YouTubeFailure.transient,
+    );
+  });
+  test('documented guest limit and sanitized errors retain their category', () {
+    expect(
+      YouTubeRequestPolicy.classify(
+        "This content isn't available, try again later",
+      ),
+      YouTubeFailure.blocked,
+    );
+    expect(
+      YouTubeRequestPolicy.classify(
+        'YouTube limitó las solicitudes o pidió una verificación.',
+      ),
+      YouTubeFailure.blocked,
+    );
+    expect(
+      YouTubeRequestPolicy.classify('YouTube rechazó el acceso (403).'),
+      YouTubeFailure.accessDenied,
+    );
+  });
+  test(
+    'a video ID with status digits does not stop subsequent requests',
+    () async {
+      final policy = YouTubeRequestPolicy(requestSpacing: Duration.zero);
+      await expectLater(
+        policy.run(() async {
+          throw StateError('[youtube] abc429xyzAB: video unavailable');
+        }),
+        throwsStateError,
+      );
+      expect(policy.blockedUntil, isNull);
+      expect(await policy.run(() async => 42), 42);
+    },
+  );
   test(
     'metadata transport retries once; explicit download never retries',
     () async {
@@ -68,9 +133,24 @@ void main() {
     );
     await expectLater(policy.run(request), throwsStateError);
     expect(count, 1);
-    now = now.add(const Duration(minutes: 16));
+    now = now.add(const Duration(seconds: 59));
+    await expectLater(policy.run(request), throwsStateError);
+    expect(count, 1);
+    now = now.add(const Duration(seconds: 1));
     await expectLater(policy.run(request), throwsStateError);
     expect(count, 2);
+  });
+  test('restored longer pauses migrate once and retain the remaining time', () {
+    var now = DateTime.utc(2026, 1, 1);
+    final policy = YouTubeRequestPolicy(now: () => now);
+    DateTime? saved;
+    policy.onBlocked = (until) => saved = until;
+    policy.restoreCooldown(now.add(const Duration(minutes: 15)));
+    expect(saved, now.add(const Duration(minutes: 1)));
+    now = now.add(const Duration(seconds: 30));
+    final restored = YouTubeRequestPolicy(now: () => now);
+    restored.restoreCooldown(saved);
+    expect(restored.blockedUntil!.difference(now), const Duration(seconds: 30));
   });
   test('only two requests run simultaneously', () async {
     final policy = YouTubeRequestPolicy(requestSpacing: Duration.zero);

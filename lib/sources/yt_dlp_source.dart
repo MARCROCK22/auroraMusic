@@ -23,13 +23,13 @@ class YtDlpSource extends SourceBackend {
     _androidOverride = androidOverride;
     _requests = requestPolicy ?? YouTubeRequestPolicy();
     _now = now ?? DateTime.now;
+    _requests.onBlocked = (until) => unawaited(
+      _preferences.setInt('youtubeCooldownUntil', until.millisecondsSinceEpoch),
+    );
     final cooldown = _preferences.getInt('youtubeCooldownUntil');
     if (cooldown != null) {
       _requests.restoreCooldown(DateTime.fromMillisecondsSinceEpoch(cooldown));
     }
-    _requests.onBlocked = (until) => unawaited(
-      _preferences.setInt('youtubeCooldownUntil', until.millisecondsSinceEpoch),
-    );
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'progress') {
         final args = call.arguments as Map;
@@ -311,6 +311,8 @@ class YtDlpSource extends SourceBackend {
     '--no-plugin-dirs',
     '--no-remote-components',
     '--no-warnings',
+    '--sleep-requests',
+    '1',
     '--socket-timeout',
     '15',
     '--retries',
@@ -334,18 +336,15 @@ class YtDlpSource extends SourceBackend {
   static String sourceError(String message) {
     final sanitized = redactError(message);
     final normalized = sanitized.toLowerCase();
-    if (normalized.contains('429') ||
-        normalized.contains('not a bot') ||
-        normalized.contains('confirm you')) {
-      return 'YouTube limitó temporalmente las solicitudes o detectó un posible bloqueo. Aurora detendrá los reintentos durante 15 minutos. Los archivos locales siguen disponibles.';
+    final failure = YouTubeRequestPolicy.classify(message);
+    if (failure == YouTubeFailure.blocked) {
+      return 'YouTube limitó las solicitudes o pidió una verificación. Aurora pausa los reintentos durante 1 minuto; YouTube puede mantener la restricción más tiempo. Los archivos locales siguen disponibles.';
     }
-    if (normalized.contains('video unavailable') ||
-        normalized.contains('private video') ||
-        normalized.contains('video has been removed')) {
+    if (failure == YouTubeFailure.unavailable) {
       return 'Este contenido de YouTube no está disponible públicamente. Prueba otro enlace.';
     }
-    if (normalized.contains('403') || normalized.contains('forbidden')) {
-      return 'YouTube rechazó el acceso al audio (403). Esto no demuestra que el enlace haya vencido. Aurora detendrá los reintentos durante 15 minutos.';
+    if (failure == YouTubeFailure.accessDenied) {
+      return 'YouTube rechazó el acceso (403). Esto no demuestra que el enlace haya vencido ni que toda la red esté bloqueada. Aurora pausa los reintentos durante 1 minuto.';
     }
     if (normalized.contains('cookie')) {
       return 'YouTube rechazó el archivo de sesión. Renueva tu sesión opcional en Ajustes.';

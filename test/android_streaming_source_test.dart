@@ -199,7 +199,10 @@ void main() {
     await expectLater(source.resolve(track), throwsStateError);
     await expectLater(source.resolve(track), throwsStateError);
     expect(calls, hasLength(1));
-    now = now.add(const Duration(minutes: 16));
+    now = now.add(const Duration(seconds: 59));
+    await expectLater(source.resolve(track), throwsStateError);
+    expect(calls, hasLength(1));
+    now = now.add(const Duration(seconds: 1));
     handler = (_) async => jsonEncode(metadata);
     await source.resolve(track);
     expect(calls, hasLength(2));

@@ -19,6 +19,7 @@ import 'core/source_backend.dart';
 import 'import/spotify_import.dart';
 import 'library/library_database.dart';
 import 'dj/recommendations.dart';
+import 'sources/youtube_request_policy.dart';
 
 final controllerProvider = ChangeNotifierProvider<AppController>((ref) {
   throw StateError('Override controllerProvider at application startup.');
@@ -608,6 +609,7 @@ class AppController extends ChangeNotifier {
       return;
     }
     final audioError = audio.lastError;
+    final failure = YouTubeRequestPolicy.classify(audioError ?? '');
     if (audioError != null && audioError != error) error = audioError;
     if (_playIntent &&
         !_recovering &&
@@ -628,11 +630,10 @@ class AppController extends ChangeNotifier {
       unawaited(_recoverExpiredStream());
     } else if (audioError != null &&
         _usingRemote &&
-        !(currentTrack != null && source.isExpiredStream(currentTrack!)) &&
-        RegExp(
-          r'429|403|forbidden|not a bot|confirm you',
-          caseSensitive: false,
-        ).hasMatch(audioError)) {
+        (failure == YouTubeFailure.blocked ||
+            (failure == YouTubeFailure.accessDenied &&
+                !(currentTrack != null &&
+                    source.isExpiredStream(currentTrack!))))) {
       source.reportPlaybackFailure(audioError);
     }
     if (audio.isPlaying &&
@@ -644,13 +645,12 @@ class AppController extends ChangeNotifier {
   }
 
   bool _isRecoverableStreamError(String message) {
-    if (RegExp(
-      r'429|not a bot|confirm you|blocked',
-      caseSensitive: false,
-    ).hasMatch(message)) {
+    final failure = YouTubeRequestPolicy.classify(message);
+    if (failure == YouTubeFailure.blocked ||
+        RegExp(r'\bblocked\b', caseSensitive: false).hasMatch(message)) {
       return false;
     }
-    if (RegExp(r'403|forbidden', caseSensitive: false).hasMatch(message)) {
+    if (failure == YouTubeFailure.accessDenied) {
       return currentTrack != null && source.isExpiredStream(currentTrack!);
     }
     return RegExp(
@@ -1011,10 +1011,10 @@ class AppController extends ChangeNotifier {
           return;
         }
         if (error != null &&
-            RegExp(
-              r'429|403|bloqueo|rechaz|limit',
-              caseSensitive: false,
-            ).hasMatch(error!)) {
+            const {
+              YouTubeFailure.blocked,
+              YouTubeFailure.accessDenied,
+            }.contains(YouTubeRequestPolicy.classify(error!))) {
           break;
         }
       }

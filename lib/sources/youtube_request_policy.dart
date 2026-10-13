@@ -8,7 +8,7 @@ class YouTubeRequestPolicy {
     DateTime Function()? now,
     Future<void> Function(Duration)? sleep,
     this.requestSpacing = const Duration(seconds: 1),
-    this.cooldown = const Duration(minutes: 15),
+    this.cooldown = const Duration(minutes: 1),
   }) : _now = now ?? DateTime.now,
        _sleep = sleep ?? Future<void>.delayed;
 
@@ -22,29 +22,46 @@ class YouTubeRequestPolicy {
   DateTime? _lastStart, _blockedUntil;
   DateTime? get blockedUntil => _blockedUntil;
   void restoreCooldown(DateTime? until) {
-    _blockedUntil = until;
+    final maximum = _now().add(cooldown);
+    _blockedUntil = until != null && until.isAfter(maximum) ? maximum : until;
+    // Migrate a longer pause saved by a previous app version once, not on
+    // every restart. Reopening the app must not restart the remaining minute.
+    if (_blockedUntil != null && _blockedUntil != until) {
+      onBlocked?.call(_blockedUntil!);
+    }
   }
 
   int requestsStarted = 0;
 
   static YouTubeFailure classify(String message) {
-    final text = message.toLowerCase();
-    if (RegExp(
-      r'429|too many requests|not a bot|confirm you|unusual traffic|rate.?limit',
-    ).hasMatch(text)) {
+    // IDs, paths and signed URL parameters can contain HTTP status numbers.
+    final text = message.toLowerCase().replaceAll(
+      RegExp(r'https?://[^\s<>"\x27]+'),
+      '',
+    );
+    final status = RegExp(
+      r'(?:\bhttp(?:\s+error)?|\b(?:response|status)(?:[\s_-]*code)?|\bcode)[\s:=]+(403|429|502|503|504)\b|\((403|429|502|503|504)\)|^\s*(403|429|502|503|504)\s*$',
+    ).firstMatch(text);
+    final code = status?.group(1) ?? status?.group(2) ?? status?.group(3);
+    if (code == '429' ||
+        RegExp(
+          r'too many requests|not a bot|unusual traffic|rate.?limit|youtube limitó|this content (?:isn\x27t|is not) available, try again later',
+        ).hasMatch(text)) {
       return YouTubeFailure.blocked;
     }
     if (RegExp(
-      r'video unavailable|private video|removed|not available in your country',
+      r'video unavailable|private video|video has been removed|removed video|not available in your country',
     ).hasMatch(text)) {
       return YouTubeFailure.unavailable;
     }
-    if (RegExp(r'403|forbidden').hasMatch(text)) {
+    if (code == '403' ||
+        RegExp(r'\bforbidden\b|youtube rechazó').hasMatch(text)) {
       return YouTubeFailure.accessDenied;
     }
-    if (RegExp(
-      r'timeout|timed out|connection reset|connection closed|socketexception|\b50[234]\b',
-    ).hasMatch(text)) {
+    if (const {'502', '503', '504'}.contains(code) ||
+        RegExp(
+          r'timeout|timed out|connection reset|connection closed|socketexception',
+        ).hasMatch(text)) {
       return YouTubeFailure.transient;
     }
     return YouTubeFailure.other;
@@ -65,7 +82,7 @@ class YouTubeRequestPolicy {
     final until = _blockedUntil;
     if (until != null && _now().isBefore(until)) {
       throw StateError(
-        'YouTube limitó o rechazó las solicitudes. Aurora ha detenido los reintentos durante 15 minutos. La música local sigue disponible.',
+        'YouTube limitó o rechazó las solicitudes. Aurora mantiene su pausa de 1 minuto. YouTube puede mantener la restricción más tiempo. La música local sigue disponible.',
       );
     }
   }

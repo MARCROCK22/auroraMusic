@@ -122,7 +122,7 @@ void main() {
   test('Upstream rate limits explain recovery and cap diagnostic text', () {
     expect(
       YtDlpSource.sourceError('HTTP Error 429: Too Many Requests'),
-      contains('15 minutos'),
+      contains('1 minuto'),
     );
     expect(
       YtDlpSource.sourceError('Sign in to confirm you are not a bot'),
@@ -136,6 +136,27 @@ void main() {
     );
     expect(YtDlpSource.sourceError('x' * 3000).length, lessThanOrEqualTo(2001));
   });
+  test(
+    'source errors distinguish status digits from IDs and disclose uncertainty',
+    () {
+      expect(
+        YtDlpSource.sourceError('[youtube] abc429xyzAB: video unavailable'),
+        contains('no está disponible públicamente'),
+      );
+      expect(
+        YtDlpSource.sourceError('Failed to inspect audio403.webm'),
+        'Failed to inspect audio403.webm',
+      );
+      expect(
+        YtDlpSource.sourceError('HTTP 429'),
+        contains('puede mantener la restricción más tiempo'),
+      );
+      expect(
+        YtDlpSource.sourceError('HTTP 403'),
+        contains('ni que toda la red esté bloqueada'),
+      );
+    },
+  );
   test(
     'Missing local file reports removal instead of returning a stale path',
     () async {

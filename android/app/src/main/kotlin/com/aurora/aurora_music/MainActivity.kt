@@ -29,6 +29,12 @@ import java.util.concurrent.TimeoutException
 import java.util.concurrent.FutureTask
 import java.util.concurrent.locks.ReentrantReadWriteLock
 
+internal fun sourceRequest(target: String) = YoutubeDLRequest(target).apply {
+    addOption("--ignore-config"); addOption("--no-plugin-dirs"); addOption("--no-remote-components"); addOption("--no-warnings")
+    addOption("--sleep-requests", "1")
+    addOption("--socket-timeout", "15"); addOption("--retries", "0"); addOption("--fragment-retries", "0"); addOption("--extractor-retries", "0")
+}
+
 class MainActivity : FlutterActivity() {
     // Keep the Dart queue and its native channel alive during background playback.
     override fun shouldDestroyEngineWithHost(): Boolean = false
@@ -270,9 +276,7 @@ class MainActivity : FlutterActivity() {
             catch (_: RejectedExecutionException) { result.error("SOURCE_BUSY", "La fuente está ocupada. Inténtalo nuevamente.", null) }
         }
     }
-    private fun request(target: String, cookiePath: String? = null) = YoutubeDLRequest(target).apply {
-        addOption("--ignore-config"); addOption("--no-plugin-dirs"); addOption("--no-remote-components"); addOption("--no-warnings")
-        addOption("--socket-timeout", "15"); addOption("--retries", "0"); addOption("--fragment-retries", "0"); addOption("--extractor-retries", "0")
+    private fun request(target: String, cookiePath: String? = null) = sourceRequest(target).apply {
         if (cookiePath != null) {
             val cookies = File(cookiePath).canonicalFile
             require(isWithin(cookies, filesDir.canonicalFile) && cookies.isFile && cookies.length() in 1..1048576) { "Archivo de sesión inválido" }

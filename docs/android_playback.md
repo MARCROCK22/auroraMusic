@@ -63,12 +63,16 @@ disponible en este backend y la interfaz desactiva esa captura.
 ## Solicitudes y nightly
 
 Dos operaciones concurrentes como máximo, ocho pendientes y un segundo entre
-inicios. Búsquedas/consultas repetidas comparten la petición y caché de cinco
-minutos; URLs resueltas se reutilizan con margen de dos minutos. La cancelación
+inicios. yt-dlp usa además `--sleep-requests 1` en Android y Windows: un segundo
+entre sus peticiones internas durante la extracción, sin ralentizar el audio
+que ya reproduce ExoPlayer. Búsquedas/consultas repetidas comparten la petición
+y caché de cinco minutos; URLs resueltas se reutilizan con margen de dos minutos. La cancelación
 antes de despachar una resolución evita iniciar un proceso ya descartado.
 
 429, verificación/bloqueo y 403 sin expiración comprobable detienen reintentos
-durante 15 minutos, incluso después de reiniciar la app. Un 403 solo permite
+durante 1 minuto, incluso después de reiniciar la app. Una pausa guardada por
+una versión anterior se acorta a un minuto como máximo. Esta pausa no garantiza
+que YouTube levante la restricción. Un 403 solo permite
 renovar la URL si su `expire`/`expires` realmente venció. La recuperación por
 fallos temporales conserva posición, espera dos/cuatro segundos y se limita a
 dos intentos. No se cambia de IP, cliente, cuenta ni sesión para evadir bloqueos.
