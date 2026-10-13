@@ -55,7 +55,6 @@ if (-not $YtDlpVersion -and $pins.ytdlp.repository -ne 'yt-dlp/yt-dlp-nightly-bu
 if ($YtDlpVersion) { $pins.ytdlp = Get-PinnedAsset 'yt-dlp/yt-dlp-nightly-builds' $YtDlpVersion '^yt-dlp\.exe$' }
 if ($DenoVersion) { $pins.deno = Get-PinnedAsset 'denoland/deno' $DenoVersion '^deno-x86_64-pc-windows-msvc\.zip$' }
 if ($FfmpegVersion) { $pins.ffmpeg = Get-PinnedAsset 'yt-dlp/FFmpeg-Builds' $FfmpegVersion '^ffmpeg-(master-latest|N-\d+-g[0-9a-f]+)-win64-gpl\.zip$' }
-$pins | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $lockPath -Encoding utf8
 
 $staging = Join-Path $ToolDirectory ('.staging-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $staging | Out-Null
@@ -99,6 +98,8 @@ try {
         $binaryHashes[$name] = (Get-FileHash -LiteralPath $binaries[$name] -Algorithm SHA256).Hash.ToLowerInvariant()
     }
     $binaryHashes | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $ToolDirectory 'binaries.sha256.json') -Encoding utf8
+    # A rejected download must leave the installed versions' lock unchanged.
+    $pins | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $lockPath -Encoding utf8
     Copy-Item -LiteralPath $licenses -Destination $ToolDirectory -Recurse -Force
     $licenseSources | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $ToolDirectory 'licenses/sources.json') -Encoding utf8
     Write-Host "Herramientas verificadas instaladas en $ToolDirectory; la compilación las incluye automáticamente."
