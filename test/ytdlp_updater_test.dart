@@ -88,6 +88,7 @@ void main() {
       expect(saved['version'], version);
       expect(saved['sha256'], expected);
       expect(saved['sourceCommit'], sourceCommit);
+      expect(saved['pendingInstallation'], isNull);
       expect(
         await File(
           p.join(directory.path, 'licenses', 'yt-dlp-$version-LICENSE'),
@@ -187,6 +188,19 @@ void main() {
         replace: (from, to) async {
           expect(first.isInstalling, isTrue);
           expect(updater().isInstalling, isTrue);
+          final journal =
+              (jsonDecode(await state.readAsString())
+                      as Map)['pendingInstallation']
+                  as Map;
+          expect(journal['sha256'], expected);
+          expect(
+            journal['previousSha256'],
+            sha256.convert(oldBytes).toString(),
+          );
+          expect(
+            await File('${executable.path}.aurora-previous').readAsBytes(),
+            oldBytes,
+          );
           await from.rename(to.path);
         },
       );
@@ -239,4 +253,184 @@ void main() {
       YtDlpUpdateStatus.throttled,
     );
   });
+
+  Future<void> pendingInstallation() async {
+    await File('${executable.path}.aurora-previous').writeAsBytes(oldBytes);
+    await state.writeAsString(
+      jsonEncode({
+        'lastCheckAt': now.toIso8601String(),
+        'version': '2026.08.19',
+        'sha256': sha256.convert(oldBytes).toString(),
+        'pendingInstallation': {
+          'sha256': expected,
+          'previousSha256': sha256.convert(oldBytes).toString(),
+          'version': version,
+          'sourceCommit': sourceCommit,
+        },
+      }),
+    );
+  }
+
+  test('recovers interrupted broken install before daily throttle', () async {
+    await pendingInstallation();
+    await executable.writeAsBytes(bytes);
+    final result = await updater(probe: (_) async => 'broken').checkForUpdate();
+    expect(result.status, YtDlpUpdateStatus.throttled);
+    expect(await executable.readAsBytes(), oldBytes);
+    final saved = jsonDecode(await state.readAsString()) as Map;
+    expect(saved['pendingInstallation'], isNull);
+    expect(saved['version'], '2026.08.19');
+    expect(requests, isEmpty);
+  });
+
+  test('startup commits valid interrupted install without network', () async {
+    await pendingInstallation();
+    await executable.writeAsBytes(bytes);
+    final result = await updater().recoverPendingInstallation();
+    expect(result.status, YtDlpUpdateStatus.updated);
+    expect(await executable.readAsBytes(), bytes);
+    final saved = jsonDecode(await state.readAsString()) as Map;
+    expect(saved['pendingInstallation'], isNull);
+    expect(saved['version'], version);
+    expect(await File('${executable.path}.aurora-previous').exists(), isFalse);
+    expect(requests, isEmpty);
+  });
+
+  test(
+    'startup restores missing executable from hash-verified backup',
+    () async {
+      await pendingInstallation();
+      await executable.delete();
+      final result = await updater().recoverPendingInstallation();
+      expect(result.status, YtDlpUpdateStatus.upToDate);
+      expect(await executable.readAsBytes(), oldBytes);
+      expect(
+        (jsonDecode(await state.readAsString()) as Map)['pendingInstallation'],
+        isNull,
+      );
+      expect(requests, isEmpty);
+    },
+  );
+
+  test('startup rejects corrupt backup and retains recovery journal', () async {
+    await pendingInstallation();
+    await executable.writeAsBytes([0]);
+    await File('${executable.path}.aurora-previous').writeAsBytes([1]);
+    final result = await updater().recoverPendingInstallation();
+    expect(result.status, YtDlpUpdateStatus.failed);
+    expect(
+      (jsonDecode(await state.readAsString()) as Map)['pendingInstallation'],
+      isNotNull,
+    );
+    expect(await executable.readAsBytes(), [0]);
+    expect(requests, isEmpty);
+  });
+
+  for (final location in [
+    'https://evil.example/payload',
+    'http://github.com/payload',
+  ]) {
+    test('rejects redirect $location before contacting destination', () async {
+      final client = _RedirectClient(location);
+      final result = await HttpOverrides.runZoned(
+        () => YtDlpUpdater(
+          executable: executable,
+          stateFile: state,
+          canUpdate: () => true,
+        ).checkForUpdate(),
+        createHttpClient: (_) => client,
+      );
+      expect(result.status, YtDlpUpdateStatus.failed);
+      expect(client.destinations, [
+        Uri.parse(
+          'https://api.github.com/repos/yt-dlp/yt-dlp-nightly-builds/releases/latest',
+        ),
+      ]);
+    });
+  }
+
+  test('stops after five official redirects', () async {
+    final client = _RedirectClient('https://api.github.com/redirect-loop');
+    final result = await HttpOverrides.runZoned(
+      () => YtDlpUpdater(
+        executable: executable,
+        stateFile: state,
+        canUpdate: () => true,
+      ).checkForUpdate(),
+      createHttpClient: (_) => client,
+    );
+    expect(result.status, YtDlpUpdateStatus.failed);
+    expect(client.destinations.length, 6);
+  });
+}
+
+class _RedirectClient implements HttpClient {
+  _RedirectClient(this.location);
+  final String location;
+  final destinations = <Uri>[];
+  @override
+  Duration? connectionTimeout;
+  @override
+  Future<HttpClientRequest> getUrl(Uri url) async {
+    destinations.add(url);
+    return _RedirectRequest(location);
+  }
+
+  @override
+  void close({bool force = false}) {}
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _RedirectRequest implements HttpClientRequest {
+  _RedirectRequest(this.location);
+  final String location;
+  @override
+  bool followRedirects = true;
+  @override
+  HttpHeaders get headers => _RedirectHeaders(location);
+  @override
+  Future<HttpClientResponse> close() async {
+    expect(followRedirects, isFalse);
+    return _RedirectResponse(location);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _RedirectResponse extends Stream<List<int>>
+    implements HttpClientResponse {
+  _RedirectResponse(this.location);
+  final String location;
+  @override
+  int get statusCode => 302;
+  @override
+  HttpHeaders get headers => _RedirectHeaders(location);
+  @override
+  StreamSubscription<List<int>> listen(
+    void Function(List<int>)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) => const Stream<List<int>>.empty().listen(
+    onData,
+    onError: onError,
+    onDone: onDone,
+    cancelOnError: cancelOnError,
+  );
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _RedirectHeaders implements HttpHeaders {
+  _RedirectHeaders(this.location);
+  final String location;
+  @override
+  String? value(String name) =>
+      name == HttpHeaders.locationHeader ? location : null;
+  @override
+  void set(String name, Object value, {bool preserveHeaderCase = false}) {}
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
