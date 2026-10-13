@@ -46,6 +46,9 @@ dependencies:
   crypto: 3.0.7
   zxing2: 0.2.4
   mobile_scanner: 7.4.2
+  flutter_inappwebview: 6.1.5
+  url_launcher: 6.3.2
+  adblocker_webview: 2.3.0
 
 dev_dependencies:
   integration_test:
