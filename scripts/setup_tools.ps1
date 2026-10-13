@@ -34,15 +34,25 @@ function Get-PinnedAsset([string]$Repository, [string]$Version, [string]$Pattern
         }
     }
     if (-not $expectedHash) { throw "No hay SHA-256 publicado para $($asset[0].name). No se instalará sin verificación." }
-    return @{ repository = $Repository; version = $release.tag_name; name = $asset[0].name; url = $asset[0].browser_download_url; sha256 = $expectedHash }
+    $pin = @{ repository = $Repository; version = $release.tag_name; name = $asset[0].name; url = $asset[0].browser_download_url; sha256 = $expectedHash }
+    if ($Repository -eq 'yt-dlp/yt-dlp-nightly-builds') {
+        if ($release.body -notmatch 'Generated from: https://github\.com/yt-dlp/yt-dlp/commit/([0-9a-f]{40})') { throw 'Nightly release is missing source provenance.' }
+        $pin.sourceCommit = $Matches[1]
+        $pin.checksumUrl = "https://github.com/$Repository/releases/download/$($release.tag_name)/SHA2-256SUMS"
+    }
+    return $pin
 }
 
 $defaultPins = Join-Path $PSScriptRoot 'windows_tools.lock.json'
 $pinsFile = if (Test-Path -LiteralPath $lockPath) { $lockPath } else { $defaultPins }
 if (-not (Test-Path -LiteralPath $pinsFile)) { throw 'Falta scripts/windows_tools.lock.json con versiones verificadas.' }
 $pins = Get-Content -LiteralPath $pinsFile -Raw | ConvertFrom-Json
+# Migrate an existing stable setup to the committed, verified nightly baseline.
+if (-not $YtDlpVersion -and $pins.ytdlp.repository -ne 'yt-dlp/yt-dlp-nightly-builds') {
+    $pins.ytdlp = (Get-Content -LiteralPath $defaultPins -Raw | ConvertFrom-Json).ytdlp
+}
 # Explicit versions (including latest) update only the requested tool.
-if ($YtDlpVersion) { $pins.ytdlp = Get-PinnedAsset 'yt-dlp/yt-dlp' $YtDlpVersion '^yt-dlp\.exe$' }
+if ($YtDlpVersion) { $pins.ytdlp = Get-PinnedAsset 'yt-dlp/yt-dlp-nightly-builds' $YtDlpVersion '^yt-dlp\.exe$' }
 if ($DenoVersion) { $pins.deno = Get-PinnedAsset 'denoland/deno' $DenoVersion '^deno-x86_64-pc-windows-msvc\.zip$' }
 if ($FfmpegVersion) { $pins.ffmpeg = Get-PinnedAsset 'yt-dlp/FFmpeg-Builds' $FfmpegVersion '^ffmpeg-(master-latest|N-\d+-g[0-9a-f]+)-win64-gpl\.zip$' }
 $pins | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $lockPath -Encoding utf8
@@ -53,7 +63,7 @@ try {
     foreach ($tool in 'ytdlp', 'deno', 'ffmpeg') {
         $pin = $pins.$tool
         if ($pin.sha256 -notmatch '^[0-9a-fA-F]{64}$') { throw "Hash inválido para $tool." }
-        if ($pin.url -notmatch '^https://github\.com/(yt-dlp/yt-dlp|denoland/deno|yt-dlp/FFmpeg-Builds)/releases/download/') { throw 'URL de herramientas no autorizada.' }
+        if ($pin.url -notmatch '^https://github\.com/(yt-dlp/yt-dlp-nightly-builds|denoland/deno|yt-dlp/FFmpeg-Builds)/releases/download/') { throw 'URL de herramientas no autorizada.' }
         $download = Join-Path $staging ([IO.Path]::GetFileName($pin.name))
         Write-Host "Descargando $tool ($($pin.version)); verificando SHA-256 oficial."
         Invoke-WebRequest -Uri $pin.url -OutFile $download -Headers $headers -TimeoutSec 600
@@ -71,9 +81,10 @@ try {
     }
     $licenses = Join-Path $staging 'licenses'
     New-Item -ItemType Directory -Path $licenses | Out-Null
+    if ($pins.ytdlp.sourceCommit -notmatch '^[0-9a-f]{40}$') { throw 'Nightly yt-dlp source commit is missing or invalid.' }
     $licenseSources = @{
-        'yt-dlp-LICENSE.txt' = "https://raw.githubusercontent.com/yt-dlp/yt-dlp/$($pins.ytdlp.version)/LICENSE"
-        'yt-dlp-THIRD_PARTY_LICENSES.txt' = "https://raw.githubusercontent.com/yt-dlp/yt-dlp/$($pins.ytdlp.version)/THIRD_PARTY_LICENSES.txt"
+        'yt-dlp-LICENSE.txt' = "https://raw.githubusercontent.com/yt-dlp/yt-dlp/$($pins.ytdlp.sourceCommit)/LICENSE"
+        'yt-dlp-THIRD_PARTY_LICENSES.txt' = "https://raw.githubusercontent.com/yt-dlp/yt-dlp/$($pins.ytdlp.sourceCommit)/THIRD_PARTY_LICENSES.txt"
         'deno-LICENSE.md' = "https://raw.githubusercontent.com/denoland/deno/$($pins.deno.version)/LICENSE.md"
     }
     foreach ($notice in $licenseSources.Keys) {

@@ -10,8 +10,9 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 Add-Type -AssemblyName System.IO.Compression
 
 $lock = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'android_ytdlp.lock.json') -Raw | ConvertFrom-Json
-if ($lock.repository -ne 'yt-dlp/yt-dlp' -or $lock.version -ne '2026.08.19' -or
-    $lock.asset -ne 'yt-dlp' -or $lock.url -ne 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp' -or
+if ($lock.repository -ne 'yt-dlp/yt-dlp-nightly-builds' -or $lock.version -notmatch '^\d{4}\.\d{2}\.\d{2}\.\d{6}$' -or
+    $lock.sourceCommit -notmatch '^[0-9a-f]{40}$' -or
+    $lock.asset -ne 'yt-dlp' -or $lock.url -ne "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/$($lock.version)/yt-dlp" -or
     $lock.sha256 -notmatch '^[0-9a-f]{64}$') {
     throw 'Invalid Android yt-dlp provenance lock.'
 }
@@ -51,13 +52,12 @@ try {
             } finally { $versionReader.Dispose() }
         } finally { $archive.Dispose() }
     } finally { $zipStream.Dispose() }
-    Move-Item -LiteralPath $temporary -Destination $resource -Force
-
     New-Item -ItemType Directory -Path $licenseDirectory -Force | Out-Null
     foreach ($notice in @('LICENSE', 'THIRD_PARTY_LICENSES.txt')) {
-        $url = "https://raw.githubusercontent.com/yt-dlp/yt-dlp/$($lock.version)/$notice"
+        $url = "https://raw.githubusercontent.com/yt-dlp/yt-dlp/$($lock.sourceCommit)/$notice"
         Invoke-WebRequest -Uri $url -OutFile (Join-Path $licenseDirectory "yt-dlp-$notice") -TimeoutSec 60
     }
+    Move-Item -LiteralPath $temporary -Destination $resource -Force
     Write-Host "Prepared yt-dlp $($lock.version) for Android (SHA-256 verified)."
 } finally {
     if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
