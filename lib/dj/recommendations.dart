@@ -88,16 +88,19 @@ Set<String> recommendationTrackKeys(Track track) {
       keys.add('spotify:track:${segments[trackIndex + 1]}');
     }
   } else {
-    final query = uri.queryParametersAll
-      ..removeWhere((key, _) {
-        final lower = key.toLowerCase();
-        return lower == 'si' ||
-            lower == 'feature' ||
-            lower == 'ref' ||
-            lower == 'fbclid' ||
-            lower == 'gclid' ||
-            lower.startsWith('utm_');
-      });
+    final query =
+        {
+          for (final entry in uri.queryParametersAll.entries)
+            entry.key: List<String>.from(entry.value),
+        }..removeWhere((key, _) {
+          final lower = key.toLowerCase();
+          return lower == 'si' ||
+              lower == 'feature' ||
+              lower == 'ref' ||
+              lower == 'fbclid' ||
+              lower == 'gclid' ||
+              lower.startsWith('utm_');
+        });
     final path = uri.path.replaceFirst(RegExp(r'/$'), '');
     final queryString = (query.keys.toList()..sort())
         .map((key) {

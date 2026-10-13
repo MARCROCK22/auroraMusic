@@ -12,6 +12,7 @@ import 'audio/music_audio.dart';
 import 'audio/android_music_audio.dart';
 import 'library/library_database.dart';
 import 'sources/yt_dlp_source.dart';
+import 'sources/web_music_source.dart';
 import 'ui/aurora_shell.dart';
 
 void main() {
@@ -41,7 +42,7 @@ class _AuroraBootstrapState extends State<AuroraBootstrap> {
     final database = await LibraryDatabase.open();
     final controller = AppController(
       audio: Platform.isAndroid ? AndroidMusicAudio() : MusicAudio(),
-      source: YtDlpSource(preferences),
+      source: WebMusicSource(YtDlpSource(preferences)),
       database: database,
       preferences: preferences,
       supportDirectory: directory,

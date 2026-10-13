@@ -20,6 +20,7 @@ import 'import/spotify_import.dart';
 import 'library/library_database.dart';
 import 'dj/recommendations.dart';
 import 'sources/youtube_request_policy.dart';
+import 'sources/web_music_source.dart';
 
 final controllerProvider = ChangeNotifierProvider<AppController>((ref) {
   throw StateError('Override controllerProvider at application startup.');
@@ -39,6 +40,79 @@ class AppController extends ChangeNotifier {
   final LibraryDatabase database;
   final SharedPreferences preferences;
   final Directory supportDirectory;
+  bool get usesOfficialYouTubeMusic => source.usesOfficialYouTubeMusic;
+  Uri? youtubeMusicRequest;
+  bool _youtubeMusicActive = false;
+  bool get youtubeMusicActive => _youtubeMusicActive;
+
+  /// A navigation request only. The official player owns its queue and session.
+  void openYouTubeMusic([Uri? uri]) {
+    if (!usesOfficialYouTubeMusic) return;
+    try {
+      final target = WebMusicSource.officialUri(uri);
+      if (_loadedTrackId != null) _resumePosition = audio.position;
+      ++_playGeneration;
+      _cancelRecovery();
+      _cancelPendingResolution();
+      stopPersonalDj();
+      _playIntent = false;
+      busy = false;
+      _loadedTrackId = null;
+      _loadedAudioInput = null;
+      _usingRemote = false;
+      _recoverableRemoteTrackId = null;
+      _youtubeMusicActive = true;
+      youtubeMusicRequest = target;
+      _controls?.updateTrack(null);
+      unawaited(audio.pause().catchError(_report));
+      _notify();
+    } on ArgumentError catch (exception) {
+      _report(exception);
+    }
+  }
+
+  void clearYouTubeMusicRequest() {
+    youtubeMusicRequest = null;
+    _notify();
+  }
+
+  /// Called after the official player has closed; personal playback stays paused.
+  void closeYouTubeMusic() {
+    _youtubeMusicActive = false;
+    youtubeMusicRequest = null;
+    _playIntent = false;
+    _notify();
+  }
+
+  bool requiresOfficialYouTubeMusic(Track track) =>
+      usesOfficialYouTubeMusic &&
+      !(track.isLocal && File(track.localPath!).existsSync()) &&
+      (track.isPendingSpotifyMatch ||
+          WebMusicSource.isOnlineYouTube(track.copyWith(clearLocalPath: true)));
+
+  bool isNativePlayable(Track track) {
+    if (!usesOfficialYouTubeMusic) {
+      return !track.isPendingSpotifyMatch &&
+          (track.isLocal || track.pageUrl != null);
+    }
+    if (track.isLocal && File(track.localPath!).existsSync()) return true;
+    final uri = Uri.tryParse(track.pageUrl ?? '');
+    return !track.isPendingSpotifyMatch &&
+        !requiresOfficialYouTubeMusic(track) &&
+        uri?.scheme == 'https' &&
+        uri!.host.isNotEmpty &&
+        uri.userInfo.isEmpty;
+  }
+
+  bool _routeToYouTubeMusic(Track track) {
+    if (!requiresOfficialYouTubeMusic(track)) return false;
+    openYouTubeMusic(WebMusicSource.uriForTrack(track));
+    return true;
+  }
+
+  List<Track> get _nativeLibrary => usesOfficialYouTubeMusic
+      ? tracks.where(isNativePlayable).toList()
+      : tracks;
   MediaControls? _controls;
   StreamSubscription<void>? _completedSubscription;
   StreamSubscription<String>? _nativeActions;
@@ -131,7 +205,7 @@ class AppController extends ChangeNotifier {
   Track? get currentTrack =>
       queueIndex >= 0 && queueIndex < queue.length ? queue[queueIndex] : null;
   List<TrackRecommendation> get recommendations => recommendTracks(
-    library: tracks,
+    library: _nativeLibrary,
     favoriteIds: favoriteIds,
     playlists: playlists,
     history: recentTracks,
@@ -139,14 +213,15 @@ class AppController extends ChangeNotifier {
     filters: djFilters,
   );
   bool get canDiscoverRecommendations =>
-      strongestTasteArtist(
-            library: tracks,
-            favoriteIds: favoriteIds,
-            playlists: playlists,
-            history: recentTracks,
-          ) !=
-          null ||
-      recommendations.isNotEmpty;
+      !usesOfficialYouTubeMusic &&
+      (strongestTasteArtist(
+                library: tracks,
+                favoriteIds: favoriteIds,
+                playlists: playlists,
+                history: recentTracks,
+              ) !=
+              null ||
+          recommendations.isNotEmpty);
   bool get personalDjActive => _personalDjActive;
   bool get personalDjIncludeDiscovery => _personalDjIncludeDiscovery;
   bool get canStartPersonalDj {
@@ -163,9 +238,7 @@ class AppController extends ChangeNotifier {
         !(_playIntent || busy || audio.isPlaying || _loadedTrackId != null)) {
       return false;
     }
-    bool playable(Track track) =>
-        !track.isPendingSpotifyMatch &&
-        (track.isLocal || track.pageUrl != null);
+    bool playable(Track track) => isNativePlayable(track);
     if (shuffle) {
       return queue.asMap().entries.any(
         (entry) =>
@@ -219,6 +292,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> discoverRecommendations() async {
+    if (usesOfficialYouTubeMusic) return;
     if (discoveringRecommendations || _disposed) return;
     final seed =
         strongestTasteArtist(
@@ -279,6 +353,7 @@ class AppController extends ChangeNotifier {
   Future<void> startPersonalDj({bool includeDiscovery = false}) async {
     if (_jamPlaybackActive) return;
     if (personalDjActive) return;
+    includeDiscovery = includeDiscovery && !usesOfficialYouTubeMusic;
     final preserveCurrent =
         currentTrack != null &&
         (_playIntent || busy || audio.isPlaying || _loadedTrackId != null);
@@ -293,7 +368,11 @@ class AppController extends ChangeNotifier {
     ]) {
       if (preserveCurrent && queue.length + seedTracks.length >= 24) break;
       final keys = recommendationTrackKeys(track);
-      if (!djFilters.permits(track) || keys.any(seenKeys.contains)) continue;
+      if (!isNativePlayable(track) ||
+          !djFilters.permits(track) ||
+          keys.any(seenKeys.contains)) {
+        continue;
+      }
       seenKeys.addAll(keys);
       seedTracks.add(track);
       if (seedTracks.length == 6) break;
@@ -347,6 +426,7 @@ class AppController extends ChangeNotifier {
   }
 
   void setPersonalDjIncludeDiscovery(bool value) {
+    value = value && !usesOfficialYouTubeMusic;
     if (_personalDjIncludeDiscovery == value) return;
     _personalDjIncludeDiscovery = value;
     _notify();
@@ -392,7 +472,7 @@ class AppController extends ChangeNotifier {
     }
 
     final local = recommendTracks(
-      library: tracks,
+      library: _nativeLibrary,
       favoriteIds: favoriteIds,
       playlists: playlists,
       history: recentTracks,
@@ -409,6 +489,7 @@ class AppController extends ChangeNotifier {
     }
 
     if (added < target &&
+        !usesOfficialYouTubeMusic &&
         _personalDjIncludeDiscovery &&
         _personalDjDiscoverySearches < 2 &&
         generation == _personalDjGeneration &&
@@ -705,7 +786,20 @@ class AppController extends ChangeNotifier {
     error = null;
     _notify();
     try {
-      final result = await source.search(query.trim(), limit: _searchLimit);
+      final needle = query.trim().toLowerCase();
+      final result = usesOfficialYouTubeMusic
+          ? _nativeLibrary
+                .where(
+                  (track) => [
+                    track.title,
+                    track.artist,
+                    track.album ?? '',
+                    ...track.genres,
+                  ].any((text) => text.toLowerCase().contains(needle)),
+                )
+                .take(_searchLimit)
+                .toList()
+          : await source.search(query.trim(), limit: _searchLimit);
       if (generation == _searchGeneration) searchResults = result;
     } catch (exception) {
       if (generation == _searchGeneration) _report(exception);
@@ -722,6 +816,9 @@ class AppController extends ChangeNotifier {
 
   Future<void> playTrack(Track track, {List<Track>? context}) async {
     if (_jamPlaybackActive) return;
+    final selected =
+        tracks.where((item) => item.id == track.id).firstOrNull ?? track;
+    if (_routeToYouTubeMusic(selected)) return;
     if (_personalDjActive) stopPersonalDj();
     await _playTrack(track, context: context);
   }
@@ -731,10 +828,12 @@ class AppController extends ChangeNotifier {
     _expiryRetries = 0;
     final remembered = {for (final item in tracks) item.id: item};
     final selected = remembered[track.id] ?? track;
+    if (_routeToYouTubeMusic(selected)) return;
     final seen = <String>{};
     queue = [];
     for (final candidate in context?.isNotEmpty == true ? context! : [track]) {
       final item = remembered[candidate.id] ?? candidate;
+      if (usesOfficialYouTubeMusic && !isNativePlayable(item)) continue;
       if (item.id != selected.id && recommendationTracksMatch(item, selected)) {
         continue;
       }
@@ -759,6 +858,7 @@ class AppController extends ChangeNotifier {
   Future<void> playQueueAt(int index) async {
     if (_jamPlaybackActive) return;
     if (index < 0 || index >= queue.length) return;
+    if (_routeToYouTubeMusic(queue[index])) return;
     stopPersonalDj();
     _playIntent = true;
     _expiryRetries = 0;
@@ -776,6 +876,9 @@ class AppController extends ChangeNotifier {
     if (!fromRecovery) _cancelRecovery();
     final track = currentTrack;
     if (track == null) return;
+    if (_routeToYouTubeMusic(track)) return;
+    _youtubeMusicActive = false;
+    youtubeMusicRequest = null;
     final generation = ++_playGeneration;
     if (!fromRecovery) _cancelPendingResolution();
     if (track.isPendingSpotifyMatch) {
@@ -828,6 +931,10 @@ class AppController extends ChangeNotifier {
       final local = track.localPath ?? remembered?.localPath;
       final availableLocally = local != null && await File(local).exists();
       if (generation != _playGeneration || _disposed) return;
+      if (!availableLocally &&
+          _routeToYouTubeMusic(track.copyWith(clearLocalPath: true))) {
+        return;
+      }
       _usingRemote = !availableLocally;
       if (!availableLocally && track.pageUrl == null) {
         throw StateError(
@@ -855,6 +962,10 @@ class AppController extends ChangeNotifier {
         ffmpegExecutable: source.ffmpegExecutable,
         start: _resumePosition,
       );
+      if (_youtubeMusicActive) {
+        await audio.pause();
+        return;
+      }
       if (generation != _playGeneration || _disposed) return;
       _resumePosition = Duration.zero;
       _loadedTrackId = track.id;
@@ -865,6 +976,10 @@ class AppController extends ChangeNotifier {
       }
       if (generation != _playGeneration || _disposed) return;
       await audio.play();
+      if (_youtubeMusicActive) {
+        await audio.pause();
+        return;
+      }
       if (generation != _playGeneration || _disposed) return;
       _recoverableRemoteTrackId = _usingRemote ? track.id : null;
       final readyTrack = audio.duration > Duration.zero
@@ -945,6 +1060,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> resumePlayback() async {
     if (_jamPlaybackActive) return;
+    if (_youtubeMusicActive) return;
     if (currentTrack == null) return;
     _playIntent = true;
     if (_loadedTrackId != currentTrack!.id || audio.lastError != null) {
@@ -962,6 +1078,10 @@ class AppController extends ChangeNotifier {
       if (_controls != null && !await _controls!.activate()) return;
       if (generation != _playGeneration || _disposed) return;
       await audio.play();
+      if (_youtubeMusicActive) {
+        await audio.pause();
+        return;
+      }
       if (_personalDjActive) unawaited(_refillPersonalDjQueue());
     } catch (exception) {
       _report(exception);
@@ -1092,6 +1212,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> _onCompleted() async {
     if (_jamPlaybackActive) return;
+    if (_youtubeMusicActive) return;
     if (!_playIntent || _disposed) return;
     final duration = audio.duration;
     if (duration > Duration.zero &&
@@ -1122,13 +1243,17 @@ class AppController extends ChangeNotifier {
 
   Future<void> next() async {
     if (_jamPlaybackActive) return;
+    if (_youtubeMusicActive) return;
     if (queue.isEmpty) return;
     _playIntent = true;
     if (shuffle && queue.length > 1) {
-      var candidates = List.generate(
-        queue.length,
-        (i) => i,
-      ).where((i) => !_shufflePlayed.contains(i)).toList();
+      var candidates = List.generate(queue.length, (i) => i)
+          .where(
+            (i) =>
+                !_shufflePlayed.contains(i) &&
+                (!usesOfficialYouTubeMusic || isNativePlayable(queue[i])),
+          )
+          .toList();
       if (candidates.isEmpty) {
         if (repeat != RepeatMode.all) {
           await stopPlayback();
@@ -1137,21 +1262,33 @@ class AppController extends ChangeNotifier {
         _shufflePlayed
           ..clear()
           ..add(queueIndex);
-        candidates = List.generate(
-          queue.length,
-          (i) => i,
-        ).where((i) => i != queueIndex).toList();
+        candidates = List.generate(queue.length, (i) => i)
+            .where(
+              (i) =>
+                  i != queueIndex &&
+                  (!usesOfficialYouTubeMusic || isNativePlayable(queue[i])),
+            )
+            .toList();
+      }
+      if (candidates.isEmpty) {
+        await stopPlayback();
+        return;
       }
       _shuffleHistory.add(queueIndex);
       queueIndex = candidates[_random.nextInt(candidates.length)];
       _shufflePlayed.add(queueIndex);
-    } else if (queueIndex + 1 < queue.length) {
-      queueIndex++;
-    } else if (repeat == RepeatMode.all) {
-      queueIndex = 0;
     } else {
-      await stopPlayback();
-      return;
+      final upcoming = [
+        for (var i = queueIndex + 1; i < queue.length; i++) i,
+        if (repeat == RepeatMode.all)
+          for (var i = 0; i <= queueIndex && i < queue.length; i++) i,
+      ].where((i) => !usesOfficialYouTubeMusic || isNativePlayable(queue[i]));
+      final nextIndex = upcoming.firstOrNull;
+      if (nextIndex == null) {
+        await stopPlayback();
+        return;
+      }
+      queueIndex = nextIndex;
     }
     _resumePosition = Duration.zero;
     await _playCurrent();
@@ -1159,6 +1296,7 @@ class AppController extends ChangeNotifier {
 
   Future<void> previous() async {
     if (_jamPlaybackActive) return;
+    if (_youtubeMusicActive) return;
     if (audio.position > const Duration(seconds: 3)) {
       await seek(Duration.zero);
       return;
@@ -1168,7 +1306,11 @@ class AppController extends ChangeNotifier {
     if (shuffle && _shuffleHistory.isNotEmpty) {
       queueIndex = _shuffleHistory.removeLast();
     } else {
-      queueIndex = (queueIndex - 1).clamp(0, queue.length - 1);
+      final previous = [for (var i = queueIndex - 1; i >= 0; i--) i]
+          .where((i) => !usesOfficialYouTubeMusic || isNativePlayable(queue[i]))
+          .firstOrNull;
+      if (previous == null && usesOfficialYouTubeMusic) return;
+      queueIndex = previous ?? 0;
     }
     _resumePosition = Duration.zero;
     await _playCurrent();
@@ -1187,6 +1329,9 @@ class AppController extends ChangeNotifier {
 
   Future<void> persistSession() => _saveQueue();
   Future<void> addToQueue(Track track) async {
+    final selected =
+        tracks.where((item) => item.id == track.id).firstOrNull ?? track;
+    if (_routeToYouTubeMusic(selected)) return;
     if (queue.any((queued) => recommendationTracksMatch(queued, track))) return;
     await _remember(track);
     // Recheck after persistence: concurrent enqueue calls may finish together.
@@ -1212,9 +1357,11 @@ class AppController extends ChangeNotifier {
       if (queue.isEmpty) {
         queueIndex = -1;
         await stopPlayback();
-      } else {
+      } else if (!_youtubeMusicActive) {
         queueIndex = index.clamp(0, queue.length - 1);
         await _playCurrent();
+      } else {
+        queueIndex = index.clamp(0, queue.length - 1);
       }
     }
     await _saveQueue();
@@ -1507,7 +1654,9 @@ class AppController extends ChangeNotifier {
   }
 
   Future<List<Track>> findSpotifyMatches(Track track) =>
-      source.search('${track.title} ${track.artist}', limit: 3);
+      usesOfficialYouTubeMusic
+      ? Future.value(const <Track>[])
+      : source.search('${track.title} ${track.artist}', limit: 3);
 
   /// Spotify supplies descriptions only; the selected match supplies audio.
   Future<bool> importSpotifyMetadataMatch(
@@ -1596,6 +1745,13 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> importPlaylist(String url) async {
+    final uri = Uri.tryParse(url.trim());
+    if (usesOfficialYouTubeMusic &&
+        uri != null &&
+        WebMusicSource.isYouTubeUri(uri)) {
+      openYouTubeMusic(uri);
+      return;
+    }
     busy = true;
     _notify();
     try {
@@ -1619,6 +1775,14 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> downloadTrack(Track track) async {
+    if (requiresOfficialYouTubeMusic(track)) {
+      _report(
+        StateError(
+          'YouTube Music se reproduce en el reproductor oficial. Las descargas de yt-dlp son solo de video.',
+        ),
+      );
+      return;
+    }
     if (track.isLocal ||
         downloads.any(
           (job) =>
