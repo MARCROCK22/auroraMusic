@@ -42,6 +42,14 @@ error message. Every network check, including failures, consumes one persisted
 24-hour allowance. A busy check consumes none. Concurrent calls for the same
 executable share one future within the Dart isolate.
 
+Await `recoverPendingInstallation()` at startup before permitting extraction.
+It makes no network requests and bypasses the daily throttle. A durable pending
+installation journal records the expected nightly hash/version/source commit
+and previous executable hash before replacement. Recovery validates the active
+file and version, commits a successful interrupted installation, or restores
+the hash-verified backup. A failed recovery must block extraction until tools
+are repaired. Normal update checks also run this recovery before throttling.
+
 The caller must reject installation during playback, buffering, extraction,
 downloads, shutdown or other work using the tools. It must wait for the current
 update future before starting new extraction when `isInstalling` is true.
@@ -55,6 +63,8 @@ header, runs `--ignore-config --version`, and downloads notices from the exact
 source commit. It stages beside the installed executable, copies the previous
 executable, then renames the candidate over the destination on the same volume.
 An installation or post-install validation failure restores the backup.
+A copy of the previous file remains available until the journal clear or
+successful installation commit is durable, including during recovery itself.
 A Windows sharing violation leaves the existing file usable. If restoration
 itself fails because another process locks the file, the backup is retained at
 `yt-dlp.exe.aurora-previous`; the returned error identifies the recovery issue.
@@ -65,6 +75,9 @@ seconds. Responses are capped at 100 MiB and license notices at 1 MiB.
 No cookies, tokens, custom repositories or shell commands participate in
 updates. Protected installation directories can make automatic updates fail;
 the old tool remains usable and a later check can retry.
+Redirects are handled manually with a limit of five. HTTPS, the standard TLS
+port and official GitHub hosts are checked before sending each request; an
+untrusted destination is never contacted.
 
 ## Android integration
 
@@ -98,7 +111,8 @@ guidance](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-coo
 
 `flutter test --no-pub test/ytdlp_updater_test.dart` covers installation,
 persisted cadence, hash mismatch, rollback, locked files, initial/delayed busy
-guards, concurrency, release URL validation and failed network checks offline.
+guards, concurrency, release URL validation, failed network checks, crash
+recovery, corrupt backups and redirect rejection/limits offline.
 `dart analyze lib/sources/ytdlp_updater.dart test/ytdlp_updater_test.dart` checks
 the new Dart code. Real playback, native background controls and signed Android
 release distribution need separate device/package validation.

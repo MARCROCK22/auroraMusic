@@ -51,29 +51,48 @@ class YtDlpUpdater {
   bool get isUpdating => _inFlight.containsKey(_key);
   bool get isInstalling => _installing.contains(_key);
 
-  Future<YtDlpUpdateResult> checkForUpdate() {
+  Future<YtDlpUpdateResult> checkForUpdate() => _start(recoveryOnly: false);
+
+  /// Call before allowing extraction at startup. This never contacts GitHub.
+  Future<YtDlpUpdateResult> recoverPendingInstallation() =>
+      _start(recoveryOnly: true);
+
+  Future<YtDlpUpdateResult> _start({required bool recoveryOnly}) {
     final existing = _inFlight[_key];
     if (existing != null) return existing;
-    final future = _check().whenComplete(() {
+    final future = _check(recoveryOnly: recoveryOnly).whenComplete(() {
       _inFlight.remove(_key);
     });
     _inFlight[_key] = future;
     return future;
   }
 
-  Future<YtDlpUpdateResult> _check() async {
+  Future<YtDlpUpdateResult> _check({required bool recoveryOnly}) async {
     final candidate = File('${executable.path}.aurora-new.exe');
     final backup = File('${executable.path}.aurora-previous');
     var replaced = false;
     var committed = false;
+    var recovering = false;
+    Map<String, dynamic>? state;
     try {
       if (!canUpdate()) {
         return const YtDlpUpdateResult(YtDlpUpdateStatus.deferred);
       }
+      state = await _readState();
+      recovering = state.containsKey('pendingInstallation');
+      final recovery = await _recover(state);
+      recovering = false;
+      if (recovery?.status == YtDlpUpdateStatus.deferred) return recovery!;
       if (!await executable.exists()) {
         throw const FormatException('No installed yt-dlp executable.');
       }
-      final state = await _readState();
+      if (recoveryOnly) {
+        return recovery ??
+            YtDlpUpdateResult(
+              YtDlpUpdateStatus.upToDate,
+              version: state['version'] as String?,
+            );
+      }
       final now = _clock().toUtc();
       final last = DateTime.tryParse(state['lastCheckAt'] as String? ?? '');
       if (last != null && now.difference(last) < const Duration(hours: 24)) {
@@ -157,6 +176,13 @@ class YtDlpUpdater {
       }
       _installing.add(_key);
       await executable.copy(backup.path);
+      state['pendingInstallation'] = {
+        'sha256': expected,
+        'previousSha256': current,
+        'version': version,
+        'sourceCommit': sourceCommit,
+      };
+      await _writeState(state);
       // Same-directory rename replaces the executable without a missing-file
       // window. A sharing violation leaves the existing executable intact.
       await _replace(candidate, executable);
@@ -164,16 +190,25 @@ class YtDlpUpdater {
       if (await _executableVersion(executable) != version) {
         throw const FormatException('Installed nightly failed validation.');
       }
-      state['version'] = version;
-      state['sha256'] = expected;
-      state['sourceCommit'] = sourceCommit;
-      await _writeState(state);
+      final completed = {
+        ...state,
+        'version': version,
+        'sha256': expected,
+        'sourceCommit': sourceCommit,
+      }..remove('pendingInstallation');
+      await _writeState(completed);
       committed = true;
       return YtDlpUpdateResult(YtDlpUpdateStatus.updated, version: version);
     } catch (_) {
-      if (replaced && !committed) {
+      if (recovering) {
+        return const YtDlpUpdateResult(
+          YtDlpUpdateStatus.failed,
+          error: 'No se pudo recuperar yt-dlp. Se conservó la copia anterior.',
+        );
+      }
+      if (replaced && !committed && state != null) {
         try {
-          await _replace(backup, executable);
+          await _restorePrevious(state, backup);
         } catch (_) {
           // Keep the backup for recovery if antivirus/another process locks it.
           return const YtDlpUpdateResult(
@@ -196,6 +231,95 @@ class YtDlpUpdater {
       } finally {
         _installing.remove(_key);
       }
+    }
+  }
+
+  Future<YtDlpUpdateResult?> _recover(Map<String, dynamic> state) async {
+    final pending = state['pendingInstallation'];
+    if (pending == null) return null;
+    if (pending is! Map ||
+        !RegExp(
+          r'^[0-9a-f]{64}$',
+        ).hasMatch(pending['sha256'] as String? ?? '') ||
+        !RegExp(
+          r'^[0-9a-f]{64}$',
+        ).hasMatch(pending['previousSha256'] as String? ?? '') ||
+        !RegExp(
+          r'^\d{4}\.\d{2}\.\d{2}\.\d{6}$',
+        ).hasMatch(pending['version'] as String? ?? '') ||
+        !RegExp(
+          r'^[0-9a-f]{40}$',
+        ).hasMatch(pending['sourceCommit'] as String? ?? '')) {
+      throw const FormatException('Invalid pending installation journal.');
+    }
+    if (!canUpdate()) {
+      return const YtDlpUpdateResult(YtDlpUpdateStatus.deferred);
+    }
+    _installing.add(_key);
+    final backup = File('${executable.path}.aurora-previous');
+    try {
+      var valid = false;
+      if (await executable.exists() &&
+          (await sha256.bind(executable.openRead()).first).toString() ==
+              pending['sha256']) {
+        try {
+          valid = await _executableVersion(executable) == pending['version'];
+        } catch (_) {
+          // An unlaunchable candidate must recover the verified previous file.
+        }
+      }
+      if (!valid) {
+        await _restorePrevious(state, backup);
+        return YtDlpUpdateResult(
+          YtDlpUpdateStatus.upToDate,
+          version: state['version'] as String?,
+        );
+      }
+      final completed = <String, dynamic>{
+        ...state,
+        'version': pending['version'],
+        'sha256': pending['sha256'],
+        'sourceCommit': pending['sourceCommit'],
+      }..remove('pendingInstallation');
+      await _writeState(completed);
+      state
+        ..clear()
+        ..addAll(completed);
+      await _deleteBackup(backup);
+      return YtDlpUpdateResult(
+        YtDlpUpdateStatus.updated,
+        version: pending['version'] as String,
+      );
+    } finally {
+      _installing.remove(_key);
+    }
+  }
+
+  Future<void> _restorePrevious(Map<String, dynamic> state, File backup) async {
+    final pending = state['pendingInstallation'] as Map;
+    if (!await backup.exists() ||
+        (await sha256.bind(backup.openRead()).first).toString() !=
+            pending['previousSha256']) {
+      throw const FormatException(
+        'Previous yt-dlp backup failed integrity check.',
+      );
+    }
+    // Copy, rather than consume, the backup until the journal clear is durable.
+    final restored = await backup.copy('${executable.path}.aurora-new.exe');
+    await _replace(restored, executable);
+    final completed = {...state}..remove('pendingInstallation');
+    await _writeState(completed);
+    state
+      ..clear()
+      ..addAll(completed);
+    await _deleteBackup(backup);
+  }
+
+  static Future<void> _deleteBackup(File backup) async {
+    try {
+      if (await backup.exists()) await backup.delete();
+    } on FileSystemException {
+      // A committed journal makes an undeletable leftover backup harmless.
     }
   }
 
@@ -260,35 +384,51 @@ class YtDlpUpdater {
       ..connectionTimeout = const Duration(seconds: 20);
     try {
       return await (() async {
-        final request = await client.getUrl(uri);
-        request.headers.set(
-          HttpHeaders.userAgentHeader,
-          'Aurora-nightly-updater',
-        );
-        final response = await request.close();
-        for (final redirect in response.redirects) {
-          if (redirect.location.scheme != 'https' ||
+        var destination = uri;
+        for (var redirects = 0; redirects <= 5; redirects++) {
+          if (destination.scheme != 'https' ||
+              destination.port != 443 ||
+              destination.userInfo.isNotEmpty ||
               !const {
                 'github.com',
                 'api.github.com',
                 'raw.githubusercontent.com',
                 'release-assets.githubusercontent.com',
                 'objects.githubusercontent.com',
-              }.contains(redirect.location.host)) {
-            throw const HttpException('Untrusted nightly asset redirect.');
+              }.contains(destination.host)) {
+            throw const HttpException('Untrusted nightly asset destination.');
           }
-        }
-        if (response.statusCode != HttpStatus.ok) {
-          throw const HttpException('Nightly update server rejected request.');
-        }
-        final bytes = <int>[];
-        await for (final chunk in response) {
-          if (bytes.length + chunk.length > 100 * 1024 * 1024) {
-            throw const HttpException('Nightly asset exceeds size limit.');
+          final request = await client.getUrl(destination);
+          request.followRedirects = false;
+          request.headers.set(
+            HttpHeaders.userAgentHeader,
+            'Aurora-nightly-updater',
+          );
+          final response = await request.close();
+          if (const {301, 302, 303, 307, 308}.contains(response.statusCode)) {
+            final location = response.headers.value(HttpHeaders.locationHeader);
+            if (location == null || redirects == 5) {
+              throw const HttpException('Invalid nightly asset redirect.');
+            }
+            destination = destination.resolve(location);
+            await response.drain<void>();
+            continue;
           }
-          bytes.addAll(chunk);
+          if (response.statusCode != HttpStatus.ok) {
+            throw const HttpException(
+              'Nightly update server rejected request.',
+            );
+          }
+          final bytes = <int>[];
+          await for (final chunk in response) {
+            if (bytes.length + chunk.length > 100 * 1024 * 1024) {
+              throw const HttpException('Nightly asset exceeds size limit.');
+            }
+            bytes.addAll(chunk);
+          }
+          return bytes;
         }
-        return bytes;
+        throw const HttpException('Nightly redirect limit exceeded.');
       })().timeout(
         uri.path.endsWith('.exe')
             ? const Duration(minutes: 3)
