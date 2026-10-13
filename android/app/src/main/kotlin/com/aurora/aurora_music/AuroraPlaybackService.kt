@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.Context
 import android.media.AudioManager
 import android.media.audiofx.Equalizer
+import android.media.audiofx.AudioEffect
 import android.net.Uri
 import android.os.Binder
 import android.os.Handler
@@ -144,7 +145,7 @@ class AuroraPlaybackService : MediaSessionService() {
             player.setAudioSessionId(sessionId)
             candidate = Equalizer(0, sessionId)
             check(candidate.numberOfBands > 0 && candidate.hasControl())
-            candidate.enabled = false
+            check(candidate.setEnabled(false) == AudioEffect.SUCCESS)
             equalizer = candidate
         } catch (_: Exception) {
             candidate?.release()
@@ -163,7 +164,7 @@ class AuroraPlaybackService : MediaSessionService() {
         try {
             check(effect.hasControl())
             if (!enabled) {
-                effect.enabled = false
+                check(effect.setEnabled(false) == AudioEffect.SUCCESS)
                 preamp = 1f
             } else {
                 val range = effect.bandLevelRange
@@ -185,7 +186,7 @@ class AuroraPlaybackService : MediaSessionService() {
                 preamp = 10.0.pow(-(levels.maxOrNull()?.toInt() ?: 0).coerceAtLeast(0) / 2000.0).toFloat()
                 player.volume = userVolume * preamp
                 levels.forEachIndexed { band, level -> effect.setBandLevel(band.toShort(), level) }
-                effect.enabled = true
+                check(effect.setEnabled(true) == AudioEffect.SUCCESS)
             }
         } catch (_: Exception) {
             effect.release()
