@@ -2,6 +2,8 @@ import 'dart:io';
 import 'models.dart';
 
 abstract class SourceBackend {
+  bool get usesOfficialYouTubeMusic => false;
+
   bool get supportsExperimentalProgressivePlayback => false;
 
   /// Applies to the next resolve; an already loaded input keeps its mode.
@@ -34,6 +36,12 @@ abstract class SourceBackend {
     required String jobId,
     void Function(double)? onProgress,
   });
+  Future<void> downloadVideo(
+    Uri url,
+    File destination, {
+    required String jobId,
+    void Function(double)? onProgress,
+  }) async => throw UnsupportedError('La fuente no permite descargar videos.');
   Future<void> cancel(String jobId);
   Future<String> diagnose();
   Future<void> configureToolDirectory(String directory);
