@@ -159,6 +159,9 @@ tasks.named("preBuild").configure {
 }
 
 dependencies {
+    implementation("androidx.media3:media3-exoplayer:1.11.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.11.1")
+    implementation("androidx.media3:media3-session:1.11.1")
     implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
     if (rebuiltFfmpeg.exists()) {
         implementation(files(rebuiltFfmpeg))

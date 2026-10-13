@@ -34,13 +34,10 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        <service android:name="com.ryanheise.audioservice.AudioService"
+        <service android:name=".AuroraPlaybackService"
             android:foregroundServiceType="mediaPlayback" android:exported="true">
-            <intent-filter><action android:name="android.media.browse.MediaBrowserService" /></intent-filter>
+            <intent-filter><action android:name="androidx.media3.session.MediaSessionService" /></intent-filter>
         </service>
-        <receiver android:name="com.ryanheise.audioservice.MediaButtonReceiver" android:exported="true">
-            <intent-filter><action android:name="android.intent.action.MEDIA_BUTTON" /></intent-filter>
-        </receiver>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
