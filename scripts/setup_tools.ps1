@@ -6,6 +6,7 @@ param(
     [string]$FfmpegVersion = ''
 )
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1') -ErrorAction Stop
 $ProgressPreference = 'SilentlyContinue'
 if ([string]::IsNullOrWhiteSpace($ToolDirectory)) { $ToolDirectory = Join-Path $PSScriptRoot '..\tools\windows' }
 $ToolDirectory = [IO.Path]::GetFullPath($ToolDirectory)
