@@ -360,6 +360,7 @@ class YtDlpSource extends SourceBackend {
       'playlist',
       'resolve',
       'download',
+      'downloadVideo',
       'cacheAudio',
       'progressiveInfo',
       'progressiveAudio',
@@ -393,6 +394,7 @@ class YtDlpSource extends SourceBackend {
           'playlist',
           'resolve',
           'download',
+          'downloadVideo',
           'cacheAudio',
           'progressiveInfo',
           'progressiveAudio',
@@ -425,6 +427,45 @@ class YtDlpSource extends SourceBackend {
         uri.userInfo.isNotEmpty ||
         (uri.hasPort && uri.port != 443)) {
       throw ArgumentError('Usa un enlace HTTPS de YouTube.');
+    }
+    return uri;
+  }
+
+  /// Accepts a single public video URL, never a Music page or playlist.
+  static Uri validateVideoUrl(String value) {
+    final uri = Uri.tryParse(value.trim());
+    if (uri == null ||
+        uri.scheme != 'https' ||
+        !const {
+          'www.youtube.com',
+          'youtu.be',
+        }.contains(uri.host.toLowerCase()) ||
+        uri.userInfo.isNotEmpty ||
+        (uri.hasPort && uri.port != 443) ||
+        uri.queryParameters.containsKey('list')) {
+      throw ArgumentError(
+        'Usa un enlace HTTPS público de un video de YouTube.',
+      );
+    }
+    final id = uri.host.toLowerCase() == 'youtu.be'
+        ? (uri.pathSegments.length == 1 ? uri.pathSegments.single : '')
+        : uri.path == '/watch'
+        ? uri.queryParameters['v'] ?? ''
+        : uri.pathSegments.length == 2 &&
+              const {'shorts', 'live', 'embed'}.contains(uri.pathSegments[0])
+        ? uri.pathSegments[1]
+        : '';
+    if (!_videoIdPattern.hasMatch(id) ||
+        (uri.host.toLowerCase() == 'www.youtube.com' &&
+            uri.path == '/watch' &&
+            uri.queryParametersAll.entries.any(
+              (entry) =>
+                  (entry.key != 'v' &&
+                      entry.key != 't' &&
+                      entry.key != 'start') ||
+                  entry.value.length != 1,
+            ))) {
+      throw ArgumentError('El enlace debe identificar un solo video público.');
     }
     return uri;
   }
@@ -1559,6 +1600,85 @@ class YtDlpSource extends SourceBackend {
       if (await destination.exists()) throw StateError('El destino ya existe.');
       if (_cancelled.contains(jobId)) throw StateError('Descarga cancelada.');
       await file.rename(destination.path);
+      onProgress?.call(1);
+    } finally {
+      _progress.remove(jobId);
+      _cancelled.remove(jobId);
+      if (await temp.exists()) await temp.delete(recursive: true);
+    }
+  }
+
+  /// Downloads a video container into [destination]'s parent directory. The
+  /// destination basename is retained and the actual container extension is
+  /// appended (for example, `abc.mp4` or `abc.webm`).
+  @override
+  Future<void> downloadVideo(
+    Uri url,
+    File destination, {
+    required String jobId,
+    void Function(double)? onProgress,
+  }) async {
+    final target = validateVideoUrl(url.toString()).toString();
+    await destination.parent.create(recursive: true);
+    final parent = await destination.parent.resolveSymbolicLinks();
+    final baseName = p.basenameWithoutExtension(destination.path);
+    if (!RegExp(r'^[A-Za-z0-9_-]{1,80}$').hasMatch(baseName)) {
+      throw ArgumentError('El nombre de destino no es válido.');
+    }
+    final temp = await Directory(parent).createTemp('.aurora-video-');
+    try {
+      if (_cancelled.contains(jobId)) throw StateError('Descarga cancelada.');
+      if (_isAndroid) {
+        if (onProgress != null) _progress[jobId] = onProgress;
+        await _native('downloadVideo', {
+          'target': target,
+          'directory': temp.path,
+          'jobId': jobId,
+        });
+      } else {
+        await _run(
+          [
+            '--no-playlist',
+            '-f',
+            'best[ext=mp4][vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]',
+            '--max-filesize',
+            '512M',
+            '--newline',
+            '--progress-template',
+            'download:AURORA_PROGRESS:%(progress._percent_str)s',
+            '-o',
+            p.join(temp.path, 'video.%(ext)s'),
+            '--',
+            target,
+          ],
+          jobId: jobId,
+          onProgress: onProgress,
+        );
+      }
+      final outputs = await temp
+          .list(followLinks: false)
+          .where(
+            (entry) =>
+                entry is File &&
+                RegExp(
+                  r'^video\.(mp4|webm|mkv|mov|m4v|avi|flv|3gp|ogv)$',
+                  caseSensitive: false,
+                ).hasMatch(p.basename(entry.path)),
+          )
+          .cast<File>()
+          .toList();
+      if (outputs.length != 1 || await outputs.single.length() == 0) {
+        throw StateError('La descarga no produjo un archivo de video válido.');
+      }
+      if (_cancelled.contains(jobId)) throw StateError('Descarga cancelada.');
+      final finalFile = File(
+        p.join(parent, '$baseName${p.extension(outputs.single.path)}'),
+      );
+      if (await FileSystemEntity.type(finalFile.path, followLinks: false) !=
+          FileSystemEntityType.notFound) {
+        throw StateError('El archivo de destino ya existe.');
+      }
+      await outputs.single.rename(finalFile.path);
       onProgress?.call(1);
     } finally {
       _progress.remove(jobId);

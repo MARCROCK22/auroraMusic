@@ -105,6 +105,44 @@ class MainActivity : FlutterActivity() {
                     initialize()
                     val target = call.argument<String>("target") ?: ""
                     val answer: Any? = when (call.method) {
+                        "downloadVideo" -> {
+                            validateVideoUrl(target)
+                            val directory = File(requireNotNull(call.argument<String>("directory"))).canonicalFile
+                            require(isWithin(directory, filesDir.canonicalFile) && directory.isDirectory) { "Destino fuera del almacenamiento privado" }
+                            val jobId = requireNotNull(job)
+                            check(!cancelledDownloads.remove(jobId)) { "Descarga cancelada" }
+                            val internalId = UUID.randomUUID().toString()
+                            require(jobs.putIfAbsent(jobId, internalId) == null) { "Descarga duplicada" }
+                            val watchdog = timeouts.schedule(Runnable {
+                                timedOutDownloads.add(jobId)
+                                try { YoutubeDL.destroyProcessById(internalId) } catch (_: Exception) { }
+                            }, 30, TimeUnit.MINUTES)
+                            try {
+                                val request = request(target, call.argument<String>("cookieFile"))
+                                request.addOption("--no-playlist")
+                                request.addOption("-f", "best[ext=mp4][vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]")
+                                request.addOption("--max-filesize", "512M")
+                                request.addOption("-o", File(directory, "video.%(ext)s").absolutePath)
+                                YoutubeDL.execute(request, internalId) { progress, _, _ ->
+                                    if (cancelledDownloads.contains(jobId)) YoutubeDL.destroyProcessById(internalId)
+                                    main.post { source.invokeMethod("progress", mapOf("jobId" to jobId, "progress" to (progress / 100.0).coerceIn(0.0, 1.0))) }
+                                }
+                                check(!cancelledDownloads.contains(jobId)) { "Descarga cancelada" }
+                                check(!timedOutDownloads.contains(jobId)) { "La descarga de video superó 30 minutos" }
+                                val outputs = directory.listFiles()?.filter {
+                                    it.name.matches(Regex("video\\.(mp4|webm|mkv|mov|m4v|avi|flv|3gp|ogv)", RegexOption.IGNORE_CASE)) &&
+                                        isRegularFileNoFollow(it) && it.canonicalFile.parentFile == directory
+                                }.orEmpty()
+                                require(outputs.size == 1 && outputs.single().length() in 1..(512L * 1024 * 1024)) { "Descarga de video incompleta o inválida" }
+                                check(!cancelledDownloads.contains(jobId)) { "Descarga cancelada" }
+                                outputs.single().name
+                            } finally {
+                                watchdog.cancel(false)
+                                jobs.remove(jobId)
+                                cancelledDownloads.remove(jobId)
+                                timedOutDownloads.remove(jobId)
+                            }
+                        }
                         "search", "playlist", "resolve", "progressiveInfo" -> {
                             if (call.method == "search") {
                                 require(target.matches(Regex("ytsearch[0-9]{1,2}:.{1,500}"))) { "Búsqueda inválida" }
@@ -293,6 +331,21 @@ class MainActivity : FlutterActivity() {
     private fun validateYouTube(value: String) {
         val uri = Uri.parse(value)
         require(uri.scheme == "https" && uri.host in setOf("youtube.com","www.youtube.com","music.youtube.com","m.youtube.com","youtu.be") && uri.userInfo == null && (uri.port == -1 || uri.port == 443)) { "Usa un enlace HTTPS de YouTube" }
+    }
+    private fun validateVideoUrl(value: String) {
+        val uri = Uri.parse(value)
+        require(uri.scheme == "https" && uri.host in setOf("www.youtube.com", "youtu.be") && uri.userInfo == null && (uri.port == -1 || uri.port == 443) && "list" !in uri.queryParameterNames) { "Usa un enlace HTTPS público de un video de YouTube" }
+        val id = if (uri.host == "youtu.be") {
+            uri.pathSegments.singleOrNull().orEmpty()
+        } else when {
+            uri.path == "/watch" -> uri.getQueryParameter("v").orEmpty()
+            uri.pathSegments.size == 2 && uri.pathSegments.first() in setOf("shorts", "live", "embed") -> uri.pathSegments.last()
+            else -> ""
+        }
+        require(id.matches(Regex("[A-Za-z0-9_-]{11}"))) { "El enlace debe identificar un solo video público" }
+        if (uri.host == "www.youtube.com" && uri.path == "/watch") {
+            require(uri.queryParameterNames.all { it in setOf("v", "t", "start") && uri.getQueryParameters(it).size == 1 }) { "Usa un enlace individual de video" }
+        }
     }
     private fun probeVersion(): String {
         val id = UUID.randomUUID().toString()
