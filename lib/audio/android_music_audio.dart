@@ -27,9 +27,11 @@ class AndroidMusicAudio extends AudioBackend {
   bool _disposed = false, _playing = false, _buffering = false;
   Duration _position = Duration.zero, _duration = Duration.zero;
   double _volume = 0.8;
+  bool _supportsEqualizer = false;
+  List<double> _eqFrequencies = const [];
 
-  // The native player exposes no software EQ/FFT: UI must show this capability.
-  bool get supportsEqualizer => false;
+  // Native EQ availability depends on the device; FFT is not exposed.
+  bool get supportsEqualizer => _supportsEqualizer;
   bool get supportsVisualization => false;
   Stream<String> get mediaActions => _mediaActions.stream;
 
@@ -46,7 +48,7 @@ class AndroidMusicAudio extends AudioBackend {
   @override
   double get volume => _volume;
   @override
-  List<double> get eqFrequencies => const [];
+  List<double> get eqFrequencies => _eqFrequencies;
   @override
   ValueListenable<List<double>> get spectrum => _spectrum;
   @override
@@ -86,6 +88,17 @@ class AndroidMusicAudio extends AudioBackend {
     if (_disposed || raw is! Map || raw['generation'] != _generation) return;
     switch (raw['type']) {
       case 'state':
+        if (raw['supportsEqualizer'] is bool) {
+          _supportsEqualizer = raw['supportsEqualizer'] as bool;
+        }
+        final frequencies = raw['eqFrequencies'];
+        if (frequencies is List) {
+          _eqFrequencies = List.unmodifiable(
+            frequencies.whereType<num>().map(
+              (frequency) => frequency.toDouble(),
+            ),
+          );
+        }
         _playing = raw['playing'] == true;
         _buffering = raw['buffering'] == true;
         final position = raw['positionMs'];
@@ -114,7 +127,13 @@ class AndroidMusicAudio extends AudioBackend {
         _fail(raw['message'] ?? 'No se pudo reproducir el audio.');
       case 'action':
         final action = raw['action'];
-        if (action == 'next' || action == 'previous') {
+        if (const [
+          'next',
+          'previous',
+          'play',
+          'pause',
+          'stop',
+        ].contains(action)) {
           _mediaActions.add(action as String);
         }
     }
@@ -204,7 +223,22 @@ class AndroidMusicAudio extends AudioBackend {
   }
 
   @override
-  void setEqualizer(bool enabled, List<double> gainsDb) {}
+  void setEqualizer(bool enabled, List<double> gainsDb) {
+    if (_disposed || !_supportsEqualizer) return;
+    final gains = List<double>.generate(
+      8,
+      (index) => index < gainsDb.length && gainsDb[index].isFinite
+          ? gainsDb[index].clamp(-12, 12)
+          : 0,
+    );
+    unawaited(
+      _invoke('equalizer', {
+        'enabled': enabled,
+        'gainsDb': gains,
+      }).catchError((Object _) {}),
+    );
+  }
+
   @override
   void setVisualizationEnabled(bool enabled) {}
 

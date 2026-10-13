@@ -2,6 +2,9 @@ package com.aurora.aurora_music
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.Context
+import android.media.AudioManager
+import android.media.audiofx.Equalizer
 import android.net.Uri
 import android.os.Binder
 import android.os.Handler
@@ -24,11 +27,18 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import kotlin.math.ln
+import kotlin.math.pow
+import kotlin.math.roundToInt
 
 /** One native player. Flutter owns the queue, repeat, shuffle and track resolution. */
 @UnstableApi
 class AuroraPlaybackService : MediaSessionService() {
-    companion object { const val BIND_AUDIO = "com.aurora.aurora_music.BIND_AUDIO" }
+    companion object {
+        const val BIND_AUDIO = "com.aurora.aurora_music.BIND_AUDIO"
+        @Volatile var playbackActive = false
+            private set
+    }
     inner class AudioBinder : Binder() { val service get() = this@AuroraPlaybackService }
     private lateinit var player: ExoPlayer
     private var session: MediaSession? = null
@@ -39,6 +49,11 @@ class AuroraPlaybackService : MediaSessionService() {
     private var completed = false
     private var failure: String? = null
     private var metadata = MediaMetadata.EMPTY
+    private var equalizer: Equalizer? = null
+    private var userVolume = 0.8f
+    private var preamp = 1f
+    // The eight UI controls form a curve mapped onto the device's native bands.
+    private val eqFrequencies = listOf(60.0, 170.0, 310.0, 600.0, 1000.0, 3000.0, 6000.0, 12000.0)
     private val progress = object : Runnable {
         override fun run() {
             publishState()
@@ -77,6 +92,7 @@ class AuroraPlaybackService : MediaSessionService() {
                 }
             })
         }
+        initializeEqualizer()
         val queuePlayer = object : ForwardingSimpleBasePlayer(player) {
             override fun getState(): State = super.getState().buildUpon()
                 .setAvailableCommands(super.getState().availableCommands.buildUpon()
@@ -92,6 +108,14 @@ class AuroraPlaybackService : MediaSessionService() {
                     Player.COMMAND_SEEK_TO_PREVIOUS, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> emit("action", mapOf("action" to "previous"))
                     else -> return super.handleSeek(mediaItemIndex, positionMs, seekCommand)
                 }
+                return Futures.immediateVoidFuture()
+            }
+            override fun handleSetPlayWhenReady(playWhenReady: Boolean): ListenableFuture<*> {
+                emit("action", mapOf("action" to if (playWhenReady) "play" else "pause"))
+                return Futures.immediateVoidFuture()
+            }
+            override fun handleStop(): ListenableFuture<*> {
+                emit("action", mapOf("action" to "stop"))
                 return Futures.immediateVoidFuture()
             }
         }
@@ -111,6 +135,65 @@ class AuroraPlaybackService : MediaSessionService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
         if (controllerInfo.packageName == packageName || controllerInfo.isTrusted) session else null
+
+    private fun initializeEqualizer() {
+        var candidate: Equalizer? = null
+        try {
+            val sessionId = (getSystemService(Context.AUDIO_SERVICE) as AudioManager).generateAudioSessionId()
+            check(sessionId > 0) // Never attach an effect to the deprecated global session 0.
+            player.setAudioSessionId(sessionId)
+            candidate = Equalizer(0, sessionId)
+            check(candidate.numberOfBands > 0 && candidate.hasControl())
+            candidate.enabled = false
+            equalizer = candidate
+        } catch (_: Exception) {
+            candidate?.release()
+            equalizer = null
+        }
+    }
+
+    private fun setEqualizer(arguments: Map<*, *>) {
+        val enabled = arguments["enabled"] == true
+        val gains = (arguments["gainsDb"] as? List<*>)?.map {
+            require(it is Number && it.toDouble().isFinite()) { "Ganancia invalida" }
+            it.toDouble().coerceIn(-12.0, 12.0)
+        } ?: emptyList()
+        require(gains.size == eqFrequencies.size) { "Bandas de ecualizador invalidas" }
+        val effect = equalizer ?: return
+        try {
+            check(effect.hasControl())
+            if (!enabled) {
+                effect.enabled = false
+                preamp = 1f
+            } else {
+                val range = effect.bandLevelRange
+                val levels = (0 until effect.numberOfBands).map { band ->
+                    val frequency = effect.getCenterFreq(band.toShort()) / 1000.0
+                    val upper = eqFrequencies.indexOfFirst { it >= frequency }
+                    val gain = when {
+                        upper == 0 -> gains.first()
+                        upper < 0 -> gains.last()
+                        else -> {
+                            val fraction = (ln(frequency) - ln(eqFrequencies[upper - 1])) /
+                                (ln(eqFrequencies[upper]) - ln(eqFrequencies[upper - 1]))
+                            gains[upper - 1] + (gains[upper] - gains[upper - 1]) * fraction
+                        }
+                    }
+                    (gain * 100).roundToInt().coerceIn(range[0].toInt(), range[1].toInt()).toShort()
+                }
+                // Attenuate before enabling boosted bands, preserving the requested user volume.
+                preamp = 10.0.pow(-(levels.maxOrNull()?.toInt() ?: 0).coerceAtLeast(0) / 2000.0).toFloat()
+                player.volume = userVolume * preamp
+                levels.forEachIndexed { band, level -> effect.setBandLevel(band.toShort(), level) }
+                effect.enabled = true
+            }
+        } catch (_: Exception) {
+            effect.release()
+            equalizer = null
+            preamp = 1f
+        }
+        player.volume = userVolume * preamp
+    }
 
     fun load(arguments: Map<*, *>) {
         val input = arguments["input"] as? String ?: throw IllegalArgumentException("Audio requerido")
@@ -173,8 +256,10 @@ class AuroraPlaybackService : MediaSessionService() {
             "volume" -> {
                 val value = (arguments["volume"] as? Number)?.toFloat() ?: throw IllegalArgumentException("Volumen requerido")
                 require(value.isFinite()) { "Volumen invalido" }
-                player.volume = value.coerceIn(0f, 1f)
+                userVolume = value.coerceIn(0f, 1f)
+                player.volume = userVolume * preamp
             }
+            "equalizer" -> setEqualizer(arguments)
             "metadata" -> updateMetadata(arguments)
             "state", "initialize" -> return state()
             else -> throw IllegalArgumentException("Comando no permitido")
@@ -188,9 +273,14 @@ class AuroraPlaybackService : MediaSessionService() {
         "buffering" to (player.playbackState == Player.STATE_BUFFERING),
         "positionMs" to player.currentPosition.coerceAtLeast(0L),
         "durationMs" to (player.duration.takeIf { it > 0L } ?: expectedDuration),
-        "volume" to player.volume.toDouble(), "error" to failure,
+        "volume" to userVolume.toDouble(), "error" to failure,
+        "supportsEqualizer" to (equalizer != null),
+        "eqFrequencies" to (if (equalizer != null) eqFrequencies else emptyList<Double>()),
     )
-    private fun publishState() { eventSink?.invoke(state()) }
+    private fun publishState() {
+        playbackActive = player.playWhenReady || player.isPlaying || player.playbackState == Player.STATE_BUFFERING
+        eventSink?.invoke(state())
+    }
     private fun emit(type: String, extra: Map<String, Any?> = emptyMap()) {
         eventSink?.invoke(mapOf("type" to type, "generation" to generation) + extra)
     }
@@ -204,10 +294,13 @@ class AuroraPlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        playbackActive = false
         main.removeCallbacks(progress)
         eventSink = null
         session?.release()
         session = null
+        equalizer?.release()
+        equalizer = null
         player.release()
         super.onDestroy()
     }
