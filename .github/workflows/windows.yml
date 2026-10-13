@@ -46,7 +46,14 @@ jobs:
         run: ./scripts/setup_tools.ps1
 
       - name: Compilar Windows
+        id: windows_build
         run: flutter build windows --release --no-pub
+
+      - name: Diagnosticar instalación de CMake en Windows
+        if: failure() && steps.windows_build.outcome == 'failure'
+        continue-on-error: true
+        shell: pwsh
+        run: cmake --install build/windows/x64 --config Release --verbose
 
       - name: Crear paquete de Windows
         shell: pwsh
