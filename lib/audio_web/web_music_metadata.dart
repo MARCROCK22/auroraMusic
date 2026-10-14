@@ -80,7 +80,12 @@ class WebMusicMetadata extends ChangeNotifier {
 
   Future<List<Track>> search(String query, {int limit = 20}) {
     final normalized = query.trim().replaceAll(RegExp(r'\s+'), ' ');
-    if (_disposed || normalized.isEmpty) return Future.value(const <Track>[]);
+    if (_disposed || normalized.isEmpty || limit <= 0) {
+      return Future.value(const <Track>[]);
+    }
+    if (normalized.length > 500) {
+      return Future.error(ArgumentError('La búsqueda es demasiado larga.'));
+    }
     final key = normalized.toLowerCase();
     final revision = ++_revision;
     _activated = true;
@@ -144,6 +149,7 @@ class WebMusicMetadata extends ChangeNotifier {
     while (!_disposed &&
         revision == _revision &&
         DateTime.now().isBefore(deadline)) {
+      if (_error != null) return const <Track>[];
       Map<String, dynamic>? response;
       try {
         response = await _bridge
@@ -163,6 +169,10 @@ class WebMusicMetadata extends ChangeNotifier {
         final status = response['status'];
         if (status == 'ready') {
           final tracks = _parseTracks(response['tracks']);
+          _cache.removeWhere(
+            (_, entry) => DateTime.now().difference(entry.at) >= cacheTtl,
+          );
+          if (_cache.length >= 40) _cache.remove(_cache.keys.first);
           _cache[key] = (at: DateTime.now(), tracks: tracks);
           return tracks;
         }
@@ -190,6 +200,7 @@ class WebMusicMetadata extends ChangeNotifier {
   List<Track> _parseTracks(Object? value) {
     if (value is! List) return const <Track>[];
     final result = <Track>[];
+    final seen = <String>{};
     for (final item in value) {
       if (item is! Map) continue;
       final id = item['videoId'];
@@ -198,6 +209,7 @@ class WebMusicMetadata extends ChangeNotifier {
         continue;
       }
       if (title is! String || title.trim().isEmpty) continue;
+      if (!seen.add(id)) continue;
       final artist = item['artist'];
       final album = item['album'];
       final artwork = item['artworkUrl'];
@@ -205,13 +217,15 @@ class WebMusicMetadata extends ChangeNotifier {
       result.add(
         Track(
           id: 'yt:$id',
-          title: title.trim(),
-          artist: artist is String ? artist.trim() : '',
-          album: album is String ? album.trim() : null,
-          artworkUrl: artwork is String && artwork.startsWith('https://')
-              ? artwork
-              : null,
-          duration: duration is num && duration.isFinite && duration > 0
+          title: _text(title),
+          artist: artist is String ? _text(artist) : '',
+          album: album is String ? _text(album) : null,
+          artworkUrl: _artwork(artwork),
+          duration:
+              duration is num &&
+                  duration.isFinite &&
+                  duration > 0 &&
+                  duration <= 864000
               ? Duration(seconds: duration.round())
               : Duration.zero,
           pageUrl: Uri.https('music.youtube.com', '/watch', {
@@ -236,11 +250,35 @@ class WebMusicMetadata extends ChangeNotifier {
   }
 
   void _setError(String message) {
+    if (_disposed) return;
     _error = message;
     notifyListeners();
   }
 
   int _limit(int value) => value.clamp(1, maxResults).toInt();
+
+  String _text(String value) {
+    final text = value.trim();
+    return text.substring(0, text.length.clamp(0, 500));
+  }
+
+  String? _artwork(Object? value) {
+    if (value is! String || value.length > 4096) return null;
+    final uri = Uri.tryParse(value);
+    if (uri == null ||
+        uri.scheme != 'https' ||
+        uri.userInfo.isNotEmpty ||
+        uri.port != 443) {
+      return null;
+    }
+    return const [
+          'ytimg.com',
+          'ggpht.com',
+          'googleusercontent.com',
+        ].any((domain) => uri.host == domain || uri.host.endsWith('.$domain'))
+        ? value
+        : null;
+  }
 
   @override
   void dispose() {

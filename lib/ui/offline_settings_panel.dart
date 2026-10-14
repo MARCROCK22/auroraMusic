@@ -19,10 +19,7 @@ class OfflineSettingsPanel extends StatelessWidget {
         ...controller.recentTracks,
         ...controller.searchResults,
       ])
-        if (!track.isLocal &&
-            track.pageUrl != null &&
-            !track.isPendingSpotifyMatch)
-          track.id: track,
+        if (controller.canDownloadTrack(track)) track.id: track,
     }.values.toList();
     if (tracks.isEmpty) {
       onSearch();

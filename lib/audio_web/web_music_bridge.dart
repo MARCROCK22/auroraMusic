@@ -103,7 +103,11 @@ class NativeWebMusicBridge extends WebMusicBridge {
         isInspectable: kDebugMode,
         mediaPlaybackRequiresUserGesture: false,
         useShouldOverrideUrlLoading: true,
-        useShouldInterceptRequest: true,
+        // Android 1.1.3 blocks its request thread waiting for the UI thread,
+        // while CookieManager.flush on that UI thread waits for network work.
+        // Keep Android request handling native to avoid that observed ANR.
+        useShouldInterceptRequest:
+            defaultTargetPlatform == TargetPlatform.windows,
         useOnRenderProcessGone: true,
         supportMultipleWindows: true,
       ),
@@ -141,30 +145,32 @@ hideAuroraVideo();
             ? NavigationActionPolicy.ALLOW
             : NavigationActionPolicy.CANCEL;
       },
-      shouldInterceptRequest: (controller, request) async {
-        final topLevel =
-            defaultTargetPlatform == TargetPlatform.android &&
-            request.isForMainFrame == true;
-        if (topLevel && !_accept(request.url)) {
-          return WebResourceResponse(
-            statusCode: 403,
-            reasonPhrase: 'Navigation blocked',
-            contentType: 'text/plain',
-            contentEncoding: 'utf-8',
-            data: Uint8List(0),
-          );
-        }
-        if (adBlocker.shouldBlock(request.url, isTopLevel: topLevel)) {
-          return WebResourceResponse(
-            statusCode: 204,
-            reasonPhrase: 'No Content',
-            contentType: 'text/plain',
-            contentEncoding: 'utf-8',
-            data: Uint8List(0),
-          );
-        }
-        return null;
-      },
+      shouldInterceptRequest: defaultTargetPlatform == TargetPlatform.windows
+          ? (controller, request) async {
+              final topLevel =
+                  defaultTargetPlatform == TargetPlatform.android &&
+                  request.isForMainFrame == true;
+              if (topLevel && !_accept(request.url)) {
+                return WebResourceResponse(
+                  statusCode: 403,
+                  reasonPhrase: 'Navigation blocked',
+                  contentType: 'text/plain',
+                  contentEncoding: 'utf-8',
+                  data: Uint8List(0),
+                );
+              }
+              if (adBlocker.shouldBlock(request.url, isTopLevel: topLevel)) {
+                return WebResourceResponse(
+                  statusCode: 204,
+                  reasonPhrase: 'No Content',
+                  contentType: 'text/plain',
+                  contentEncoding: 'utf-8',
+                  data: Uint8List(0),
+                );
+              }
+              return null;
+            }
+          : null,
       onCreateWindow: (controller, action) async {
         if (_accept(action.request.url)) {
           await controller.loadUrl(
@@ -364,7 +370,11 @@ try {
 }
 const metadata = navigator.mediaSession && navigator.mediaSession.metadata;
 const text = selector => (document.querySelector(selector)?.textContent || '').trim().slice(0, 500);
-const imageSource = metadata?.artwork?.[0]?.src || document.querySelector('ytmusic-player-bar img')?.src;
+const artwork = [...(metadata?.artwork || [])].sort((a, b) => {
+  const width = image => Math.max(0, ...(image.sizes || '').split(/\s+/).map(size => Number(size.split('x')[0]) || 0));
+  return width(b) - width(a);
+});
+const imageSource = artwork[0]?.src || document.querySelector('ytmusic-player-bar img')?.src;
 let artworkUrl;
 if (imageSource) {
   const image = new URL(imageSource, location.origin);

@@ -35,6 +35,7 @@ class AndroidMusicAudio extends AudioBackend {
   bool get supportsEqualizer => _supportsEqualizer;
   @override
   bool get supportsVisualization => false;
+  @override
   Stream<String> get mediaActions => _mediaActions.stream;
 
   @override
@@ -189,6 +190,14 @@ class AndroidMusicAudio extends AudioBackend {
     'artist': artist,
     'artworkUrl': artworkUrl,
   });
+
+  @override
+  Future<void> updateTrackMetadata(Track track) => updateMetadata(
+    id: track.id,
+    title: track.title,
+    artist: track.artist,
+    artworkUrl: track.artworkUrl,
+  );
 
   @override
   Future<void> play() => _invoke('play');

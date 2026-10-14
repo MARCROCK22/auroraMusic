@@ -65,6 +65,7 @@ class WebMusicAudio extends AudioBackend {
 
   YouTubeMusicAdBlocker? get adBlocker => _bridge.adBlocker;
 
+  @override
   Track? get currentTrackMetadata => _target == null || title.isEmpty
       ? null
       : Track(

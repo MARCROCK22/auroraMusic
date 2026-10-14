@@ -208,12 +208,21 @@ class StudioSidebar extends StatelessWidget {
                     'Ctrl+2',
                   ),
                   _nav(context, 8, 'DJ', 'DJ', StudioSymbols.explore, ''),
-                  if (controller.usesOfficialYouTubeMusic)
+                  _nav(
+                    context,
+                    12,
+                    'Artistas',
+                    'Artistas',
+                    Icons.mic_none_rounded,
+                    '',
+                  ),
+                  if (controller.usesOfficialYouTubeMusic ||
+                      controller.usesYouTubeWebAudio)
                     _nav(
                       context,
                       10,
-                      'YouTube Music',
-                      'YouTube Music',
+                      'Acceso a YouTube Music',
+                      'Acceso a YouTube Music',
                       Icons.music_video_outlined,
                       '',
                     ),
@@ -233,7 +242,8 @@ class StudioSidebar extends StatelessWidget {
                     StudioSymbols.downloadDone,
                     'Ctrl+4',
                   ),
-                  if (controller.usesOfficialYouTubeMusic)
+                  if (controller.usesOfficialYouTubeMusic ||
+                      controller.usesYouTubeWebAudio)
                     _nav(
                       context,
                       11,
