@@ -34,7 +34,7 @@ class NativeWebMusicBridge extends WebMusicBridge {
   InAppWebViewController? _controller;
   WebViewEnvironment? _environment;
   static Future<WebViewEnvironment>? _windowsEnvironment;
-  Uri _pending = youtubeMusicHome;
+  Uri? _pending;
   bool _disposed = false;
 
   @override
@@ -73,6 +73,10 @@ class NativeWebMusicBridge extends WebMusicBridge {
   }
 
   bool _accept(Uri? uri) {
+    // The initial empty native view has no provider request or autoplay.
+    if (_pending == null && (uri == null || uri.toString() == 'about:blank')) {
+      return true;
+    }
     final policy = classifyYouTubeMusicNavigation(uri);
     if (policy == YouTubeMusicNavigation.allow) return true;
     onFailure?.call(
@@ -88,7 +92,9 @@ class NativeWebMusicBridge extends WebMusicBridge {
     final initial = _pending;
     return InAppWebView(
       webViewEnvironment: _environment,
-      initialUrlRequest: URLRequest(url: WebUri.uri(initial)),
+      initialUrlRequest: initial == null
+          ? null
+          : URLRequest(url: WebUri.uri(initial)),
       // Preserve native UA, TLS and cookies. Native Aurora buttons supply play
       // intent; allow their normal media commands without a WebView-only tap.
       // Generic filters protect media/auth origins. No media URL extraction,
@@ -120,10 +126,10 @@ hideAuroraVideo();
       onWebViewCreated: (controller) {
         if (_disposed) return;
         _controller = controller;
-        if (_pending == initial) return;
+        if (_pending == initial || _pending == null) return;
         unawaited(
           controller
-              .loadUrl(urlRequest: URLRequest(url: WebUri.uri(_pending)))
+              .loadUrl(urlRequest: URLRequest(url: WebUri.uri(_pending!)))
               .catchError((Object _) {
                 onFailure?.call('No se pudo cargar YouTube Music.');
               }),
@@ -202,7 +208,9 @@ hideAuroraVideo();
   @override
   Future<void> navigate(Uri uri) async {
     if (_disposed) return;
-    if (!_accept(uri)) throw ArgumentError('Se requiere una página oficial.');
+    if (uri.scheme != 'https' || !_accept(uri)) {
+      throw ArgumentError('Se requiere una página oficial.');
+    }
     _pending = uri;
     await _controller?.loadUrl(urlRequest: URLRequest(url: WebUri.uri(uri)));
   }
@@ -350,11 +358,20 @@ try {
   } else if (action === 'volume' && Number.isFinite(value)) {
     media.volume = Math.max(0, Math.min(value, 1));
   }
-} catch (_) {
-  status = action === 'play' ? 'playBlocked' : 'commandFailed';
+} catch (error) {
+  if (action === 'play') media.pause();
+  status = action === 'play' && error.name === 'NotAllowedError' ? 'playBlocked' : 'commandFailed';
 }
 const metadata = navigator.mediaSession && navigator.mediaSession.metadata;
 const text = selector => (document.querySelector(selector)?.textContent || '').trim().slice(0, 500);
+const imageSource = metadata?.artwork?.[0]?.src || document.querySelector('ytmusic-player-bar img')?.src;
+let artworkUrl;
+if (imageSource) {
+  const image = new URL(imageSource, location.origin);
+  if (image.protocol === 'https:' && !image.username && !image.password && /(^|\.)(ytimg\.com|ggpht\.com|googleusercontent\.com)$/.test(image.hostname)) {
+    artworkUrl = image.href;
+  }
+}
 const snapshot = {
   status,
   videoId: pageId,
@@ -367,6 +384,7 @@ const snapshot = {
   duration: Number.isFinite(media.duration) ? media.duration : 0,
   volume: media.volume,
   mediaError: media.error ? media.error.code : 0,
+  artworkUrl,
   title: (metadata?.title || text('ytmusic-player-bar .title')).slice(0, 500),
   artist: (metadata?.artist || text('ytmusic-player-bar .byline')).slice(0, 500)
 };

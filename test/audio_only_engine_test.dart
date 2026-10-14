@@ -186,6 +186,25 @@ void main() {
     expect(audio.duration, Duration.zero);
   });
 
+  test('pause cancels play while initial volume command is pending', () async {
+    await audio.load(const ResolvedAudio(input: input));
+    await audio.refresh();
+    final pending = Completer<Map<String, dynamic>?>();
+    bridge.pending = pending;
+    final playing = audio.play();
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.commands.last, 'volume');
+    final pausing = audio.pause();
+    pending.complete({
+      ...bridge.state,
+      'generation': 1,
+      'videoId': '6geljA2OZSY',
+    });
+    await Future.wait([playing, pausing]);
+    expect(bridge.commands, isNot(contains('play')));
+    expect(audio.isPlaying, isFalse);
+  });
+
   test('missing media has bounded actionable failure', () async {
     audio.dispose();
     audio = WebMusicAudio(
@@ -200,6 +219,49 @@ void main() {
     expect(audio.needsWebsiteAccess, isTrue);
     expect(audio.isBuffering, isFalse);
   });
+
+  test(
+    'artwork is observed HTTPS imagery, never a media URL or credentials',
+    () async {
+      await audio.load(const ResolvedAudio(input: input));
+      for (final rejected in [
+        'http://i.ytimg.com/vi/6geljA2OZSY/default.jpg',
+        'https://secret@i.ytimg.com/cover.jpg',
+        'https://rr1.googlevideo.com/videoplayback?token=secret',
+        'https://i.ytimg.com.evil.test/cover.jpg',
+      ]) {
+        bridge.state['artworkUrl'] = rejected;
+        await audio.refresh();
+        expect(audio.currentTrackMetadata?.artworkUrl, isNull);
+      }
+      bridge.state['artworkUrl'] =
+          'https://i.ytimg.com/vi/6geljA2OZSY/default.jpg';
+      await audio.refresh();
+      expect(
+        audio.currentTrackMetadata?.artworkUrl,
+        bridge.state['artworkUrl'],
+      );
+    },
+  );
+
+  test(
+    'new selection cancels an older stop before it navigates home',
+    () async {
+      await audio.load(const ResolvedAudio(input: input));
+      final pending = Completer<Map<String, dynamic>?>();
+      bridge.pending = pending;
+      final stopping = audio.stop();
+      await Future<void>.delayed(Duration.zero);
+      await audio.load(const ResolvedAudio(input: otherInput));
+      pending.complete({
+        'status': 'ready',
+        'generation': 1,
+        'videoId': '6geljA2OZSY',
+      });
+      await stopping;
+      expect(bridge.page.toString(), otherInput);
+    },
+  );
 
   testWidgets(
     'hidden/visible host retains one view and excludes hidden input',

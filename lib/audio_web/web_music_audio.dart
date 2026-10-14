@@ -33,6 +33,7 @@ class WebMusicAudio extends AudioBackend {
   bool _playIntent = false, _playing = false, _buffering = false;
   bool needsWebsiteAccess = false, adPlaying = false;
   String title = '', artist = '';
+  String? artworkUrl;
   Duration _position = Duration.zero, _duration = Duration.zero;
   Duration _pendingSeek = Duration.zero;
   double _volume = 0.8;
@@ -72,6 +73,7 @@ class WebMusicAudio extends AudioBackend {
           artist: artist,
           duration: _duration,
           pageUrl: _target.toString(),
+          artworkUrl: artworkUrl,
         );
 
   static Uri validateInput(String input) {
@@ -103,9 +105,12 @@ class WebMusicAudio extends AudioBackend {
       children: [
         ExcludeFocus(
           excluding: !showWebsite,
-          child: IgnorePointer(
-            ignoring: !showWebsite,
-            child: _view ??= _bridge.buildView(),
+          child: ExcludeSemantics(
+            excluding: !showWebsite,
+            child: IgnorePointer(
+              ignoring: !showWebsite,
+              child: _view ??= _bridge.buildView(),
+            ),
           ),
         ),
         if (!showWebsite)
@@ -157,14 +162,18 @@ class WebMusicAudio extends AudioBackend {
     needsWebsiteAccess = false;
     lastError = null;
     title = artist = '';
+    artworkUrl = null;
     _position = _duration = Duration.zero;
     _pendingSeek = start;
     _waitingSince = DateTime.now();
     notifyListeners();
+    final generation = _generation;
     try {
       await _bridge.navigate(target);
     } catch (_) {
-      _failure('No se pudo abrir la canción en la página oficial.');
+      if (generation == _generation) {
+        _failure('No se pudo abrir la canción en la página oficial.');
+      }
       rethrow;
     }
   }
@@ -262,6 +271,7 @@ class WebMusicAudio extends AudioBackend {
       _duration = _seconds(data['duration']);
       title = _text(data['title']);
       artist = _text(data['artist']);
+      artworkUrl = _artwork(data['artworkUrl']);
       if (data['ended'] == true && !_ended) {
         _ended = true;
         _playIntent = _playing = _buffering = false;
@@ -276,6 +286,23 @@ class WebMusicAudio extends AudioBackend {
       : Duration.zero;
   static String _text(Object? value) =>
       value is String ? value.substring(0, value.length.clamp(0, 500)) : '';
+
+  static String? _artwork(Object? value) {
+    if (value is! String || value.length > 4096) return null;
+    final uri = Uri.tryParse(value);
+    if (uri == null ||
+        uri.scheme != 'https' ||
+        uri.userInfo.isNotEmpty ||
+        uri.port != 443) {
+      return null;
+    }
+    const domains = {'ytimg.com', 'ggpht.com', 'googleusercontent.com'};
+    return domains.any(
+          (domain) => uri.host == domain || uri.host.endsWith('.$domain'),
+        )
+        ? value
+        : null;
+  }
 
   @override
   Future<void> play() async {
@@ -298,7 +325,11 @@ class WebMusicAudio extends AudioBackend {
         await Future<void>.delayed(const Duration(milliseconds: 200));
       }
     }
-    if (generation != _generation || _disposed || !_playIntent) return;
+    if (generation != _generation ||
+        _disposed ||
+        (!_playIntent && !needsWebsiteAccess)) {
+      return;
+    }
     if (_waitingSince != null && !needsWebsiteAccess) {
       _failure(
         'La página no presentó audio a tiempo. Abre el sitio para revisar.',
@@ -306,12 +337,22 @@ class WebMusicAudio extends AudioBackend {
     }
     if (!needsWebsiteAccess) {
       await _command('volume', _volume);
-      if (_pendingSeek > Duration.zero) {
+      if (generation != _generation ||
+          _disposed ||
+          (!_playIntent && !needsWebsiteAccess)) {
+        return;
+      }
+      if (!needsWebsiteAccess && _pendingSeek > Duration.zero) {
         final pending = _pendingSeek;
         _pendingSeek = Duration.zero;
         await seek(pending);
       }
-      await _command('play');
+      if (generation != _generation ||
+          _disposed ||
+          (!_playIntent && !needsWebsiteAccess)) {
+        return;
+      }
+      if (!needsWebsiteAccess) await _command('play');
     }
     if (generation == _generation && needsWebsiteAccess) {
       throw StateError(lastError ?? 'El sitio no pudo reproducir.');
