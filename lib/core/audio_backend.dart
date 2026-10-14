@@ -13,6 +13,9 @@ abstract class AudioBackend extends ChangeNotifier {
   List<double> get eqFrequencies;
   ValueListenable<List<double>> get spectrum;
   Stream<void> get completed;
+  Stream<String> get mediaActions => const Stream.empty();
+  Track? get currentTrackMetadata => null;
+  Future<void> updateTrackMetadata(Track track) async {}
   Future<void> initialize();
   Future<void> load(
     ResolvedAudio source, {

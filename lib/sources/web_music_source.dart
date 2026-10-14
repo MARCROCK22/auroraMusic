@@ -5,9 +5,11 @@ import '../core/source_backend.dart';
 
 /// YouTube Music owns online playback; yt-dlp is only a video/tool utility.
 class WebMusicSource extends SourceBackend {
-  WebMusicSource(this.delegate);
+  WebMusicSource(this.delegate, {this.audioOnly = false, this.metadataSearch});
 
   final SourceBackend delegate;
+  final bool audioOnly;
+  final Future<List<Track>> Function(String query, {int limit})? metadataSearch;
   final Map<String, HttpClient> _downloads = {};
 
   static final home = Uri.https('music.youtube.com', '/');
@@ -118,19 +120,95 @@ class WebMusicSource extends SourceBackend {
   }
 
   @override
-  bool get usesOfficialYouTubeMusic => true;
+  bool get usesOfficialYouTubeMusic => !audioOnly;
+  @override
+  bool get usesYouTubeWebAudio => audioOnly;
+  @override
+  bool get supportsOnlineMetadataSearch => audioOnly && metadataSearch != null;
+
+  /// An official page identifier for the WebView engine, never a media URL.
+  static Uri audioUriForTrack(Track track) {
+    final uri = uriForTrack(track);
+    final video = uri.queryParameters['v'];
+    if (uri.path != '/watch' || video == null || !_videoId.hasMatch(video)) {
+      throw StateError('Agrega un enlace HTTPS de una canción de YouTube.');
+    }
+    return Uri.https('music.youtube.com', '/watch', {'v': video});
+  }
 
   // Shared search uses the controller's library. No yt-dlp listing is allowed.
   @override
-  Future<List<Track>> search(String query, {int limit = 20}) async => [];
+  Future<List<Track>> search(String query, {int limit = 20}) async {
+    if (!audioOnly || limit <= 0) return [];
+    final input = Uri.tryParse(query.trim());
+    if (input == null || !isYouTubeUri(input)) {
+      if (metadataSearch == null || query.trim().isEmpty) return [];
+      // A pasted unrelated URL must not become a website search query.
+      if (input?.hasScheme == true) return [];
+      final results = await metadataSearch!(query.trim(), limit: limit);
+      final seen = <String>{};
+      final validated = <Track>[];
+      for (final track in results) {
+        if (track.isLocal || track.isPendingSpotifyMatch) continue;
+        try {
+          final official = audioUriForTrack(track);
+          final id = 'yt:${official.queryParameters['v']}';
+          if (!seen.add(id)) continue;
+          validated.add(
+            Track(
+              id: id,
+              title: track.title,
+              artist: track.artist,
+              duration: track.duration,
+              artworkUrl: track.artworkUrl,
+              album: track.album,
+              genres: track.genres,
+              pageUrl: official.toString(),
+            ),
+          );
+          if (validated.length == limit) break;
+        } on StateError {
+          continue;
+        }
+      }
+      return validated;
+    }
+    final uri = officialUri(input);
+    final video = uri.queryParameters['v'];
+    if (uri.path != '/watch' || video == null) {
+      throw StateError(
+        'Agrega un enlace de una canción, no una lista completa.',
+      );
+    }
+    return [
+      Track(
+        id: 'yt:$video',
+        title: 'YouTube Music',
+        artist: '',
+        pageUrl: Uri.https('music.youtube.com', '/watch', {
+          'v': video,
+        }).toString(),
+      ),
+    ];
+  }
+
   @override
-  Future<List<Track>> importPlaylist(Uri url) async =>
-      throw UnsupportedError('Abre la lista en YouTube Music.');
+  Future<List<Track>> importPlaylist(Uri url) async => throw UnsupportedError(
+    audioOnly
+        ? 'Agrega canciones con sus enlaces; no se extraen listas de YouTube.'
+        : 'Abre la lista en YouTube Music.',
+  );
 
   @override
   Future<ResolvedAudio> resolve(Track track) async {
     if (track.isLocal && await File(track.localPath!).exists()) {
       return ResolvedAudio(input: track.localPath!, duration: track.duration);
+    }
+    if (audioOnly && isOnlineYouTube(track.copyWith(clearLocalPath: true))) {
+      return ResolvedAudio(
+        input: audioUriForTrack(track).toString(),
+        duration: track.duration,
+      );
     }
     return ResolvedAudio(
       input: _nativeUri(track).toString(),
