@@ -370,7 +370,16 @@ try {
 }
 const metadata = navigator.mediaSession && navigator.mediaSession.metadata;
 const text = selector => (document.querySelector(selector)?.textContent || '').trim().slice(0, 500);
-const artwork = [...(metadata?.artwork || [])].sort((a, b) => {
+const artwork = [
+  ...(metadata?.artwork || []),
+  ...[...document.querySelectorAll('ytmusic-player img, ytmusic-player-bar img')]
+    .map(image => ({src: image.currentSrc || image.src, sizes: `${image.naturalWidth}x${image.naturalHeight}`}))
+].filter(image => {
+  try {
+    const url = new URL(image.src, location.origin);
+    return url.protocol === 'https:' && !url.username && !url.password && /(^|\.)(ytimg\.com|ggpht\.com|googleusercontent\.com)$/.test(url.hostname);
+  } catch (_) { return false; }
+}).sort((a, b) => {
   const width = image => {
     const declared = Math.max(0, ...(image.sizes || '').split(/\s+/).map(size => Number(size.split('x')[0]) || 0));
     if (declared > 0) return declared;
@@ -382,7 +391,7 @@ const artwork = [...(metadata?.artwork || [])].sort((a, b) => {
   };
   return width(b) - width(a);
 });
-const imageSource = artwork[0]?.src || document.querySelector('ytmusic-player-bar img')?.src;
+const imageSource = artwork[0]?.src;
 let artworkUrl;
 if (imageSource) {
   const image = new URL(imageSource, location.origin);
