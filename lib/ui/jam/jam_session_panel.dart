@@ -316,7 +316,11 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
           );
           return ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: Artwork(track: track, size: 44, radius: 8),
+            leading: Artwork(
+              track: track,
+              artworkContext: ArtworkContext.thumbnailCompact,
+              radius: 8,
+            ),
             title: Text(
               entry.track.title,
               maxLines: 2,
@@ -409,7 +413,11 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
             .map(
               (track) => ListTile(
                 contentPadding: EdgeInsets.zero,
-                leading: Artwork(track: track, size: 44, radius: 8),
+                leading: Artwork(
+                  track: track,
+                  artworkContext: ArtworkContext.thumbnailCompact,
+                  radius: 8,
+                ),
                 title: Text(
                   track.title,
                   maxLines: 2,

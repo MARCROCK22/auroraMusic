@@ -223,13 +223,10 @@ class _QueueList extends StatelessWidget {
   Widget _tile(BuildContext context, Track track, int queueIndex) => ListTile(
     key: ValueKey('$queueIndex:${track.id}'),
     contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
-    leading: SizedBox(
-      width: 48,
-      height: 48,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(5),
-        child: _Artwork(track: track),
-      ),
+    leading: Artwork(
+      track: track,
+      artworkContext: ArtworkContext.thumbnail,
+      radius: 5,
     ),
     title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis),
     subtitle: Text(
@@ -265,10 +262,7 @@ class _Artwork extends StatelessWidget {
   Widget build(BuildContext context) {
     final item = track;
     if (item != null) {
-      return LayoutBuilder(
-        builder: (context, size) =>
-            Artwork(track: item, size: size.maxWidth, radius: 0),
-      );
+      return Artwork.fill(track: item, artworkContext: ArtworkContext.player);
     }
     return ColoredBox(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,

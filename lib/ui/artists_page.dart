@@ -136,7 +136,13 @@ class _ArtistsPageState extends State<ArtistsPage> {
           ),
         ),
         const SizedBox(height: 12),
-        Center(child: Artwork(track: cover, size: 176, radius: 88)),
+        Center(
+          child: Artwork(
+            track: cover,
+            artworkContext: ArtworkContext.card,
+            radius: 88,
+          ),
+        ),
         const SizedBox(height: 16),
         Text(
           artist.name,
@@ -190,7 +196,11 @@ class _ArtistTile extends StatelessWidget {
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
-              Artwork(track: cover, size: 64, radius: 32),
+              Artwork(
+                track: cover,
+                artworkContext: ArtworkContext.thumbnailDetail,
+                radius: 32,
+              ),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
@@ -230,7 +240,11 @@ class _TrackTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListTile(
     contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-    leading: Artwork(track: track, size: 48, radius: 4),
+    leading: Artwork(
+      track: track,
+      artworkContext: ArtworkContext.thumbnail,
+      radius: 4,
+    ),
     title: Text(track.title, maxLines: 2, overflow: TextOverflow.ellipsis),
     subtitle: Text(
       [

@@ -280,7 +280,11 @@ class _GroupCard extends StatelessWidget {
             children: [
               Stack(
                 children: [
-                  Artwork(track: cover, size: 176, radius: artist ? 88 : 2),
+                  Artwork(
+                    track: cover,
+                    artworkContext: ArtworkContext.card,
+                    radius: artist ? 88 : 2,
+                  ),
                   Positioned(
                     right: 8,
                     bottom: 8,
@@ -353,7 +357,11 @@ class _TrackCard extends StatelessWidget {
           children: [
             Stack(
               children: [
-                Artwork(track: track, size: 176, radius: 2),
+                Artwork(
+                  track: track,
+                  artworkContext: ArtworkContext.card,
+                  radius: 2,
+                ),
                 Positioned(
                   right: 8,
                   bottom: 8,
@@ -431,7 +439,13 @@ class _RecentSleeve extends StatelessWidget {
             Expanded(
               child: Stack(
                 children: [
-                  Center(child: Artwork(track: track, size: 210, radius: 2)),
+                  Center(
+                    child: Artwork(
+                      track: track,
+                      artworkContext: ArtworkContext.cardDetail,
+                      radius: 2,
+                    ),
+                  ),
                   Positioned(
                     right: 0,
                     bottom: 0,

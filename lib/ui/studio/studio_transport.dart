@@ -37,7 +37,13 @@ class _StudioTransportState extends State<StudioTransport> {
           final info = Row(
             children: [
               if (track != null)
-                Artwork(track: track, size: wide ? 56 : 44, radius: 2)
+                Artwork(
+                  track: track,
+                  artworkContext: wide
+                      ? ArtworkContext.transport
+                      : ArtworkContext.thumbnailCompact,
+                  radius: 2,
+                )
               else
                 Container(
                   width: 44,

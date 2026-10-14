@@ -299,7 +299,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
                                   ),
                                   child: Artwork(
                                     track: track,
-                                    size: leftWidth - 34,
+                                    artworkContext: ArtworkContext.playerDetail,
                                     radius: 4,
                                   ),
                                 ),
@@ -375,7 +375,11 @@ class _LyricsPanelState extends State<LyricsPanel> {
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   child: Row(
                     children: [
-                      Artwork(track: track, size: 64, radius: 4),
+                      Artwork(
+                        track: track,
+                        artworkContext: ArtworkContext.thumbnailDetail,
+                        radius: 4,
+                      ),
                       const SizedBox(width: 14),
                       Expanded(
                         child: Text(

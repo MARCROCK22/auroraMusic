@@ -75,7 +75,7 @@ class DjPanel extends StatelessWidget {
               contentPadding: const EdgeInsets.symmetric(horizontal: 8),
               leading: Artwork(
                 track: recommendation.track,
-                size: 48,
+                artworkContext: ArtworkContext.thumbnail,
                 radius: 8,
               ),
               title: Text(
@@ -183,7 +183,11 @@ class DjPanel extends StatelessWidget {
           ...c.discoveredRecommendations.map(
             (track) => ListTile(
               contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-              leading: Artwork(track: track, size: 48, radius: 8),
+              leading: Artwork(
+                track: track,
+                artworkContext: ArtworkContext.thumbnail,
+                radius: 8,
+              ),
               title: Text(
                 track.title,
                 maxLines: 1,

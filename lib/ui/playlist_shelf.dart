@@ -37,16 +37,26 @@ class PlaylistShelf extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if (tracks.isEmpty)
-                    const SizedBox.square(
-                      dimension: 136,
-                      child: Icon(Icons.queue_music, size: 48),
+                    SizedBox.square(
+                      dimension: ArtworkContext.cardCompact.size,
+                      child: const Icon(Icons.queue_music, size: 48),
                     )
                   else if (tracks.length < 4)
-                    Artwork(track: tracks.first, size: 136, radius: 8)
+                    Artwork(
+                      track: tracks.first,
+                      artworkContext: ArtworkContext.cardCompact,
+                      radius: 8,
+                    )
                   else
                     Wrap(
                       children: tracks
-                          .map((t) => Artwork(track: t, size: 68, radius: 0))
+                          .map(
+                            (t) => Artwork(
+                              track: t,
+                              artworkContext: ArtworkContext.mosaic,
+                              radius: 0,
+                            ),
+                          )
                           .toList(),
                     ),
                   const SizedBox(height: 12),

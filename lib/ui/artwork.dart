@@ -1,60 +1,126 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import '../core/models.dart';
+
+/// Logical artwork dimensions shared by every music surface.
+enum ArtworkContext {
+  thumbnail(48),
+  thumbnailCompact(40),
+  thumbnailDetail(64),
+  transport(56),
+  card(176),
+  cardCompact(136),
+  cardDetail(210),
+  detail(120),
+  mosaic(68),
+  player(330),
+  playerCompact(280),
+  playerDetail(436),
+  sleeve(300),
+  vinyl(420),
+  vinylCompact(360);
+
+  const ArtworkContext(this.size);
+  final double size;
+
+  double constrain(BoxConstraints constraints) =>
+      math.min(size, math.min(constraints.maxWidth, constraints.maxHeight));
+}
 
 class Artwork extends StatelessWidget {
   const Artwork({
     super.key,
     required this.track,
-    required this.size,
+    this.artworkContext = ArtworkContext.thumbnail,
+    double? size,
     this.radius = 12,
-  });
+  }) : assert(size == null || (size > 0 && size < double.infinity)),
+       _size = size,
+       _fill = false;
+
+  /// Use inside an already bounded square, such as a circular vinyl label.
+  const Artwork.fill({
+    super.key,
+    required this.track,
+    this.artworkContext = ArtworkContext.vinyl,
+    this.radius = 0,
+  }) : _size = null,
+       _fill = true;
+
   final Track track;
-  final double size;
+  final ArtworkContext artworkContext;
+  final double? _size;
+  final bool _fill;
   final double radius;
 
+  // Kept for callers that inspect or explicitly override the nominal size.
+  double get size => _size ?? artworkContext.size;
+
   @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final placeholder = Container(
-      color: colors.primary.withValues(alpha: .10),
-      child: Center(
-        child: Icon(
-          Icons.music_note_rounded,
-          size: size * .35,
-          color: colors.primary,
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final bound = math.min(constraints.maxWidth, constraints.maxHeight);
+      final side = _fill && bound.isFinite
+          ? bound
+          : _size == null
+          ? artworkContext.constrain(constraints)
+          : math.min(size, bound);
+      final colors = Theme.of(context).colorScheme;
+      final placeholder = Container(
+        color: colors.primary.withValues(alpha: .10),
+        child: Center(
+          child: Icon(
+            Icons.music_note_rounded,
+            size: side * .35,
+            color: colors.primary,
+          ),
         ),
-      ),
-    );
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: track.artworkUrl == null
-            ? placeholder
-            : track.artworkUrl!.startsWith('asset:')
-            ? Image.asset(
-                track.artworkUrl!.substring(6),
-                fit: BoxFit.cover,
-                cacheWidth: (size * MediaQuery.devicePixelRatioOf(context))
-                    .ceil()
-                    .clamp(48, 1024),
-                excludeFromSemantics: true,
-                errorBuilder: (_, _, _) => placeholder,
-              )
-            : Image.network(
-                track.artworkUrl!,
-                fit: BoxFit.cover,
-                alignment: Alignment.center,
-                cacheWidth: (size * MediaQuery.devicePixelRatioOf(context))
-                    .ceil()
-                    .clamp(48, 1024),
-                excludeFromSemantics: true,
-                errorBuilder: (_, _, _) => placeholder,
-                loadingBuilder: (_, image, progress) =>
-                    progress == null ? image : placeholder,
-              ),
-      ),
-    );
-  }
+      );
+      final cacheWidth = math.max(
+        1,
+        (side * MediaQuery.devicePixelRatioOf(context)).ceil(),
+      );
+      final url = track.artworkUrl?.trim();
+      return Align(
+        widthFactor: 1,
+        heightFactor: 1,
+        child: SizedBox.square(
+          dimension: side,
+          child: AspectRatio(
+            aspectRatio: 1,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(radius),
+              child: url == null || url.isEmpty
+                  ? placeholder
+                  : url.startsWith('asset:')
+                  ? Image.asset(
+                      url.substring(6),
+                      fit: BoxFit.cover,
+                      filterQuality: FilterQuality.high,
+                      cacheWidth: cacheWidth,
+                      excludeFromSemantics: true,
+                      errorBuilder: (_, _, _) => placeholder,
+                      frameBuilder: (_, image, frame, synchronous) =>
+                          synchronous || frame != null ? image : placeholder,
+                    )
+                  : Image.network(
+                      url,
+                      fit: BoxFit.cover,
+                      filterQuality: FilterQuality.high,
+                      alignment: Alignment.center,
+                      cacheWidth: cacheWidth,
+                      excludeFromSemantics: true,
+                      errorBuilder: (_, _, _) => placeholder,
+                      frameBuilder: (_, image, frame, synchronous) =>
+                          synchronous || frame != null ? image : placeholder,
+                      loadingBuilder: (_, image, progress) =>
+                          progress == null ? image : placeholder,
+                    ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
 }
