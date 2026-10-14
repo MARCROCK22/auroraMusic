@@ -285,9 +285,6 @@ class StudioHomeIntroduction extends StatelessWidget {
           LayoutBuilder(
             builder: (context, constraints) {
               final wide = constraints.maxWidth >= 560;
-              final size = wide
-                  ? constraints.maxWidth * .4
-                  : constraints.maxWidth.clamp(0.0, 300.0);
               final sleeve = Stack(
                 children: [
                   Container(
@@ -297,7 +294,11 @@ class StudioHomeIntroduction extends StatelessWidget {
                         BoxShadow(color: Colors.black, offset: Offset(4, 6)),
                       ],
                     ),
-                    child: Artwork(track: track, size: size, radius: 8),
+                    child: Artwork.fill(
+                      track: track,
+                      artworkContext: ArtworkContext.sleeve,
+                      radius: 8,
+                    ),
                   ),
                   Positioned(
                     top: 8,
@@ -315,7 +316,10 @@ class StudioHomeIntroduction extends StatelessWidget {
                   ? Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        sleeve,
+                        SizedBox(
+                          width: constraints.maxWidth * .4,
+                          child: sleeve,
+                        ),
                         const SizedBox(width: 24),
                         Expanded(child: info),
                       ],
@@ -323,7 +327,12 @@ class StudioHomeIntroduction extends StatelessWidget {
                   : Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Center(child: sleeve),
+                        Center(
+                          child: SizedBox(
+                            width: ArtworkContext.sleeve.constrain(constraints),
+                            child: sleeve,
+                          ),
+                        ),
                         const SizedBox(height: 28),
                         info,
                       ],

@@ -456,7 +456,11 @@ class _DownloadsStudioPageState extends State<DownloadsStudioPage> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Artwork(track: job.track, size: 64, radius: 4),
+              Artwork(
+                track: job.track,
+                artworkContext: ArtworkContext.thumbnailDetail,
+                radius: 4,
+              ),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
@@ -544,7 +548,11 @@ class _DownloadsStudioPageState extends State<DownloadsStudioPage> {
         for (final (index, job) in jobs.indexed)
           _tableRow([
             Text((index + 1).toString().padLeft(2, '0')),
-            Artwork(track: job.track, size: 40, radius: 4),
+            Artwork(
+              track: job.track,
+              artworkContext: ArtworkContext.thumbnailCompact,
+              radius: 4,
+            ),
             Text(
               job.track.title,
               style: const TextStyle(fontFamily: 'Newsreader', fontSize: 18),

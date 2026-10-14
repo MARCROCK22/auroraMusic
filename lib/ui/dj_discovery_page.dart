@@ -217,7 +217,7 @@ class _DjDiscoveryPageState extends State<DjDiscoveryPage> {
                 Center(
                   child: Artwork(
                     track: track,
-                    size: math.min(constraints.maxWidth, 280),
+                    artworkContext: ArtworkContext.playerCompact,
                     radius: 12,
                   ),
                 ),

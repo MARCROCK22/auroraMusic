@@ -1297,7 +1297,11 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         context,
       ).colorScheme.primary.withValues(alpha: .06),
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      leading: Artwork(track: t, size: 48, radius: 8),
+      leading: Artwork(
+        track: t,
+        artworkContext: ArtworkContext.thumbnail,
+        radius: 8,
+      ),
       title: Text(
         t.title,
         maxLines: 1,
@@ -2028,12 +2032,10 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                             ],
                           ),
                           const SizedBox(height: 24),
-                          LayoutBuilder(
-                            builder: (_, box) => Artwork(
-                              track: t,
-                              size: math.min(box.maxWidth, 330),
-                              radius: 24,
-                            ),
+                          Artwork(
+                            track: t,
+                            artworkContext: ArtworkContext.player,
+                            radius: 24,
                           ),
                           const SizedBox(height: 28),
                           Text(
@@ -2250,7 +2252,10 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                         itemBuilder: (_, i) => ListTile(
                           key: ValueKey('${player.queue[i].id}-$i'),
                           selected: i == player.queueIndex,
-                          leading: Artwork(track: player.queue[i], size: 42),
+                          leading: Artwork(
+                            track: player.queue[i],
+                            artworkContext: ArtworkContext.thumbnailCompact,
+                          ),
                           title: Text(
                             player.queue[i].title,
                             maxLines: 1,

@@ -339,7 +339,11 @@ class StudioSessionAside extends StatelessWidget {
             children: [
               StudioStamp((index + 1).toString().padLeft(2, '0')),
               const SizedBox(width: 8),
-              Artwork(track: track, size: 40, radius: 2),
+              Artwork(
+                track: track,
+                artworkContext: ArtworkContext.thumbnailCompact,
+                radius: 2,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Column(

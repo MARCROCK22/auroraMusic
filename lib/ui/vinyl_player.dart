@@ -3,7 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
-import '../core/models.dart';
+import 'artwork.dart';
 
 class VinylPlayer extends StatefulWidget {
   const VinylPlayer({super.key, required this.controller});
@@ -120,13 +120,17 @@ class _VinylPlayerState extends State<VinylPlayer>
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 760;
         final artSize = compact
-            ? math.min(math.max(0.0, constraints.maxWidth - 36), 360.0)
+            ? ArtworkContext.vinylCompact.constrain(
+                BoxConstraints(
+                  maxWidth: math.max(0.0, constraints.maxWidth - 36),
+                ),
+              )
             : math
                   .min(
                     (constraints.maxWidth - 300) * .58,
                     constraints.maxHeight - 48,
                   )
-                  .clamp(0.0, 420.0);
+                  .clamp(0.0, ArtworkContext.vinyl.size);
         final record = SizedBox.square(
           dimension: artSize,
           child: Stack(
@@ -209,7 +213,10 @@ class _VinylPlayerState extends State<VinylPlayer>
                             clipBehavior: Clip.antiAlias,
                             child: track == null
                                 ? const Icon(Icons.music_note, size: 46)
-                                : _Artwork(track: track),
+                                : Artwork.fill(
+                                    track: track,
+                                    artworkContext: ArtworkContext.vinyl,
+                                  ),
                           ),
                         ),
                         Align(
@@ -353,13 +360,10 @@ class _VinylPlayerState extends State<VinylPlayer>
                 ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  leading: SizedBox(
-                    width: 34,
-                    height: 34,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(5),
-                      child: _Artwork(track: nextTracks[i]),
-                    ),
+                  leading: Artwork(
+                    track: nextTracks[i],
+                    artworkContext: ArtworkContext.thumbnailCompact,
+                    radius: 5,
                   ),
                   title: Text(
                     nextTracks[i].title,
@@ -492,38 +496,6 @@ class _GroovesPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _GroovesPainter oldDelegate) => false;
-}
-
-class _Artwork extends StatelessWidget {
-  const _Artwork({required this.track});
-  final Track track;
-  @override
-  Widget build(BuildContext context) {
-    final url = track.artworkUrl;
-    if (url == null || url.isEmpty) {
-      final color = Theme.of(context).colorScheme;
-      return ColoredBox(
-        color: color.surfaceContainerHighest,
-        child: Icon(Icons.music_note, size: 42, color: color.onSurfaceVariant),
-      );
-    }
-    return Image.network(
-      url,
-      fit: BoxFit.cover,
-      alignment: Alignment.center,
-      errorBuilder: (context, _, _) {
-        final color = Theme.of(context).colorScheme;
-        return ColoredBox(
-          color: color.surfaceContainerHighest,
-          child: Icon(
-            Icons.music_note,
-            size: 42,
-            color: color.onSurfaceVariant,
-          ),
-        );
-      },
-    );
-  }
 }
 
 String _time(Duration value) {

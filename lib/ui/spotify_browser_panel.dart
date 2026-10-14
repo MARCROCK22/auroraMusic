@@ -211,7 +211,7 @@ class _SpotifyBrowserPanelState extends State<SpotifyBrowserPanel> {
                 icon: const Icon(Icons.arrow_back),
                 label: const Text('Volver a los resultados'),
               ),
-              _cover(details.entity, size: 120),
+              _cover(details.entity, artworkContext: ArtworkContext.detail),
               const SizedBox(height: 12),
               Text(
                 details.title,
@@ -230,7 +230,11 @@ class _SpotifyBrowserPanelState extends State<SpotifyBrowserPanel> {
           ),
         for (final track in details.tracks)
           ListTile(
-            leading: Artwork(track: track, size: 48, radius: 8),
+            leading: Artwork(
+              track: track,
+              artworkContext: ArtworkContext.thumbnail,
+              radius: 8,
+            ),
             title: Text(
               track.title,
               maxLines: 2,
@@ -262,22 +266,18 @@ class _SpotifyBrowserPanelState extends State<SpotifyBrowserPanel> {
     );
   }
 
-  Widget _cover(SpotifyMetadataEntity item, {double size = 48}) => ClipRRect(
-    borderRadius: BorderRadius.circular(
-      item.type == SpotifyEntityType.artist ? size : 8,
+  Widget _cover(
+    SpotifyMetadataEntity item, {
+    ArtworkContext artworkContext = ArtworkContext.thumbnail,
+  }) => Artwork(
+    track: Track(
+      id: item.uri,
+      title: item.name,
+      artist: item.subtitle,
+      artworkUrl: item.artworkUrl,
     ),
-    child: SizedBox.square(
-      dimension: size,
-      child: item.artworkUrl == null
-          ? const Icon(Icons.library_music_outlined)
-          : Image.network(
-              item.artworkUrl!,
-              fit: BoxFit.cover,
-              excludeFromSemantics: true,
-              errorBuilder: (_, _, _) =>
-                  const Icon(Icons.library_music_outlined),
-            ),
-    ),
+    artworkContext: artworkContext,
+    radius: item.type == SpotifyEntityType.artist ? artworkContext.size : 8,
   );
 
   String _trackDescription(Track track) => [
