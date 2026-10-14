@@ -386,7 +386,10 @@ const artwork = [
     try {
       const url = new URL(image.src, location.origin);
       const resize = url.pathname.match(/=[ws](\d+)(?:-|$)/);
-      return Number(url.searchParams.get('width') || url.searchParams.get('w') || resize?.[1]) || 0;
+      const offered = Number(url.searchParams.get('width') || url.searchParams.get('w') || resize?.[1]);
+      if (offered > 0 && offered <= 16384) return offered;
+      const filename = url.pathname.split('/').pop().toLowerCase();
+      return {maxresdefault:1280, sddefault:640, hqdefault:480, mqdefault:320, default:120}[filename.split('.')[0]] || 0;
     } catch (_) { return 0; }
   };
   return width(b) - width(a);
