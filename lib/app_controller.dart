@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'audio/media_controls.dart';
 import 'core/audio_backend.dart';
+import 'core/artwork_metadata.dart';
 import 'core/models.dart';
 import 'core/source_backend.dart';
 import 'import/spotify_import.dart';
@@ -787,12 +788,17 @@ class AppController extends ChangeNotifier {
       return;
     }
     final placeholder = track.title == 'YouTube Music';
+    final missingCover =
+        track.artworkUrl == null || track.artworkUrl!.trim().isEmpty;
     final improveCover =
         track.spotifyUri == null &&
         metadata.title.trim() == track.title.trim() &&
         metadata.artworkUrl != null &&
         metadata.artworkUrl != track.artworkUrl &&
-        (track.artworkUrl == null || _isWebArtwork(track.artworkUrl!)) &&
+        (missingCover ||
+            artworkWidthHint(metadata.artworkUrl) >
+                artworkWidthHint(track.artworkUrl)) &&
+        (missingCover || _isWebArtwork(track.artworkUrl!)) &&
         _isWebArtwork(metadata.artworkUrl!);
     if (!placeholder && !improveCover) return;
     try {
@@ -810,7 +816,9 @@ class AppController extends ChangeNotifier {
       duration: track.duration,
       artworkUrl: improveCover
           ? metadata.artworkUrl
-          : track.artworkUrl ?? metadata.artworkUrl,
+          : missingCover
+          ? metadata.artworkUrl
+          : track.artworkUrl,
       pageUrl: track.pageUrl,
       localPath: track.localPath,
       album: track.album,

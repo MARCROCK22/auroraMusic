@@ -371,7 +371,15 @@ try {
 const metadata = navigator.mediaSession && navigator.mediaSession.metadata;
 const text = selector => (document.querySelector(selector)?.textContent || '').trim().slice(0, 500);
 const artwork = [...(metadata?.artwork || [])].sort((a, b) => {
-  const width = image => Math.max(0, ...(image.sizes || '').split(/\s+/).map(size => Number(size.split('x')[0]) || 0));
+  const width = image => {
+    const declared = Math.max(0, ...(image.sizes || '').split(/\s+/).map(size => Number(size.split('x')[0]) || 0));
+    if (declared > 0) return declared;
+    try {
+      const url = new URL(image.src, location.origin);
+      const resize = url.pathname.match(/=[ws](\d+)(?:-|$)/);
+      return Number(url.searchParams.get('width') || url.searchParams.get('w') || resize?.[1]) || 0;
+    } catch (_) { return 0; }
+  };
   return width(b) - width(a);
 });
 const imageSource = artwork[0]?.src || document.querySelector('ytmusic-player-bar img')?.src;

@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/models.dart';
+import '../core/artwork_metadata.dart';
 import '../core/source_backend.dart';
 import 'progressive_audio_relay.dart';
 import 'youtube_request_policy.dart';
@@ -654,11 +655,7 @@ class YtDlpSource extends SourceBackend {
       final file = uri.pathSegments.lastOrNull?.toLowerCase() ?? '';
       final lowQuality =
           file.contains('hqdefault') || file.contains('mqdefault');
-      final fallback = file.contains('maxres')
-          ? 1280.0
-          : file.contains('sddefault')
-          ? 640.0
-          : 0.0;
+      final fallback = artworkWidthHint(value).toDouble();
       final pixels = width is num && width.isFinite && width > 0
           ? width.toDouble()
           : fallback;

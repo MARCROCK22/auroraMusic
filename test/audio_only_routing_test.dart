@@ -538,15 +538,18 @@ void main() {
         id: 'yt:abcdefghijk',
         title: 'Observed Song',
         artist: 'Artist',
-        artworkUrl: 'https://i.ytimg.com/cover-small.jpg',
+        artworkUrl: 'https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg',
       );
       audio.emitMetadata(observed);
       final writes = database.saveCalls;
       final improved = observed.copyWith(
-        artworkUrl: 'https://i.ytimg.com/cover-large.jpg',
+        artworkUrl: 'https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg',
       );
       audio.emitMetadata(improved);
       audio.emitMetadata(improved);
+      audio.emitMetadata(observed);
+      audio.emitMetadata(improved);
+      audio.emitMetadata(observed);
       expect(app.currentTrack?.artworkUrl, improved.artworkUrl);
       expect(app.currentTrack?.title, observed.title);
       expect(database.saveCalls, writes + 1);
