@@ -526,6 +526,39 @@ void main() {
   );
 
   test(
+    'a larger observed cover updates the current song without repeated writes',
+    () async {
+      final audio = _InitializationAudio();
+      final database = _FailingLibraryDatabase()..failReads = false;
+      final app = await _controller(audio, audioOnly: true, database: database);
+      await app.initialize(mediaControls: false);
+      await app.search('https://youtu.be/abcdefghijk');
+      await app.playTrack(app.searchResults.single);
+      const observed = Track(
+        id: 'yt:abcdefghijk',
+        title: 'Observed Song',
+        artist: 'Artist',
+        artworkUrl: 'https://i.ytimg.com/cover-small.jpg',
+      );
+      audio.emitMetadata(observed);
+      final writes = database.saveCalls;
+      final improved = observed.copyWith(
+        artworkUrl: 'https://i.ytimg.com/cover-large.jpg',
+      );
+      audio.emitMetadata(improved);
+      audio.emitMetadata(improved);
+      expect(app.currentTrack?.artworkUrl, improved.artworkUrl);
+      expect(app.currentTrack?.title, observed.title);
+      expect(database.saveCalls, writes + 1);
+      audio.emitMetadata(
+        observed.copyWith(artworkUrl: 'https://secret@i.ytimg.com/private.jpg'),
+      );
+      expect(app.currentTrack?.artworkUrl, improved.artworkUrl);
+      expect(database.saveCalls, writes + 1);
+    },
+  );
+
+  test(
     'optional website metadata merges with library without yt-dlp listing',
     () async {
       final audio = _InitializationAudio(), utility = FakeSource();

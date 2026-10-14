@@ -782,11 +782,19 @@ class AppController extends ChangeNotifier {
         _loadedTrackId != track.id ||
         !_usingRemote ||
         metadata == null ||
-        track.title != 'YouTube Music' ||
         metadata.title.trim().isEmpty ||
         metadata.title == 'YouTube Music') {
       return;
     }
+    final placeholder = track.title == 'YouTube Music';
+    final improveCover =
+        track.spotifyUri == null &&
+        metadata.title.trim() == track.title.trim() &&
+        metadata.artworkUrl != null &&
+        metadata.artworkUrl != track.artworkUrl &&
+        (track.artworkUrl == null || _isWebArtwork(track.artworkUrl!)) &&
+        _isWebArtwork(metadata.artworkUrl!);
+    if (!placeholder && !improveCover) return;
     try {
       final video = WebMusicSource.audioUriForTrack(track).queryParameters['v'];
       if (metadata.id != 'yt:$video') return;
@@ -795,12 +803,14 @@ class AppController extends ChangeNotifier {
     }
     final updated = Track(
       id: track.id,
-      title: metadata.title.trim(),
-      artist: metadata.artist.trim().isEmpty
+      title: placeholder ? metadata.title.trim() : track.title,
+      artist: !placeholder || metadata.artist.trim().isEmpty
           ? track.artist
           : metadata.artist.trim(),
       duration: track.duration,
-      artworkUrl: track.artworkUrl ?? metadata.artworkUrl,
+      artworkUrl: improveCover
+          ? metadata.artworkUrl
+          : track.artworkUrl ?? metadata.artworkUrl,
       pageUrl: track.pageUrl,
       localPath: track.localPath,
       album: track.album,
@@ -818,6 +828,18 @@ class AppController extends ChangeNotifier {
     _controls?.updateTrack(updated);
     unawaited(audio.updateTrackMetadata(updated).catchError(_report));
     unawaited(database.saveTrack(updated).catchError(_report));
+  }
+
+  bool _isWebArtwork(String value) {
+    final uri = Uri.tryParse(value);
+    return uri != null &&
+        uri.scheme == 'https' &&
+        uri.userInfo.isEmpty &&
+        const [
+          'ytimg.com',
+          'ggpht.com',
+          'googleusercontent.com',
+        ].any((domain) => uri.host == domain || uri.host.endsWith('.$domain'));
   }
 
   bool _isRecoverableStreamError(String message) {

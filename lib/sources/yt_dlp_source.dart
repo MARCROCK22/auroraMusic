@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -623,7 +624,6 @@ class YtDlpSource extends SourceBackend {
 
   Track _track(Map<String, dynamic> json) {
     final id = json['id']?.toString() ?? '';
-    final thumbs = json['thumbnails'] as List?;
     return Track(
       id: 'yt:$id',
       title: json['title']?.toString() ?? 'Sin título',
@@ -633,13 +633,53 @@ class YtDlpSource extends SourceBackend {
       duration: Duration(
         milliseconds: ((json['duration'] as num? ?? 0) * 1000).round(),
       ),
-      artworkUrl:
-          json['thumbnail'] as String? ??
-          (thumbs?.isNotEmpty == true
-              ? (thumbs!.last as Map)['url'] as String?
-              : null),
+      artworkUrl: selectArtworkUrl(json),
       pageUrl: 'https://www.youtube.com/watch?v=$id',
     );
+  }
+
+  /// Prefer declared resolution; lower quality YouTube defaults are fallback.
+  @visibleForTesting
+  static String? selectArtworkUrl(Map<String, dynamic> json) {
+    final candidates = <({String url, double width, bool lowQuality})>[];
+    void add(Object? value, [Object? width]) {
+      if (value is! String) return;
+      final uri = Uri.tryParse(value);
+      if (uri == null ||
+          uri.scheme != 'https' ||
+          uri.host.isEmpty ||
+          uri.userInfo.isNotEmpty) {
+        return;
+      }
+      final file = uri.pathSegments.lastOrNull?.toLowerCase() ?? '';
+      final lowQuality =
+          file.contains('hqdefault') || file.contains('mqdefault');
+      final fallback = file.contains('maxres')
+          ? 1280.0
+          : file.contains('sddefault')
+          ? 640.0
+          : 0.0;
+      final pixels = width is num && width.isFinite && width > 0
+          ? width.toDouble()
+          : fallback;
+      candidates.add((url: value, width: pixels, lowQuality: lowQuality));
+    }
+
+    final thumbnails = json['thumbnails'];
+    if (thumbnails is List) {
+      for (final entry in thumbnails.whereType<Map>()) {
+        add(entry['url'], entry['width']);
+      }
+    }
+    add(json['thumbnail']);
+    if (candidates.isEmpty) return null;
+    final hasPreferred = candidates.any(
+      (image) => !image.lowQuality && image.width >= 500,
+    );
+    final selected =
+        candidates.where((image) => !hasPreferred || !image.lowQuality).toList()
+          ..sort((a, b) => b.width.compareTo(a.width));
+    return selected.first.url;
   }
 
   Future<List<Track>> _listing(String target, int limit, String method) {

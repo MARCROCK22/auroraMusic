@@ -1,5 +1,44 @@
 # Contexto para retomar Aurora Music
 
+## Objetivo vigente nuevo: cuatro etapas estrictas
+
+El usuario cambió la entrega: ejecutar 1) portadas uniformes y de alta calidad,
+2) pub get/format/analyze/test y recorrido completo con correcciones y revisor independiente,
+3) subir versión, compilar Windows/APK release firmado localmente, ZIP, commit/push `[skip ci]`,
+crear GitHub Release con gh sin GitHub Actions y verificar assets,
+4) implementar DJ «Auror» local vectorial, gustos por señales reales, ~20 pistas y relleno <5.
+**No avanzar a una etapa si la anterior falla.** La publicación precede a Auror por orden explícito.
+
+Estado al empezar este objetivo: `main` tiene integración nativa WebView preservada en
+`ab60160`; no está publicada. Stage 1 activo: raíz modifica selección de thumbnails en
+`lib/sources/yt_dlp_source.dart` y sus tests (3 pasaron); agente en rama
+`kaz-py/fix-uniform-artwork` posee TODOS los cambios de `lib/ui` y test/artwork_test.dart.
+No editar esos mismos archivos mientras trabaje. El revisor independiente debe intervenir
+tras integrar esa rama y antes del paso 2.
+
+Corrección pendiente para paso 2: rama `kaz-py/audit-native-webview-anr`, commit `32ebab2`.
+Plugin Android1.1.3 confirmó deadlock entre CookieManager.flush main y callbacks de
+interceptación. Ese commit genera copias Java parcheadas durante build y hace flush en
+executor limitado, sin modificar PubCache. Revisado por raíz; plugin compile y harness de
+concurrencia pasaron. Aún no integrado. Restaurar callback Dart Android (root lo desactivó
+temporalmente para aislar ANR) tras integrar el parche y comprobar en emulador.
+
+Verificación posterior a la antigua nota: integración nativa completa pasó analyze y
+386 pruebas; APK debug y Windows release compilaron. En emulador API36 se observó streaming
+real, título/artista/portada y progreso, pausa/reanudar/seek/volumen desde botones Flutter.
+Android sin interceptación dejó de bloquearse. En segundo plano/pantalla apagada se observó
+pausa: NO garantizar esa función ni eludir restricciones. Native MediaSession queda NONE
+durante audio web; controles del sistema para esa fuente aún no comprobados.
+Captura real del reproductor nativo: build/android-verification/aurora-native-player.png.
+Portada inicial era pequeña; selección actual usa la artwork de mayor tamaño de MediaSession.
+Todos los logs mencionados bajo build están ignorados y no son entregas publicadas.
+
+Usuario requiere subagentes por áreas, revisión independiente antes de avanzar y UN agente
+para compilar/publicar el paso 3 secuencialmente. El coordinador integra y hace commit final.
+No comenzar embeddings/vectorDB/Auror hasta terminar publicación del paso 3.
+
+---
+
 Actualizado: 13 de octubre de 2026. El usuario pidió guardar el contexto porque se está quedando sin tokens. **La última migración sigue en desarrollo; no afirmar que está terminada, compilada o publicada.**
 
 ## Instrucción para la próxima conversación
