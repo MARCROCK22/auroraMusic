@@ -356,7 +356,11 @@ void main() {
     expect(audio.engine, AudioEngine.web);
     expect(audio.input, 'https://music.youtube.com/watch?v=19y35jAcG6k');
     orch.blacklisted.clear();
-    for (final kind in [YouTubeFailure.blocked, YouTubeFailure.accessDenied]) {
+    for (final kind in [
+      YouTubeFailure.blocked,
+      YouTubeFailure.accessDenied,
+      YouTubeFailure.other,
+    ]) {
       orch.error = StreamResolveException(kind, 'x');
       audio = await source.resolve(_song);
       expect(audio.engine, AudioEngine.web);

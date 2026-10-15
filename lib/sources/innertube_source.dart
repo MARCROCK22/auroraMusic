@@ -427,11 +427,13 @@ class InnerTubeSource extends SourceBackend {
     try {
       stream = await orch.resolve(id, trackDuration: _knownDuration(track));
     } on StreamResolveException catch (error) {
-      if (error.kind == YouTubeFailure.blocked ||
-          error.kind == YouTubeFailure.accessDenied) {
-        return _webFallback(id, track);
+      // Network and removed videos are real errors; anything else (bot check,
+      // login, ciphered or changed responses) still plays in the official player.
+      if (error.kind == YouTubeFailure.transient ||
+          error.kind == YouTubeFailure.unavailable) {
+        rethrow;
       }
-      rethrow;
+      return _webFallback(id, track);
     }
     final AudioProxy proxy;
     try {

@@ -57,7 +57,8 @@ flowchart TD
 | 403/401/410 de googlevideo a mitad de reproducción, o URL a punto de caducar (margen 30 s) | El proxy renueva (`forceRefresh`, mismo itag, una sola renovación por vídeo) y reintenta el trozo una vez. |
 | La renovación falla o cambia la longitud | Sin cabeceras enviadas: `410`. Con cabeceras enviadas: corta el socket. La app lo trata como recuperable y vuelve a resolver. Nunca 403/502 hacia el reproductor. |
 | Flujo truncado (menos bytes que la longitud) | `validateCompletion` falla con «Premature EOF»; el controlador recupera la pista. |
-| Bot/login (`blocked`, `accessDenied`, LOGIN_REQUIRED, «not a bot») en todos los clientes | Respaldo web automático y lista negra de 30 min para ese vídeo. |
+| Bot/login (`blocked`, `accessDenied`, LOGIN_REQUIRED, «not a bot») en todos los clientes | Respaldo web automático y lista negra de 30 min para ese vídeo. El cliente que respondió así queda relegado 2 min. |
+| Respuesta inesperada o sin formato reproducible (p. ej. todas las URLs cifradas) | Respaldo web automático para esa pista, sin lista negra. |
 | Transitorio (red, tiempo agotado, DNS) o no disponible (UNPLAYABLE, retirado) | Sin lista negra ni web: error normal con reintento. |
 | Cliente con 403 o sondeo fallido | Se marca malo 10 min (2 min si es error de red); se prueba el último. |
 

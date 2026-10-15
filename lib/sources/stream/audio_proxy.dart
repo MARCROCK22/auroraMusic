@@ -229,6 +229,8 @@ class AudioProxy {
               got += data.length;
               sub.pause();
               socket!.add(data);
+              // Mark before the flush: the player may hang up right after it.
+              if (pos + got - 1 == total - 1) entry!.servedToEnd = true;
               socket.flush().then((_) => sub.resume(), onError: fail);
             });
             sub.onError(fail);
@@ -352,11 +354,13 @@ class AudioProxy {
               int.parse(m[2]!) != b ||
               (response.contentLength != -1 &&
                   response.contentLength != b - a + 1)) {
+            _discard(response);
             throw _Fail(null, 'upstream range mismatch');
           }
           return response;
         }
         request.abort();
+        _discard(response);
         // Other statuses (3xx, 5xx, 416, ...) end as our 410 downstream.
         if (attempt == 0 && const {401, 403, 410}.contains(status)) {
           stream = await _renew(
@@ -408,6 +412,14 @@ class AudioProxy {
       throw error is _Fail ? error : _Fail(null, 'refresh failed: $error');
     }
   }
+}
+
+/// abort() is a no-op once headers arrived; drop the socket instead of
+/// letting an unread body hold the upstream connection.
+void _discard(HttpClientResponse response) {
+  unawaited(
+    response.detachSocket().then((s) => s.destroy(), onError: (Object _) {}),
+  );
 }
 
 class _Entry {
