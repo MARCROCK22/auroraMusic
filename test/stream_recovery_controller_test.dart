@@ -59,80 +59,150 @@ Future<void> _settle(AppController controller) async {
   await Future<void>.delayed(const Duration(milliseconds: 1));
 }
 
+class _PrefetchSource extends FakeSource {
+  final prefetched = <String>[];
+  Completer<void>? gate;
+  @override
+  Future<void> prefetch(Track track) async {
+    prefetched.add(track.id);
+    await gate?.future;
+  }
+}
+
+Future<void> _tick(FakeAudio audio, int seconds) async {
+  audio.position = Duration(seconds: seconds);
+  audio.notifyListeners();
+  await Future<void>.delayed(const Duration(milliseconds: 1));
+}
+
 void main() {
-  test(
-    'premature EOF refreshes the same queue occurrence twice at position',
-    () async {
-      final source = FakeSource();
-      final audio = FakeAudio();
-      final controller = await createTestController(
-        source: source,
-        audio: audio,
-        tracks: [_first, _second],
-        preferences: {
-          'queue': ['one', 'one', 'two'],
-          'queueIndex': 1,
-        },
-      );
-      addTearDown(() => closeTestController(controller));
-      await controller.playQueueAt(1);
-      audio.position = const Duration(seconds: 37);
-      audio.lastError = 'El audio terminó antes de completar la reproducción.';
-      audio.notifyListeners();
-      await _settle(controller);
+  test('preloads next track once after 10 s', () async {
+    final source = _PrefetchSource();
+    final audio = FakeAudio();
+    final controller = await createTestController(
+      source: source,
+      audio: audio,
+      tracks: [_first, _second],
+    );
+    addTearDown(() => closeTestController(controller));
+    await controller.playTrack(_first, context: [_first, _second]);
+    await _tick(audio, 5);
+    expect(source.prefetched, isEmpty);
+    await _tick(audio, 11);
+    await _tick(audio, 12);
+    expect(source.prefetched, ['two']);
+  });
 
-      expect(controller.queueIndex, 1);
-      expect(controller.currentTrack?.id, 'one');
-      expect(source.resolved, ['one', 'one']);
-      expect(audio.position, const Duration(seconds: 37));
-      expect(controller.error, isNull);
-      audio.lastError = 'El audio terminó antes de completar la reproducción.';
-      audio.notifyListeners();
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-      await _settle(controller);
-      expect(source.resolved, ['one', 'one', 'one']);
-      expect(controller.error, isNull);
-    },
-  );
+  test('preload skips shuffle, repeat one and local next', () async {
+    final source = _PrefetchSource();
+    final audio = FakeAudio();
+    const local = Track(
+      id: 'loc',
+      title: 'L',
+      artist: 'A',
+      localPath: 'C:/x.mp3',
+    );
+    final controller = await createTestController(
+      source: source,
+      audio: audio,
+      tracks: [_first, _second, local],
+    );
+    addTearDown(() => closeTestController(controller));
+    await controller.playTrack(_second, context: [_second, local]);
+    await _tick(audio, 20);
+    expect(source.prefetched, isEmpty);
+    await controller.playTrack(_first, context: [_first, _second]);
+    controller.shuffle = true;
+    await _tick(audio, 20);
+    controller.shuffle = false;
+    controller.repeat = RepeatMode.one;
+    await _tick(audio, 21);
+    expect(source.prefetched, isEmpty);
+  });
 
-  test(
-    'failed refresh retries automatically and later outage recovers',
-    () async {
-      final source = FakeSource();
-      final audio = _FailingAudio();
-      final controller = await createTestController(
-        source: source,
-        audio: audio,
-      );
-      addTearDown(() => closeTestController(controller));
-      await controller.playTrack(_first);
-      audio.position = const Duration(seconds: 24);
-      audio.failedLoadsRemaining = 1;
-      audio.lastError = 'SocketException: connection timed out';
-      audio.notifyListeners();
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-      await _settle(controller);
-      expect(source.resolved, ['one', 'one', 'one']);
-      expect(audio.position, const Duration(seconds: 24));
-      expect(controller.error, isNull);
+  test('queue change during preload allows a fresh preload', () async {
+    final source = _PrefetchSource()..gate = Completer<void>();
+    final audio = FakeAudio();
+    final controller = await createTestController(
+      source: source,
+      audio: audio,
+      tracks: [_first, _second],
+    );
+    addTearDown(() => closeTestController(controller));
+    await controller.playTrack(_first, context: [_first, _second]);
+    await _tick(audio, 11);
+    await _tick(audio, 12);
+    expect(source.prefetched, ['two']);
+    await controller.playTrack(_first, context: [_first, _second]);
+    source.gate!.complete();
+    await _tick(audio, 11);
+    await _tick(audio, 12);
+    expect(source.prefetched, ['two', 'two']);
+  });
 
-      // No retry is scheduled after exhausting the bounded incident budget.
-      audio.lastError = 'SocketException: connection timed out';
-      audio.notifyListeners();
-      await _settle(controller);
-      expect(source.resolved, ['one', 'one', 'one']);
-      expect(controller.error, 'SocketException: connection timed out');
+  test('premature EOF refreshes once at position and does not loop', () async {
+    final source = FakeSource();
+    final audio = FakeAudio();
+    final controller = await createTestController(
+      source: source,
+      audio: audio,
+      tracks: [_first, _second],
+      preferences: {
+        'queue': ['one', 'one', 'two'],
+        'queueIndex': 1,
+      },
+    );
+    addTearDown(() => closeTestController(controller));
+    await controller.playQueueAt(1);
+    audio.position = const Duration(seconds: 37);
+    audio.lastError = 'El audio terminó antes de completar la reproducción.';
+    audio.notifyListeners();
+    await _settle(controller);
 
-      // A real 30 second advance resets the budget for a later outage.
-      audio.position = const Duration(seconds: 54);
-      audio.notifyListeners();
-      audio.lastError = 'SocketException: connection timed out';
-      audio.notifyListeners();
-      await _settle(controller);
-      expect(source.resolved, ['one', 'one', 'one', 'one']);
-      expect(controller.error, isNull);
-    },
-  );
+    expect(controller.queueIndex, 1);
+    expect(controller.currentTrack?.id, 'one');
+    expect(source.resolved, ['one', 'one']);
+    expect(audio.position, const Duration(seconds: 37));
+    expect(audio.isPlaying, isTrue);
+    expect(controller.error, isNull);
+    audio.lastError = 'El audio terminó antes de completar la reproducción.';
+    audio.notifyListeners();
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    await _settle(controller);
+    expect(source.resolved, ['one', 'one']);
+    expect(controller.error, isNotNull);
+  });
+
+  test('failed refresh is not retried; 60 s of progress re-arms it', () async {
+    final source = FakeSource();
+    final audio = _FailingAudio();
+    final controller = await createTestController(source: source, audio: audio);
+    addTearDown(() => closeTestController(controller));
+    await controller.playTrack(_first);
+    audio.position = const Duration(seconds: 24);
+    audio.failedLoadsRemaining = 1;
+    audio.lastError = 'SocketException: connection timed out';
+    audio.notifyListeners();
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    await _settle(controller);
+    expect(source.resolved, ['one', 'one']);
+    expect(controller.error, isNotNull);
+
+    audio.lastError = 'SocketException: connection timed out';
+    audio.notifyListeners();
+    await _settle(controller);
+    expect(source.resolved, ['one', 'one']);
+
+    // Playing 60 more seconds opens a new failure window.
+    audio.isPlaying = true;
+    audio.position = const Duration(seconds: 90);
+    audio.notifyListeners();
+    audio.lastError = 'SocketException: connection timed out';
+    audio.notifyListeners();
+    await _settle(controller);
+    expect(source.resolved, ['one', 'one', 'one']);
+    expect(controller.error, isNull);
+  });
 
   test('queue change while URL refresh is pending wins', () async {
     final source = FakeSource();
@@ -217,24 +287,5 @@ void main() {
 
     expect(audio.isPlaying, isFalse);
     expect(audio.loadCount, 1);
-  });
-
-  test('pause cancels the bounded retry backoff', () async {
-    final source = FakeSource();
-    final audio = _FailingAudio();
-    final controller = await createTestController(source: source, audio: audio);
-    addTearDown(() => closeTestController(controller));
-    await controller.playTrack(_first);
-    audio.failedLoadsRemaining = 1;
-    audio.lastError = 'SocketException: connection timed out';
-    audio.notifyListeners();
-    while (audio.failedLoadsRemaining > 0) {
-      await Future<void>.delayed(const Duration(milliseconds: 10));
-    }
-    await controller.togglePlayback();
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-
-    expect(source.resolved, ['one', 'one']);
-    expect(audio.isPlaying, isFalse);
   });
 }

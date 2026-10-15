@@ -28,7 +28,7 @@ final controllerProvider = ChangeNotifierProvider<AppController>((ref) {
 });
 
 class AppController extends ChangeNotifier {
-  static const _maxStreamRecoveryAttempts = 2;
+  static const _maxStreamRecoveryAttempts = 1;
   AppController({
     required this.audio,
     required this.source,
@@ -217,6 +217,8 @@ class AppController extends ChangeNotifier {
   String? _loadedTrackId;
   String? _loadedAudioInput;
   String? _pendingResolveVideoId;
+  String? _prefetchKey;
+  bool _prefetching = false;
   Duration _resumePosition = Duration.zero;
   final Random _random = Random();
   final List<int> _shuffleHistory = [];
@@ -867,7 +869,7 @@ class AppController extends ChangeNotifier {
         !_recovering &&
         audio.isPlaying &&
         audio.position - _recoveryProgressPosition >=
-            const Duration(seconds: 30)) {
+            const Duration(seconds: 60)) {
       _expiryRetries = 0;
       _recoveryProgressPosition = audio.position;
     }
@@ -888,12 +890,58 @@ class AppController extends ChangeNotifier {
                     source.isExpiredStream(currentTrack!))))) {
       source.reportPlaybackFailure(audioError);
     }
+    _maybePrefetchNext();
     if (audio.isPlaying &&
         DateTime.now().difference(_lastSnapshot).inSeconds >= 5) {
       _lastSnapshot = DateTime.now();
       unawaited(_saveQueue());
     }
     _notify();
+  }
+
+  /// Warms the next queue item's URL once; shuffle and repeat-one skip it.
+  void _maybePrefetchNext() {
+    final track = currentTrack;
+    if (_prefetching ||
+        track == null ||
+        !_usingRemote ||
+        !_playIntent ||
+        _recovering ||
+        !audio.isPlaying ||
+        _loadedTrackId != track.id ||
+        shuffle ||
+        repeat == RepeatMode.one) {
+      return;
+    }
+    final duration = audio.duration;
+    if (audio.position < const Duration(seconds: 10) &&
+        !(duration > Duration.zero && audio.position * 2 >= duration)) {
+      return;
+    }
+    final nextIndex = queueIndex + 1 < queue.length
+        ? queueIndex + 1
+        : repeat == RepeatMode.all && queue.length > 1
+        ? 0
+        : -1;
+    if (nextIndex < 0) return;
+    final upcoming = queue[nextIndex];
+    final key = '$_playGeneration:${upcoming.id}';
+    if (_prefetchKey == key ||
+        upcoming.id == track.id ||
+        upcoming.isLocal ||
+        upcoming.isPendingSpotifyMatch) {
+      return;
+    }
+    _prefetchKey = key;
+    _prefetching = true;
+    final generation = _playGeneration;
+    unawaited(
+      source.prefetch(upcoming).catchError((Object _) {}).whenComplete(() {
+        // A queue change meanwhile only wastes the cached URL; allow a new one.
+        _prefetching = false;
+        if (generation != _playGeneration) _prefetchKey = null;
+      }),
+    );
   }
 
   void _adoptWebTrackMetadata() {

@@ -21,6 +21,9 @@ abstract class SourceBackend {
   Future<List<Track>> importPlaylist(Uri url);
   Future<ResolvedAudio> resolve(Track track);
 
+  /// Warms the stream URL of an upcoming track; must swallow its own errors.
+  Future<void> prefetch(Track track) async {}
+
   /// Called before a bounded retry of an expired or interrupted stream.
   void invalidateResolvedAudio(Track track) {}
   void reportPlaybackFailure(String message) {}

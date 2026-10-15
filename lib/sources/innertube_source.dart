@@ -258,6 +258,22 @@ class InnerTubeSource extends SourceBackend {
     return resolved;
   }
 
+  /// Explode-only URL warm-up: never falls back to yt-dlp, never throws.
+  @override
+  Future<void> prefetch(Track track) async {
+    final id = _youTubeId(track);
+    if (track.isLocal || id == null) return;
+    final cached = _resolved[id];
+    if (cached != null && !_expired(cached)) return;
+    try {
+      final stream = await _streams(id);
+      _resolved[id] = ResolvedAudio(
+        input: stream.url.toString(),
+        duration: track.duration,
+      );
+    } catch (_) {}
+  }
+
   bool _expired(ResolvedAudio audio) {
     final seconds = int.tryParse(
       Uri.tryParse(audio.input)?.queryParameters['expire'] ?? '',
