@@ -13,8 +13,8 @@ import com.yausername.youtubedl_android.YoutubeDLRequest
 import com.yausername.ffmpeg.FFmpeg
 import android.content.Context
 import io.flutter.embedding.android.FlutterActivity
+import com.ryanheise.audioservice.AudioServicePlugin
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.IOException
@@ -38,8 +38,10 @@ internal fun sourceRequest(target: String) = YoutubeDLRequest(target).apply {
 class MainActivity : FlutterActivity() {
     // Keep the Dart queue and its native channel alive during background playback.
     override fun shouldDestroyEngineWithHost(): Boolean = false
-    override fun provideFlutterEngine(context: Context): FlutterEngine? =
-        FlutterEngineCache.getInstance().get("aurora-playback")
+    // audio_service starts its own engine (running main() again) unless the
+    // activity uses it; two app instances would race on the same database.
+    override fun provideFlutterEngine(context: Context): FlutterEngine =
+        AudioServicePlugin.getFlutterEngine(context)
     private val sourceWorkers = ThreadPoolExecutor(2, 2, 0, TimeUnit.MILLISECONDS, ArrayBlockingQueue<Runnable>(8))
     private val controls = Executors.newSingleThreadExecutor()
     private val timeouts = Executors.newSingleThreadScheduledExecutor()
@@ -68,7 +70,6 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
-        FlutterEngineCache.getInstance().put("aurora-playback", engine)
         // Reattaching the cached engine must preserve active source jobs/channels too.
         if (engine.plugins.has(AuroraAudioPlugin::class.java)) return
         engine.plugins.add(AuroraAudioPlugin())
