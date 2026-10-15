@@ -11,8 +11,8 @@ typedef PlayerPost =
       Map<String, Object?> body,
     );
 
-/// Non-2xx reply from [PlayerPost]/[HttpGet] implementations. Network
-/// failures throw [SocketException]/[TimeoutException] instead.
+/// Non-2xx reply from [PlayerPost]. [HttpGet] never throws it: it returns
+/// the status. Network failures throw [SocketException]/[TimeoutException].
 class HttpStatusException implements Exception {
   const HttpStatusException(this.statusCode, [this.message = '']);
 
