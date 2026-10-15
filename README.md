@@ -1,6 +1,18 @@
 # Aurora
 
-Reproductor de música en Flutter y Dart para **Windows x64 y Android 7+**. Interfaz en español, biblioteca local y fuentes públicas de YouTube mediante yt-dlp ejecutado en el dispositivo.
+Reproductor de música en Flutter y Dart para **Windows x64 y Android 7+**. Interfaz en español, biblioteca local y búsqueda de YouTube Music mediante InnerTube, con reproducción nativa de solo audio (versión 1.1.0). yt-dlp queda como respaldo de resolución y para descargas explícitas.
+
+## Motor de audio (v1.1.0)
+
+- **Búsqueda** en YouTube Music vía InnerTube, sin clave de API ([`innertube_source.dart`](lib/sources/innertube_source.dart)): categorías canciones, álbumes, artistas y vídeos, paginación por continuación, búsquedas recientes y navegación de álbum/artista.
+- **Solo audio**: la URL del formato de audio se obtiene con `youtube_explode_dart` 3.1.0 y se reproduce con streaming real, sin descargar antes y sin WebView: Android con Media3 (servicio en segundo plano) y Windows con SoLoud + FFmpeg con reconexión.
+- **yt-dlp** solo extrae la URL como respaldo (un intento, con límite de ritmo) y gestiona las descargas explícitas de audio y vídeo. No se exportan cookies ni tokens.
+- **Anuncios**: al reproducir únicamente los formatos de audio de la canción no se emiten anuncios del reproductor de YouTube (en una comprobación real la duración del flujo coincidió con la de la canción). `adblocker_webview` sigue filtrando los WebViews opcionales restantes.
+- Precarga de la URL de la siguiente pista y una recuperación a mitad de canción por ventana de 60 s.
+- **Reproducir a continuación** (funciona con aleatorio) y metadatos/portada publicados a los controles del sistema antes de cargar; Android usa `WAKE_MODE_NETWORK` y `ACCESS_WIFI_STATE`.
+- **DJ con IA local** ([docs/dj.md](docs/dj.md)): vectores de 256 dimensiones, perfil de gustos con decaimiento de 14 días, similitud coseno, diversidad MMR y enfriamiento por artista, almacenados en SQLite. No usa recomendaciones de YouTube.
+
+Motor anterior (WebView) reemplazado: ver [docs/youtube_music_audio_engine.md](docs/youtube_music_audio_engine.md).
 
 ## Funciones
 
@@ -117,13 +129,9 @@ Este comando permite prepararlas por separado. Descarga versiones oficiales veri
 
 Android incorpora Python, JavaScript, yt-dlp y FFmpeg mediante `youtubedl-android` 0.18.1; no necesita instalar Python. Las primeras operaciones preparan esos componentes localmente.
 
-### Caché de reproducción en Windows y Android
+### Reproducción y reintentos
 
-Para reducir cortes de las URLs temporales de YouTube, Aurora descarga primero el audio completo en su carpeta privada y valida su duración con ffprobe. La primera reproducción necesita esperar la descarga; una copia válida puede reutilizarse. La caché se limita a 512 MB y limpia los archivos más antiguos. **Ajustes → Almacenamiento y biblioteca → Limpiar caché** conserva la canción actual y tus descargas locales. Los paquetes para compartir no incluyen esta caché ni tus datos personales.
-
-Android también descarga y valida el archivo completo antes de reproducirlo. En **Ajustes → Almacenamiento y biblioteca**, **Descargar mientras se reproduce (experimental)** permite comenzar con un WebM compatible mientras yt-dlp sigue descargando. Está desactivado por defecto y afecta a las próximas canciones. Otros formatos conservan la descarga completa; buscar una parte todavía no descargada puede requerir esperar. Los archivos incompletos no se publican como copias válidas.
-
-Los reintentos de reproducción son limitados, conservan la canción y posición, y se cancelan al pausar, detener o cambiar de canción. No evitan restricciones de YouTube ni hacen accesibles videos privados o eliminados.
+Desde la 1.1.0 el audio suena mientras llega (streaming real): Aurora ya no descarga el archivo completo antes de reproducir. Precarga la URL de la siguiente pista y, si el flujo falla a mitad de canción, reintenta una vez por ventana de 60 s conservando la posición. Los reintentos se cancelan al pausar, detener o cambiar de canción y no evitan restricciones de YouTube ni hacen accesibles vídeos privados o eliminados. **Ajustes → Almacenamiento y biblioteca → Limpiar caché** conserva la canción actual y tus descargas locales.
 
 ### Importar playlists de Spotify gratis
 
@@ -137,7 +145,7 @@ Todo el archivo se procesa localmente, sin claves de API ni pagos. Se conservan 
 
 Un HTTP 429 o una petición de verificar la sesión proviene de YouTube. Abre YouTube en tu navegador, inicia sesión y completa cualquier verificación que aparezca. Espera antes de repetir búsquedas. Aurora envía la búsqueda con Enter o la flecha, sin consultar mientras escribes ni duplicar una consulta pendiente.
 
-Si necesitas usar tu sesión, exporta **solo las cookies de YouTube** a un archivo `.txt` en formato Netscape siguiendo la [documentación oficial de yt-dlp](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies). En Aurora, abre **Ajustes → Sesión de YouTube → Importar sesión**. La app valida el archivo y guarda una copia en su carpeta privada; puedes reemplazarla o eliminarla desde esa misma sección. El archivo original permanece intacto. La sesión es opcional y no elimina un bloqueo de la dirección IP.
+Aurora no necesita cookies para reproducir. Si aun así necesitas usar tu sesión con yt-dlp (respaldo y descargas), exporta **solo las cookies de YouTube** a un archivo `.txt` en formato Netscape siguiendo la [documentación oficial de yt-dlp](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies). En Aurora, abre **Ajustes → Sesión de YouTube → Importar sesión**. La app valida el archivo y guarda una copia en su carpeta privada; puedes reemplazarla o eliminarla desde esa misma sección. El archivo original permanece intacto. La sesión es opcional y no elimina un bloqueo de la dirección IP.
 
 El archivo permite acceder a tu sesión: mantenlo privado y no lo adjuntes a incidencias ni al repositorio. Aurora no lo cifra ni lee automáticamente las credenciales del navegador. Si la sesión caduca, importa un archivo actualizado.
 
@@ -181,7 +189,7 @@ ni contraseñas en el chat. El ZIP Windows no tiene firma Authenticode.
 ## Arquitectura y seguridad
 
 `lib/core/` define modelos y contratos; `lib/audio/` contiene SoLoud y controles
-del sistema; `lib/sources/` integra yt-dlp; `lib/metadata/spotify/` consulta
+del sistema; `lib/sources/` integra InnerTube, `youtube_explode_dart` y yt-dlp (respaldo/descargas); `lib/metadata/spotify/` consulta
 metadatos; `lib/dj/` puntúa recomendaciones y aplica filtros; `lib/jam/` mantiene
 sesiones LAN y audio temporal; `lib/ui/studio/` presenta el Atelier Sonoro; `lib/library/`
 persiste la biblioteca; `lib/ui/` presenta las pantallas. `AppController`
@@ -190,6 +198,10 @@ coordina estado y reproducción. Consulta el [árbol de módulos](docs/architect
 Los procesos reciben argumentos separados, con plugins/configuración externa desactivados; entradas YouTube restringidas a HTTPS y hosts permitidos. TLS permanece verificado, salidas/colas/buffers tienen límites y las descargas se publican por renombrado desde archivos temporales. Los mensajes ocultan consultas firmadas, cookies y autorización. No se guardan URLs de reproducción temporales.
 
 Los archivos importados y descargados se guardan en el directorio de soporte de Aurora del usuario. Limpiar caché conserva la biblioteca; eliminar una descarga requiere confirmación. La app usa la salida de audio elegida por el sistema, incluidos auriculares cableados, USB o Bluetooth; las combinaciones físicas requieren pruebas de dispositivo.
+
+## Estado de la 1.1.0 y limitaciones
+
+433 pruebas automáticas aprobadas y `flutter analyze` limpio. Incluye el respaldo de lectura QR por código de barras puro en Jam y pruebas de diseño móvil. **Pendiente en dispositivo real**: Android en segundo plano/pantalla apagada, Bluetooth y SMTC/teclas multimedia de Windows. Los vídeos con restricción de edad recurren a yt-dlp, YouTube puede limitar solicitudes y las duraciones de las canciones top de un artista pueden mostrarse como 0.
 
 ## Validación
 

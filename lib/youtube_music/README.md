@@ -1,3 +1,5 @@
+> **Obsoleto (v1.1.0).** La reproducción ya no usa WebView; esta vista solo cubre el sitio oficial opcional. Ver [docs/architecture.md](../../docs/architecture.md).
+
 # Official YouTube Music view
 
 `youtube_music_page.dart` exports `YouTubeMusicPage` and the test platform seam.

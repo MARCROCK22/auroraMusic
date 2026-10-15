@@ -1,3 +1,5 @@
+> **Actualización v1.1.0.** La resolución principal ya no es yt-dlp: la URL de solo audio llega por InnerTube + `youtube_explode_dart` 3.1.0 y Media3 la reproduce con streaming real; yt-dlp es respaldo (un intento) y descargas. Lo que sigue describe el flujo previo y las descargas, que siguen vigentes. Pendiente en dispositivo real: segundo plano/pantalla apagada y Bluetooth. Android añade `WAKE_MODE_NETWORK` y `ACCESS_WIFI_STATE`.
+
 # Reproducción Android, streaming y música sin conexión
 
 ## Flujo por plataforma

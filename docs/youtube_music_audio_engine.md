@@ -1,3 +1,5 @@
+> **Reemplazado (v1.1.0, 2026-10-15).** El motor WebView descrito aquí fue sustituido por el motor InnerTube de solo audio con streaming nativo (Media3 en Android, SoLoud + FFmpeg en Windows). Se conserva como historial. Ver [README](../README.md) y [architecture.md](architecture.md).
+
 # Official Music WebView engine for Aurora's native audio interface
 
 Updated 2026-10-13 for the latest requirement: preserve Aurora's native library,

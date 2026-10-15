@@ -11,13 +11,14 @@ lib/
   app_controller.dart               Estado personal, cola, reproducción y persistencia
   core/                             Track, playlists, contratos y controles de ventana
   audio/                            SoLoud, DSP, FFT y controles multimedia
-  sources/                          yt-dlp, caché y transmisión progresiva
+  sources/                          InnerTube (búsqueda), youtube_explode_dart, yt-dlp (respaldo/descargas)
   library/
     library_database.dart           SQLite: biblioteca, favoritos, listas e historial
     local_file_metadata.dart        Tamaño y formato de archivos conocidos
   import/                           Lectura local de exportaciones JSON/CSV de Spotify
   metadata/spotify/                 Autenticación, Pathfinder, mapeo, caché y navegación
   dj/
+    ai_dj.dart                      DJ IA local: vectores 256-d, perfil de gustos, MMR
     recommendations.dart            Puntuación, filtros, razones e identidad de canciones
     discovery_controller.dart       Elecciones de tarjetas durante la sesión del DJ
   jam/
@@ -93,6 +94,10 @@ Los filtros del DJ se guardan en preferencias. `Track.genres` conserva únicamen
 géneros explícitos de los datos; las canciones anteriores usan una lista vacía.
 No se infieren géneros desde nombres ni se migra el esquema de la base de datos.
 Las sesiones Jam, sus participantes, tokens y cola común permanecen en memoria.
+
+## Motor de audio v1.1.0
+
+`InnertubeSource` busca en YouTube Music (canciones, álbumes, artistas, vídeos; continuación y recientes) y resuelve la URL de solo audio con `youtube_explode_dart`; yt-dlp es un respaldo de un intento. La reproducción es streaming nativo (`AndroidMusicAudio`/Media3, `MusicAudio`/SoLoud + FFmpeg) sin WebView. El DJ (`lib/dj/ai_dj.dart`) guarda `track_vectors` y `taste_profile` en SQLite (drift) y no usa recomendaciones de YouTube; detalles en [dj.md](dj.md).
 
 Consulta [diseño implementado](design_idea_implementation.md),
 [DJ y sus señales](dj.md), [metadatos Spotify](spotify_metadata.md),

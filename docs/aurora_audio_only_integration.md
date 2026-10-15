@@ -1,3 +1,5 @@
+> **Reemplazado (v1.1.0, 2026-10-15).** El motor WebView descrito aquí fue sustituido por el motor InnerTube de solo audio con streaming nativo (Media3 en Android, SoLoud + FFmpeg en Windows). Se conserva como historial. Ver [README](../README.md) y [architecture.md](architecture.md).
+
 # Aurora audio-only routing audit and controller integration
 
 Audit date: 2026-10-13. Baseline: `139251b` (`Integrate web player navigation and preserve video downloads`). This branch implements the controller/source portion after the coordinator expanded ownership; the WebView engine and app/shell wiring are separate work. No live account, personal library, signed media URL, cookie, or actual device playback was inspected.
