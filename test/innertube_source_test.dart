@@ -173,76 +173,27 @@ void main() {
     expect(InnerTubeSource.isValidVideoId('../etc/pass'), isFalse);
   });
 
-  test('resolve streams the audio URL and caches it until expiry', () async {
-    var now = DateTime.utc(2026, 10, 15, 12);
-    final expire = now.add(const Duration(hours: 6)).millisecondsSinceEpoch;
-    var calls = 0;
+  test('resolve hands YouTube tracks to the official watch page', () async {
     final delegate = FakeSource();
-    final source = InnerTubeSource(
-      delegate,
-      now: () => now,
-      streams: (id) async {
-        calls++;
-        return (
-          url: Uri.parse(
-            'https://rr.googlevideo.com/videoplayback?id=$id&expire=${expire ~/ 1000}&n=$calls',
-          ),
-          container: 'webm',
-          bitrate: 160000,
-        );
-      },
-    );
-    final first = await source.resolve(_song);
-    expect(first.input, startsWith('https://rr.googlevideo.com/'));
-    expect(first.duration, _song.duration);
-    expect(await source.resolve(_song), same(first));
-    expect(calls, 1);
+    final source = InnerTubeSource(delegate);
+    final audio = await source.resolve(_song);
+    expect(audio.input, 'https://music.youtube.com/watch?v=19y35jAcG6k');
+    expect(audio.headers, isEmpty);
+    expect(audio.duration, _song.duration);
     expect(source.isExpiredStream(_song), isFalse);
-
-    now = now.add(const Duration(hours: 6));
-    expect(source.isExpiredStream(_song), isTrue);
-    final renewed = await source.resolve(_song);
-    expect(calls, 2);
-    expect(renewed.input, isNot(first.input));
-
-    source.invalidateResolvedAudio(_song);
-    await source.resolve(_song);
-    expect(calls, 3);
+    // No extraction, no yt-dlp fallback.
     expect(delegate.resolved, isEmpty);
-  });
-
-  test(
-    'resolve falls back to the delegate once when extraction fails',
-    () async {
-      final delegate = FakeSource();
-      var calls = 0;
-      final source = InnerTubeSource(
-        delegate,
-        streams: (_) async {
-          calls++;
-          throw StateError('403');
-        },
-      );
-      final audio = await source.resolve(_song);
-      expect(calls, 1);
-      expect(delegate.resolved, ['yt:19y35jAcG6k']);
-      expect(audio.input, 'https://example.test/yt:19y35jAcG6k');
-    },
-  );
-
-  test('resolve uses an explicit URL-only fallback when given', () async {
-    final delegate = FakeSource();
-    final fallbacks = <String>[];
-    final source = InnerTubeSource(
-      delegate,
-      streams: (_) => throw StateError('sin formatos'),
-      fallback: (track) async {
-        fallbacks.add(track.id);
-        return const ResolvedAudio(input: 'https://fallback.test/audio');
-      },
+    await expectLater(
+      source.resolve(
+        const Track(
+          id: 'web:1',
+          title: 'Otra',
+          artist: 'Sitio',
+          pageUrl: 'https://example.test/song',
+        ),
+      ),
+      throwsStateError,
     );
-    expect((await source.resolve(_song)).input, 'https://fallback.test/audio');
-    expect(fallbacks, ['yt:19y35jAcG6k']);
     expect(delegate.resolved, isEmpty);
   });
 }

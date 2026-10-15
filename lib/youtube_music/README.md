@@ -1,4 +1,4 @@
-> **Obsoleto (v1.1.0).** La reproducción ya no usa WebView; esta vista solo cubre el sitio oficial opcional. Ver [docs/architecture.md](../../docs/architecture.md).
+> El reproductor de YouTube de Aurora vive ahora en `lib/audio_web/` (ver [docs/youtube_music_audio_engine.md](../../docs/youtube_music_audio_engine.md)); esta vista visible no se usa en la interfaz.
 
 # Official YouTube Music view
 

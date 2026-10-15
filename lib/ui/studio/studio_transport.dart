@@ -75,7 +75,9 @@ class _StudioTransportState extends State<StudioTransport> {
                     ),
                     if (track != null)
                       Text(
-                        track.artist,
+                        c.adPlaying
+                            ? 'Anuncio · tu canción sigue después'
+                            : track.artist,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(

@@ -10,6 +10,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app_controller.dart';
 import 'audio/music_audio.dart';
 import 'audio/android_music_audio.dart';
+import 'audio/routed_music_audio.dart';
+import 'audio_web/web_music_audio.dart';
 import 'library/library_database.dart';
 import 'sources/yt_dlp_source.dart';
 import 'sources/innertube_source.dart';
@@ -41,7 +43,11 @@ class _AuroraBootstrapState extends State<AuroraBootstrap> {
     await directory.create(recursive: true);
     final database = await LibraryDatabase.open();
     final controller = AppController(
-      audio: Platform.isAndroid ? AndroidMusicAudio() : MusicAudio(),
+      // YouTube plays in the official site (hidden WebView); local files natively.
+      audio: RoutedMusicAudio(
+        native: Platform.isAndroid ? AndroidMusicAudio() : MusicAudio(),
+        web: WebMusicAudio(),
+      ),
       source: InnerTubeSource(YtDlpSource(preferences)),
       database: database,
       preferences: preferences,

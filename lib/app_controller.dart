@@ -12,6 +12,7 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'audio/media_controls.dart';
+import 'audio/routed_music_audio.dart';
 import 'core/audio_backend.dart';
 import 'core/artwork_metadata.dart';
 import 'core/models.dart';
@@ -43,6 +44,13 @@ class AppController extends ChangeNotifier {
   final Directory supportDirectory;
   bool get usesOfficialYouTubeMusic => source.usesOfficialYouTubeMusic;
   bool get usesYouTubeWebAudio => source.usesYouTubeWebAudio;
+
+  /// The current track plays in the official site, not a native backend.
+  bool get webPlayback =>
+      audio is RoutedMusicAudio && (audio as RoutedMusicAudio).usingWeb;
+
+  /// The site is showing an ad; the player shows «Anuncio» meanwhile.
+  bool get adPlaying => audio.adPlaying;
   Uri? youtubeMusicRequest;
   bool _youtubeMusicActive = false;
   bool get youtubeMusicActive => _youtubeMusicActive;
@@ -821,7 +829,11 @@ class AppController extends ChangeNotifier {
       if (Platform.isAndroid) {
         _nativeActions ??= audio.mediaActions.listen((action) {
           if (_jamPlaybackActive) return;
+          final seekTo = action.startsWith('seek:')
+              ? int.tryParse(action.substring(5))
+              : null;
           final task = switch (action) {
+            _ when seekTo != null => seek(Duration(milliseconds: seekTo)),
             'next' => next(),
             'previous' => previous(),
             'play' => resumePlayback(),
@@ -889,8 +901,10 @@ class AppController extends ChangeNotifier {
       _expiryRetries = 0;
       _recoveryProgressPosition = audio.position;
     }
+    // The web engine reports its own actionable errors; no stream to renew.
+    final streamPlayback = _usingRemote && !webPlayback;
     if (audioError != null &&
-        _usingRemote &&
+        streamPlayback &&
         _recoverableRemoteTrackId == currentTrack?.id &&
         _playIntent &&
         !_recovering &&
@@ -899,7 +913,7 @@ class AppController extends ChangeNotifier {
         _isRecoverableStreamError(audioError)) {
       unawaited(_recoverExpiredStream());
     } else if (audioError != null &&
-        _usingRemote &&
+        streamPlayback &&
         (failure == YouTubeFailure.blocked ||
             (failure == YouTubeFailure.accessDenied &&
                 !(currentTrack != null &&

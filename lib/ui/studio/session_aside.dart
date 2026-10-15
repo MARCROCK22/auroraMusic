@@ -244,7 +244,9 @@ class StudioSessionAside extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  c.audio.supportsEqualizer
+                  c.webPlayback
+                      ? 'El ecualizador aplica a archivos locales, no a YouTube Music.'
+                      : c.audio.supportsEqualizer
                       ? 'Ecualizador real · simulación de válvula y cinta pendiente'
                       : 'El dispositivo no ofrece un ecualizador compatible.',
                   style: const TextStyle(fontSize: 10),

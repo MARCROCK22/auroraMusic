@@ -2,11 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:youtube_explode_dart/youtube_explode_dart.dart';
-
 import '../core/models.dart';
 import '../core/source_backend.dart';
-import 'yt_dlp_source.dart';
 
 typedef InnerTubePost =
     Future<Map<String, dynamic>> Function(
@@ -14,34 +11,14 @@ typedef InnerTubePost =
       Map<String, Object?> body,
     );
 
-typedef AudioStream = ({Uri url, String container, int bitrate});
-
-typedef AudioStreamResolver = Future<AudioStream> Function(String videoId);
-
-/// YouTube Music search (InnerTube) and audio-only resolution for the native
-/// backends. yt-dlp stays for downloads, playlists and as resolve fallback.
+/// YouTube Music search (InnerTube). Playback resolves to the official watch
+/// page; yt-dlp stays for downloads and playlist imports.
 class InnerTubeSource extends SourceBackend {
-  InnerTubeSource(
-    this.delegate, {
-    InnerTubePost? post,
-    AudioStreamResolver? streams,
-    Future<ResolvedAudio> Function(Track track)? fallback,
-    DateTime Function()? now,
-  }) : _post = post ?? _httpPost,
-       _fallback =
-           fallback ??
-           (delegate is YtDlpSource
-               ? delegate.resolveStreamUrl
-               : delegate.resolve),
-       _streams = streams ?? explodeAudioStream,
-       _now = now ?? DateTime.now;
+  InnerTubeSource(this.delegate, {InnerTubePost? post})
+    : _post = post ?? _httpPost;
 
   final SourceBackend delegate;
   final InnerTubePost _post;
-  final AudioStreamResolver _streams;
-  final Future<ResolvedAudio> Function(Track track) _fallback;
-  final DateTime Function() _now;
-  final Map<String, ResolvedAudio> _resolved = {};
 
   static final _videoId = RegExp(r'^[A-Za-z0-9_-]{11}$');
   static final _clock = RegExp(r'^(?:(\d+):)?(\d{1,2}):(\d{2})$');
@@ -358,129 +335,23 @@ class InnerTubeSource extends SourceBackend {
     return id != null && _videoId.hasMatch(id) ? id : null;
   }
 
+  /// YouTube plays in the official music.youtube.com player (WebMusicAudio);
+  /// nothing is extracted. yt-dlp is reserved for explicit downloads.
   @override
   Future<ResolvedAudio> resolve(Track track) async {
     if (track.isLocal && await File(track.localPath!).exists()) {
       return ResolvedAudio(input: track.localPath!, duration: track.duration);
     }
     final id = _youTubeId(track);
-    if (id == null) return delegate.resolve(track);
-    final cached = _resolved[id];
-    if (cached != null && !_expired(cached)) return cached;
-    _resolved.remove(id);
-    final AudioStream stream;
-    try {
-      stream = await _streams(id);
-    } catch (_) {
-      // One fallback: a single yt-dlp URL extraction, streamed the same way.
-      return _fallback(track);
+    if (id == null) {
+      throw StateError(
+        'Solo se pueden reproducir canciones de YouTube Music o archivos locales.',
+      );
     }
-    final resolved = ResolvedAudio(
-      input: stream.url.toString(),
+    return ResolvedAudio(
+      input: Uri.https('music.youtube.com', '/watch', {'v': id}).toString(),
       duration: track.duration,
     );
-    _resolved[id] = resolved;
-    return resolved;
-  }
-
-  /// Explode-only URL warm-up: never falls back to yt-dlp, never throws.
-  @override
-  Future<void> prefetch(Track track) async {
-    final id = _youTubeId(track);
-    if (track.isLocal || id == null) return;
-    final cached = _resolved[id];
-    if (cached != null && !_expired(cached)) return;
-    try {
-      final stream = await _streams(id);
-      _resolved[id] = ResolvedAudio(
-        input: stream.url.toString(),
-        duration: track.duration,
-      );
-    } catch (_) {}
-  }
-
-  bool _expired(ResolvedAudio audio) {
-    final seconds = int.tryParse(
-      Uri.tryParse(audio.input)?.queryParameters['expire'] ?? '',
-    );
-    // Renew a minute early so a load never starts on a dying URL.
-    return seconds != null &&
-        !_now().isBefore(
-          DateTime.fromMillisecondsSinceEpoch(
-            seconds * 1000,
-          ).subtract(const Duration(minutes: 1)),
-        );
-  }
-
-  @override
-  bool isExpiredStream(Track track) {
-    final cached = _resolved[_youTubeId(track)];
-    if (cached == null) return delegate.isExpiredStream(track);
-    return _expired(cached);
-  }
-
-  @override
-  void invalidateResolvedAudio(Track track) {
-    _resolved.remove(_youTubeId(track));
-    delegate.invalidateResolvedAudio(track);
-  }
-
-  /// Best audio-only stream the platform decodes, verified with a ranged GET.
-  static Future<AudioStream> explodeAudioStream(String videoId) async {
-    if (!_videoId.hasMatch(videoId)) {
-      throw ArgumentError('El identificador del video no es válido.');
-    }
-    final yt = YoutubeExplode();
-    try {
-      final manifest = await yt.videos.streamsClient
-          // The watch page is the request YouTube rate-limits first; the
-          // player API alone is enough for unsigned audio formats.
-          .getManifest(videoId, requireWatchPage: false)
-          .timeout(const Duration(seconds: 30));
-      final candidates =
-          manifest.audioOnly
-              .where(
-                (s) =>
-                    s.url.scheme == 'https' &&
-                    (s.audioTrack == null || s.audioTrack!.audioIsDefault) &&
-                    (s.container == StreamContainer.mp4 ||
-                        s.container == StreamContainer.webM),
-              )
-              .toList()
-            ..sort((a, b) {
-              // Media3 decodes both, but AAC/m4a is the safest on old devices.
-              if (Platform.isAndroid && a.container != b.container) {
-                return a.container == StreamContainer.mp4 ? -1 : 1;
-              }
-              return b.bitrate.bitsPerSecond.compareTo(a.bitrate.bitsPerSecond);
-            });
-      if (candidates.isEmpty) throw StateError('No hay audio disponible.');
-      final best = candidates.first;
-      await _probe(best.url);
-      return (
-        url: best.url,
-        container: best.container.name,
-        bitrate: best.bitrate.bitsPerSecond,
-      );
-    } finally {
-      yt.close();
-    }
-  }
-
-  static Future<void> _probe(Uri url) async {
-    final client = HttpClient()..connectionTimeout = _timeout;
-    try {
-      final request = await client.getUrl(url);
-      request.headers.set(HttpHeaders.rangeHeader, 'bytes=0-1');
-      final response = await request.close().timeout(_timeout);
-      await response.drain<void>();
-      if (response.statusCode != HttpStatus.partialContent &&
-          response.statusCode != HttpStatus.ok) {
-        throw StateError('El audio respondió ${response.statusCode}.');
-      }
-    } finally {
-      client.close(force: true);
-    }
   }
 
   @override
@@ -544,7 +415,6 @@ class InnerTubeSource extends SourceBackend {
   String? get ffmpegExecutable => delegate.ffmpegExecutable;
   @override
   void dispose() {
-    _resolved.clear();
     delegate.dispose();
   }
 }

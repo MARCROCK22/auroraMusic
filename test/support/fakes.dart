@@ -2,12 +2,13 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:aurora_music/app_controller.dart';
+import 'package:aurora_music/audio_web/web_music_audio.dart';
 import 'package:aurora_music/core/audio_backend.dart';
 import 'package:aurora_music/core/models.dart';
 import 'package:aurora_music/core/source_backend.dart';
 import 'package:aurora_music/library/library_database.dart';
 import 'package:drift/native.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class FakeAudio extends AudioBackend {
@@ -192,7 +193,7 @@ class FakeSource extends SourceBackend {
 Future<AppController> createTestController({
   List<Track> tracks = const [],
   List<MusicPlaylist> playlists = const [],
-  FakeAudio? audio,
+  AudioBackend? audio,
   FakeSource? source,
   Map<String, Object> preferences = const {},
 }) async {
@@ -223,4 +224,66 @@ Future<void> closeTestController(AppController controller) async {
   if (await controller.supportDirectory.exists()) {
     await controller.supportDirectory.delete(recursive: true);
   }
+}
+
+/// Fake official-site bridge: no WebView, no network.
+class FakeWebBridge extends WebMusicBridge {
+  Uri? page;
+  int builds = 0;
+  bool disposed = false;
+  final commands = <String>[];
+  final values = <double?>[];
+  final timeouts = <Duration>[];
+  Map<String, dynamic> state = {
+    'status': 'ready',
+    'playing': false,
+    'position': 12.5,
+    'duration': 150,
+  };
+
+  /// Overrides the response to the next 'play' only.
+  Map<String, dynamic>? playResult;
+  Completer<Map<String, dynamic>?>? pending;
+
+  @override
+  Future<void> initialize() async {}
+  @override
+  Widget buildView() {
+    builds++;
+    return const ColoredBox(key: ValueKey('engine'), color: Colors.red);
+  }
+
+  @override
+  Future<void> navigate(Uri uri) async => page = uri;
+  @override
+  Future<Map<String, dynamic>?> command(
+    String action, {
+    required String videoId,
+    required int generation,
+    double? value,
+    Duration timeout = const Duration(seconds: 20),
+  }) async {
+    commands.add(action);
+    values.add(value);
+    timeouts.add(timeout);
+    if (pending != null) {
+      final future = pending!.future;
+      pending = null;
+      return future;
+    }
+    if (action == 'play' && playResult != null) {
+      final result = playResult!;
+      playResult = null;
+      return result;
+    }
+    if (action == 'play' && state['status'] == 'ready') {
+      state = {...state, 'playing': true, 'ended': false};
+    } else if (action == 'pause') {
+      state = {...state, 'playing': false};
+    }
+    return {...state, 'generation': generation, 'videoId': videoId};
+  }
+
+  @override
+  void dispose() => disposed = true;
 }

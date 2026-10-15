@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -31,6 +32,8 @@ import 'offline_settings_panel.dart';
 import '../youtube_music/youtube_music_page.dart';
 import 'video_downloads_page.dart';
 import 'artists_page.dart';
+import '../audio/routed_music_audio.dart';
+import '../audio_web/web_music_audio.dart';
 
 const _sections = [
   'Inicio',
@@ -99,7 +102,18 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     WidgetsBinding.instance.addObserver(this);
     _audio = ref.read(controllerProvider).audio;
     WindowControls.setCloseConfirmation(_confirmWindowClose);
+    _guardWebClose();
     _audio.setVisualizationEnabled(false);
+  }
+
+  /// The hidden official player, when it initialized.
+  WebMusicAudio? get _webAudio {
+    final audio = _audio;
+    return audio is RoutedMusicAudio &&
+            audio.web is WebMusicAudio &&
+            audio.webInitializationError == null
+        ? audio.web as WebMusicAudio
+        : null;
   }
 
   @override
@@ -129,7 +143,9 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     }
   }
 
-  void _guardWebClose() => WindowControls.guardClose(_section == 10);
+  // With the web engine mounted every close passes through _confirmWindowClose.
+  void _guardWebClose() =>
+      WindowControls.guardClose(_section == 10 || _webAudio != null);
 
   @override
   void dispose() {
@@ -201,8 +217,12 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     });
   }
 
-  Future<bool> _confirmWindowClose() async =>
-      await _musicKey.currentState?.confirmExit() ?? true;
+  Future<bool> _confirmWindowClose() async {
+    final close = await _musicKey.currentState?.confirmExit() ?? true;
+    // Release WebView2 before the window goes so the process can exit.
+    if (close) await _webAudio?.shutdown();
+    return close;
+  }
 
   Future<void> _openLibrary({
     MusicPlaylist? playlist,
@@ -241,7 +261,8 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       controllerProvider.select((c) => (c.reducedMotion, c.audio.isPlaying)),
       (_, _) => _syncVisualization(),
     );
-    return CallbackShortcuts(
+    final web = _webAudio;
+    final shell = CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.digit1, control: true): () =>
             _navigate(0),
@@ -367,6 +388,75 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         ),
       ),
     );
+    if (web == null) return shell;
+    return ListenableBuilder(
+      listenable: web,
+      builder: (context, _) => Stack(
+        fit: StackFit.expand,
+        children: [shell, ..._webEngineLayers(web)],
+      ),
+    );
+  }
+
+  /// The official player is always mounted at the same tree position (so it
+  /// keeps playing) and covered. It is shown only as a sheet when the site
+  /// itself asks the user for consent, sign-in or a verification.
+  List<Widget> _webEngineLayers(WebMusicAudio web) {
+    final visible = web.showingWebsite;
+    final colors = Theme.of(context).colorScheme;
+    return [
+      Positioned.fill(
+        child: IgnorePointer(
+          ignoring: !visible,
+          child: ColoredBox(
+            color: visible ? Colors.black54 : Colors.transparent,
+          ),
+        ),
+      ),
+      Positioned(
+        left: 0,
+        top: visible ? 72 : 0,
+        right: visible ? 0 : null,
+        bottom: visible ? 0 : null,
+        width: visible ? null : 1,
+        height: visible ? null : 1,
+        child: web.buildEngineView(),
+      ),
+      if (visible)
+        Positioned(
+          left: 0,
+          right: 0,
+          top: 16,
+          height: 56,
+          child: Material(
+            color: colors.surfaceContainerHigh,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Resuelve el aviso de YouTube Music y pulsa Listo',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  FilledButton(
+                    onPressed: () {
+                      web.setWebsiteVisible(false);
+                      final c = ref.read(controllerProvider);
+                      c.clearError();
+                      unawaited(c.resumePlayback());
+                    },
+                    child: const Text('Listo'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+    ];
   }
 
   Widget _sidebar(AppController c, bool wide) {
@@ -548,14 +638,6 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                 ),
               ),
               PopupMenuItem(
-                value: 10,
-                child: ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.music_video_outlined),
-                  title: Text('Acceso a YouTube Music'),
-                ),
-              ),
-              PopupMenuItem(
                 value: 11,
                 child: ListTile(
                   contentPadding: EdgeInsets.zero,
@@ -630,11 +712,10 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
               ),
             ),
           ),
-          if (c.usesYouTubeWebAudio)
-            IconButton(
-              tooltip: 'Acceso y consentimiento de YouTube Music',
-              onPressed: () => _navigate(10),
-              icon: const Icon(Icons.open_in_browser),
+          if (_webAudio?.needsWebsiteAccess == true)
+            TextButton(
+              onPressed: () => _webAudio?.setWebsiteVisible(true),
+              child: const Text('Revisar sitio'),
             ),
           IconButton(
             tooltip: 'Cerrar aviso',
@@ -1667,7 +1748,9 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       ),
       (
         title: 'Ecualizador',
-        subtitle: !c.audio.supportsEqualizer
+        subtitle: c.webPlayback
+            ? 'El ecualizador aplica a archivos locales, no a YouTube Music'
+            : !c.audio.supportsEqualizer
             ? 'El dispositivo no ofrece un ecualizador compatible'
             : c.eqEnabled
             ? 'Ecualizador activado'
@@ -2110,7 +2193,9 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            t.artist,
+                            player.adPlaying
+                                ? 'Anuncio · tu canción sigue después'
+                                : t.artist,
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontSize: 16,

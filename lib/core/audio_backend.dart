@@ -16,6 +16,13 @@ abstract class AudioBackend extends ChangeNotifier {
   Stream<String> get mediaActions => const Stream.empty();
   Track? get currentTrackMetadata => null;
   Future<void> updateTrackMetadata(Track track) async {}
+
+  /// True while the web player is showing an advertisement.
+  bool get adPlaying => false;
+
+  /// Lets a native media session reflect [playback] owned by another engine;
+  /// null returns the session to this backend.
+  Future<void> mirrorExternalPlayback(AudioBackend? playback) async {}
   Future<void> initialize();
   Future<void> load(
     ResolvedAudio source, {
