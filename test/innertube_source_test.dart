@@ -182,6 +182,17 @@ class _FakeProxy implements AudioProxy {
     return Uri.parse('http://127.0.0.1:1/tok/a/$videoId');
   }
 
+  bool? served = true;
+  @override
+  bool? servedToEnd(String videoId) => served;
+  @override
+  int get activeConnections => 0;
+  @override
+  int get chunkBytes => 4 << 20;
+  @override
+  Duration get headerTimeout => Duration.zero;
+  @override
+  Duration get stallTimeout => Duration.zero;
   @override
   ResolvedStream? current(String videoId) => currentStream;
   @override
@@ -310,6 +321,28 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(proxy.closed, isTrue);
   });
+
+  test(
+    'a stream cut before its last byte fails completion as premature EOF',
+    () async {
+      final proxy = _FakeProxy();
+      final source = InnerTubeSource(
+        FakeSource(),
+        proxyFactory: () async => proxy,
+        orchestratorFactory: () => _FakeOrch(),
+      );
+      final audio = await source.resolve(_song);
+      await audio.validateCompletion!(); // served to the end
+      proxy.served = null;
+      await audio.validateCompletion!(); // unregistered: unknown, trusted
+      proxy.served = false;
+      await expectLater(
+        audio.validateCompletion!(),
+        throwsA(predicate((e) => '$e'.contains('Premature EOF'))),
+      );
+      source.dispose();
+    },
+  );
 
   test('blocked videos fall back to the web engine, others rethrow', () async {
     final orch = _FakeOrch();

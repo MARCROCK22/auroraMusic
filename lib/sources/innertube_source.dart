@@ -455,7 +455,25 @@ class InnerTubeSource extends SourceBackend {
       onFailure: (status, reason) =>
           orch.reportFailure(id, httpStatus: status, reason: reason),
     );
-    return ResolvedAudio(input: uri.toString(), duration: track.duration);
+    return ResolvedAudio(
+      input: uri.toString(),
+      duration: track.duration,
+      validateCompletion: () => _checkServedToEnd(proxy, id),
+    );
+  }
+
+  /// Players report a cut loopback connection as a normal end; only a stream
+  /// whose last byte was delivered counts. Unknown (unregistered) is trusted.
+  Future<void> _checkServedToEnd(AudioProxy proxy, String id) async {
+    // The flag flips just after the final flush the player already saw.
+    for (var i = 0; i < 10 && proxy.servedToEnd(id) == false; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    if (proxy.servedToEnd(id) == false) {
+      throw StateError(
+        'Premature EOF: YouTube audio ended before the file did',
+      );
+    }
   }
 
   @override

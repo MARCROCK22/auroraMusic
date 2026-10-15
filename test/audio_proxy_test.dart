@@ -481,15 +481,17 @@ void main() {
 
   test('servedToEnd only after the last byte was written', () async {
     await startProxy();
-    expect(proxy.servedToEnd('vid'), isFalse);
+    expect(proxy.servedToEnd('vid'), isNull);
     final u = register(stream());
     await fetch(u, range: 'bytes=0-2000');
     expect(proxy.servedToEnd('vid'), isFalse);
     await fetch(u, method: 'HEAD');
     expect(proxy.servedToEnd('vid'), isFalse);
     await fetch(u, range: 'bytes=4000-');
-    await eventually(() => proxy.servedToEnd('vid')); // set right after flush
-    expect(proxy.servedToEnd('nope'), isFalse);
+    await eventually(
+      () => proxy.servedToEnd('vid') == true,
+    ); // set right after flush
+    expect(proxy.servedToEnd('nope'), isNull);
     // A new registration starts clean; an aborted read never counts.
     up.hangBody.add('s2');
     final u2 = register(stream(path: 's2'));
@@ -548,7 +550,7 @@ void main() {
     expect(up.log.length, lessThan(16)); // proxy did not read ahead unbounded
     sub.resume();
     await eventually(() => received >= (16 << 20));
-    await eventually(() => proxy.servedToEnd('vid'));
+    await eventually(() => proxy.servedToEnd('vid') == true);
     expect(up.log, hasLength(16));
     socket.destroy();
   });

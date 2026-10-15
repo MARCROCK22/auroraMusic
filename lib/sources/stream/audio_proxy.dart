@@ -89,8 +89,9 @@ class AudioProxy {
 
   ResolvedStream? current(String videoId) => _entries[videoId]?.stream;
 
-  /// True once a response for this registration wrote the file's last byte.
-  bool servedToEnd(String videoId) => _entries[videoId]?.servedToEnd ?? false;
+  /// Whether some response for this registration delivered the file's last
+  /// byte (not that the whole file was played). Null when not registered.
+  bool? servedToEnd(String videoId) => _entries[videoId]?.servedToEnd;
 
   /// Open downstream connections (test hook for leak checks).
   int get activeConnections => _active.length;
