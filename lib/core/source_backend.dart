@@ -21,6 +21,10 @@ abstract class SourceBackend {
   Future<List<Track>> importPlaylist(Uri url);
   Future<ResolvedAudio> resolve(Track track);
 
+  /// Provider "radio" continuation for [seed] (YouTube Music up-next); empty
+  /// when the source has none. Used by the DJ as candidate pool.
+  Future<List<Track>> radio(Track seed, {int limit = 25}) async => const [];
+
   /// Called before a bounded retry of an expired or interrupted stream.
   void invalidateResolvedAudio(Track track) {}
   void reportPlaybackFailure(String message) {}
