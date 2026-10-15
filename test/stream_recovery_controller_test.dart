@@ -173,6 +173,28 @@ void main() {
     expect(controller.error, isNotNull);
   });
 
+  for (final message in [
+    'HTTP 410',
+    'Source error: Response code: 410',
+    'Connection closed unexpectedly',
+    'premature EOF',
+  ]) {
+    test('proxy-surfaced "$message" refreshes the stream', () async {
+      final source = FakeSource();
+      final audio = FakeAudio();
+      final controller = await createTestController(
+        source: source,
+        audio: audio,
+      );
+      addTearDown(() => closeTestController(controller));
+      await controller.playTrack(_first);
+      audio.lastError = message;
+      audio.notifyListeners();
+      await _settle(controller);
+      expect(source.resolved, ['one', 'one']);
+    });
+  }
+
   test('failed refresh is not retried; 60 s of progress re-arms it', () async {
     final source = FakeSource();
     final audio = _FailingAudio();

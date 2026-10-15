@@ -4,6 +4,10 @@ import 'dart:io';
 
 import '../core/models.dart';
 import '../core/source_backend.dart';
+import 'stream/audio_proxy.dart';
+import 'stream/resolved_stream.dart';
+import 'stream/stream_orchestrator.dart';
+import 'youtube_request_policy.dart';
 
 typedef InnerTubePost =
     Future<Map<String, dynamic>> Function(
@@ -11,14 +15,32 @@ typedef InnerTubePost =
       Map<String, Object?> body,
     );
 
-/// YouTube Music search (InnerTube). Playback resolves to the official watch
-/// page; yt-dlp stays for downloads and playlist imports.
+/// YouTube Music search (InnerTube). Playback resolves through the stream
+/// orchestrator and a loopback proxy, falling back to the official watch page
+/// (web engine) when YouTube blocks it; yt-dlp stays for downloads and imports.
 class InnerTubeSource extends SourceBackend {
-  InnerTubeSource(this.delegate, {InnerTubePost? post})
-    : _post = post ?? _httpPost;
+  InnerTubeSource(
+    this.delegate, {
+    InnerTubePost? post,
+    Future<AudioProxy> Function()? proxyFactory,
+    StreamOrchestrator Function()? orchestratorFactory,
+  }) : _post = post ?? _httpPost,
+       _proxyFactory = proxyFactory ?? AudioProxy.start,
+       _orchestratorFactory =
+           orchestratorFactory ??
+           (() => StreamOrchestrator(preferMp4a: Platform.isAndroid));
 
   final SourceBackend delegate;
   final InnerTubePost _post;
+  final Future<AudioProxy> Function() _proxyFactory;
+  final StreamOrchestrator Function() _orchestratorFactory;
+  // Created on the first YouTube resolve, never in the constructor.
+  StreamOrchestrator? _orchestrator;
+  Future<AudioProxy>? _proxyFuture;
+  AudioProxy? _proxy;
+  String? _registeredId;
+  String? _currentVideoId;
+  bool _disposed = false;
 
   static final _videoId = RegExp(r'^[A-Za-z0-9_-]{11}$');
   static final _clock = RegExp(r'^(?:(\d+):)?(\d{1,2}):(\d{2})$');
@@ -335,8 +357,47 @@ class InnerTubeSource extends SourceBackend {
     return id != null && _videoId.hasMatch(id) ? id : null;
   }
 
-  /// YouTube plays in the official music.youtube.com player (WebMusicAudio);
-  /// nothing is extracted. yt-dlp is reserved for explicit downloads.
+  StreamOrchestrator get _orch => _orchestrator ??= _orchestratorFactory();
+
+  static Duration? _knownDuration(Track track) =>
+      track.duration > Duration.zero ? track.duration : null;
+
+  ResolvedAudio _webFallback(String id, Track track) => ResolvedAudio(
+    input: Uri.https('music.youtube.com', '/watch', {'v': id}).toString(),
+    duration: track.duration,
+    engine: AudioEngine.web,
+  );
+
+  Future<AudioProxy> _startProxy() async {
+    if (_disposed) throw StateError('La fuente ya se cerró.');
+    return _proxy = await (_proxyFuture ??= _proxyFactory());
+  }
+
+  @override
+  Future<void> prefetch(Track track) async {
+    final id = _youTubeId(track);
+    if (id == null || track.isLocal) return;
+    try {
+      await _orch.resolve(id, trackDuration: _knownDuration(track));
+    } catch (_) {}
+  }
+
+  @override
+  void invalidateResolvedAudio(Track track) {
+    final id = _youTubeId(track);
+    if (id == null) return;
+    _orchestrator?.reportFailure(id);
+    _proxy?.unregister(id);
+    if (_registeredId == id) _registeredId = null;
+  }
+
+  @override
+  bool isExpiredStream(Track track) {
+    final id = _youTubeId(track);
+    return id != null &&
+        (_proxy?.current(id)?.expiredAt(DateTime.now()) ?? false);
+  }
+
   @override
   Future<ResolvedAudio> resolve(Track track) async {
     if (track.isLocal && await File(track.localPath!).exists()) {
@@ -348,10 +409,32 @@ class InnerTubeSource extends SourceBackend {
         'Solo se pueden reproducir canciones de YouTube Music o archivos locales.',
       );
     }
-    return ResolvedAudio(
-      input: Uri.https('music.youtube.com', '/watch', {'v': id}).toString(),
-      duration: track.duration,
+    _currentVideoId = id;
+    final orch = _orch;
+    if (orch.isBlacklisted(id)) return _webFallback(id, track);
+    final ResolvedStream stream;
+    try {
+      stream = await orch.resolve(id, trackDuration: _knownDuration(track));
+    } on StreamResolveException catch (error) {
+      if (error.kind == YouTubeFailure.blocked ||
+          error.kind == YouTubeFailure.accessDenied) {
+        return _webFallback(id, track);
+      }
+      rethrow;
+    }
+    final proxy = await _startProxy();
+    final previous = _registeredId;
+    if (previous != null && previous != id) proxy.unregister(previous);
+    _registeredId = id;
+    final uri = proxy.register(
+      id,
+      stream,
+      refresh: () =>
+          orch.resolve(id, forceRefresh: true, sameItag: stream.itag),
+      onFailure: (status, reason) =>
+          orch.reportFailure(id, httpStatus: status, reason: reason),
     );
+    return ResolvedAudio(input: uri.toString(), duration: track.duration);
   }
 
   @override
@@ -383,8 +466,17 @@ class InnerTubeSource extends SourceBackend {
   @override
   Future<void> cancel(String jobId) => delegate.cancel(jobId);
   @override
-  void reportPlaybackFailure(String message) =>
-      delegate.reportPlaybackFailure(message);
+  void reportPlaybackFailure(String message) {
+    final id = _currentVideoId;
+    if (id == null) return;
+    final status = RegExp(r'\b(401|403|410)\b').firstMatch(message)?[1];
+    _orchestrator?.reportFailure(
+      id,
+      httpStatus: status == null ? null : int.parse(status),
+      reason: message,
+    );
+  }
+
   @override
   String? get toolUpdateMessage => delegate.toolUpdateMessage;
   @override
@@ -415,6 +507,11 @@ class InnerTubeSource extends SourceBackend {
   String? get ffmpegExecutable => delegate.ffmpegExecutable;
   @override
   void dispose() {
+    _disposed = true;
+    final proxy = _proxyFuture;
+    if (proxy != null) {
+      unawaited(proxy.then((p) => p.close()).catchError((Object _) {}));
+    }
     delegate.dispose();
   }
 }

@@ -24,7 +24,10 @@ class _AdAudio extends FakeAudio {
 
 const _web = ResolvedAudio(
   input: 'https://music.youtube.com/watch?v=6geljA2OZSY',
+  engine: AudioEngine.web,
 );
+
+const _proxy = ResolvedAudio(input: 'http://127.0.0.1:41000/tok/a/id');
 
 void main() {
   test(
@@ -101,6 +104,37 @@ void main() {
       expect(native.mirrors.last, isNull);
       expect(audio.adPlaying, isFalse);
       expect(audio.supportsEqualizer, isTrue);
+    },
+  );
+
+  test(
+    'engine decides routing and the guard blocks raw YouTube URLs',
+    () async {
+      final native = FakeAudio();
+      final web = FakeAudio();
+      final audio = RoutedMusicAudio(native: native, web: web);
+      addTearDown(audio.dispose);
+      // A music.youtube.com URL with the native engine is never sent to web.
+      await expectLater(
+        audio.load(
+          const ResolvedAudio(input: 'https://music.youtube.com/watch?v=abc'),
+        ),
+        throwsStateError,
+      );
+      await expectLater(
+        audio.load(
+          const ResolvedAudio(
+            input: 'https://rr1.googlevideo.com/videoplayback',
+          ),
+        ),
+        throwsStateError,
+      );
+      expect(native.loadCount + web.loadCount, 0);
+      await audio.load(_proxy);
+      expect(native.loadCount, 1);
+      expect(audio.usingWeb, isFalse);
+      await audio.load(_web);
+      expect(web.loadCount, 1);
     },
   );
 
