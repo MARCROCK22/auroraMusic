@@ -102,7 +102,7 @@ class DjPanel extends StatelessWidget {
           contentPadding: const EdgeInsets.symmetric(horizontal: 8),
           title: const Text('Incluir novedades de YouTube'),
           subtitle: const Text(
-            'Hasta 2 búsquedas y 24 temas distintos por sesión.',
+            'Hasta 2 búsquedas por recarga, guiadas por tu perfil.',
           ),
           value: c.personalDjIncludeDiscovery,
           onChanged: c.setPersonalDjIncludeDiscovery,
@@ -130,9 +130,13 @@ class DjPanel extends StatelessWidget {
           ),
         ),
         if (c.personalDjActive)
-          const Padding(
-            padding: EdgeInsets.only(top: 6, left: 8),
-            child: Text('El tema actual seguirá hasta terminar.'),
+          Padding(
+            padding: const EdgeInsets.only(top: 6, left: 8),
+            child: Text(
+              c.personalDjNextReason == null
+                  ? 'El tema actual seguirá hasta terminar.'
+                  : 'A continuación: ${c.personalDjNextReason}',
+            ),
           ),
         if (c.personalDjError != null)
           Padding(

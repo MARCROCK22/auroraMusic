@@ -18,6 +18,7 @@ import 'core/models.dart';
 import 'core/source_backend.dart';
 import 'import/spotify_import.dart';
 import 'library/library_database.dart';
+import 'dj/ai_dj.dart';
 import 'dj/recommendations.dart';
 import 'sources/youtube_request_policy.dart';
 import 'sources/web_music_source.dart';
@@ -196,11 +197,19 @@ class AppController extends ChangeNotifier {
   int _searchGeneration = 0;
   int _recommendationDiscoveryGeneration = 0;
   int _personalDjGeneration = 0;
-  int _personalDjDiscoverySearches = 0;
   bool _personalDjActive = false;
   bool _personalDjIncludeDiscovery = false;
   Set<String> _personalDjSeenKeys = {};
   Future<void>? _personalDjRefillTask;
+  List<DjEvent> _djEvents = [];
+  final Set<String> _djUsedQueries = {};
+  final Set<String> _djEmbeddedIds = {};
+
+  /// Short Spanish reason for each track the DJ queued in this session.
+  final Map<String, String> personalDjReasons = {};
+
+  /// Observed skip/complete events, newest last (bounded to [djMaxEvents]).
+  List<DjEvent> get djEvents => List.unmodifiable(_djEvents);
   bool _processingDownloads = false;
   Future<void>? _downloadWorker;
   final _closed = Completer<void>();
@@ -356,6 +365,7 @@ class AppController extends ChangeNotifier {
         fresh.add(track);
       }
       discoveredRecommendations = fresh.take(6).toList();
+      unawaited(_embedDjTracks(results));
     } catch (exception) {
       if (generation == _recommendationDiscoveryGeneration &&
           !_disposed &&
@@ -413,7 +423,7 @@ class AppController extends ChangeNotifier {
     ++_personalDjGeneration;
     _personalDjActive = true;
     _personalDjIncludeDiscovery = includeDiscovery;
-    _personalDjDiscoverySearches = 0;
+    _djUsedQueries.clear();
     personalDjError = null;
     _personalDjSeenKeys = seenKeys;
     _notify();
@@ -433,7 +443,7 @@ class AppController extends ChangeNotifier {
       queue.insertAll(insertAt, seedTracks);
       await _saveQueue();
       _notify();
-      if (audio.isPlaying) unawaited(_refillPersonalDjQueue());
+      if (audio.isPlaying) unawaited(_refillPersonalDjQueue(force: true));
       return;
     }
     queue = seedTracks;
@@ -445,6 +455,9 @@ class AppController extends ChangeNotifier {
     _resumePosition = Duration.zero;
     _playIntent = true;
     await _playCurrent();
+    if (_personalDjActive && audio.isPlaying) {
+      unawaited(_refillPersonalDjQueue(force: true));
+    }
   }
 
   void stopPersonalDj() {
@@ -465,21 +478,24 @@ class AppController extends ChangeNotifier {
     _notify();
   }
 
-  Future<void> _refillPersonalDjQueue() async {
+  int get _upcomingCount => shuffle
+      ? queue.length - _shufflePlayed.length
+      : queue.length - queueIndex - 1;
+
+  /// Keeps about [djUpcomingTarget] DJ tracks ahead; refills below
+  /// [djRefillThreshold] unless [force]d. Only appends after user choices.
+  Future<void> _refillPersonalDjQueue({bool force = false}) async {
     if (!_personalDjActive || !_playIntent || _disposed) return;
     final pending = _personalDjRefillTask;
     if (pending != null) {
       await pending;
       if (_personalDjActive && _playIntent && !_disposed) {
-        await _refillPersonalDjQueue();
+        await _refillPersonalDjQueue(force: force);
       }
       return;
     }
-    if (queue.isEmpty || queueIndex < 0 || queue.length >= 24) return;
-    final upcoming = shuffle
-        ? queue.length - _shufflePlayed.length
-        : queue.length - queueIndex - 1;
-    if (upcoming > 2) return;
+    if (queue.isEmpty || queueIndex < 0) return;
+    if (djRefillCount(_upcomingCount, force: force) == 0) return;
     final generation = _personalDjGeneration;
     final task = _performPersonalDjRefill(generation);
     _personalDjRefillTask = task;
@@ -492,85 +508,187 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> _performPersonalDjRefill(int generation) async {
-    final target = (24 - queue.length).clamp(0, 3);
-    if (target == 0) return;
-    _personalDjSeenKeys.addAll(queue.expand(recommendationTrackKeys));
-    var added = 0;
-    void addTrack(Track track) {
-      if (queue.length >= 24) return;
-      queue.add(track);
-      _personalDjSeenKeys.addAll(recommendationTrackKeys(track));
-      added++;
+  /// Embeds tracks into the local vector store once per session.
+  Future<void> _embedDjTracks(Iterable<Track> items) async {
+    final fresh = [
+      for (final track in items)
+        if (_djEmbeddedIds.add(track.id))
+          (track: track, vector: embedDjTrack(track)),
+    ];
+    if (fresh.isEmpty || _disposed) return;
+    try {
+      await database.upsertTrackVectors(fresh);
+    } catch (_) {
+      // The store is an optimisation; the DJ keeps working without it.
+      for (final entry in fresh) {
+        _djEmbeddedIds.remove(entry.track.id);
+      }
     }
+  }
 
+  void _recordDjSignal(DjSignal signal) {
+    final track = currentTrack;
+    if (track == null || _loadedTrackId != track.id) return;
+    _djEvents = [..._djEvents, DjEvent(signal, track.id, DateTime.now())];
+    if (_djEvents.length > djMaxEvents) {
+      _djEvents = _djEvents.sublist(_djEvents.length - djMaxEvents);
+    }
+    unawaited(
+      preferences
+          .setStringList('djEvents', [for (final e in _djEvents) e.encode()])
+          .then((_) {}, onError: (Object _) {}),
+    );
+    unawaited(_embedDjTracks([track]));
+  }
+
+  TasteProfile _tasteProfile() {
+    final byId = {for (final track in tracks) track.id: track};
+    return buildTasteProfile(
+      favorites: [for (final id in favoriteIds) ?byId[id]],
+      playlistTracks: [
+        for (final id in playlists.expand((p) => p.trackIds).toSet()) ?byId[id],
+      ],
+      history: recentTracks,
+      events: _djEvents,
+      known: byId,
+      now: DateTime.now(),
+    );
+  }
+
+  Future<void> _performPersonalDjRefill(int generation) async {
+    bool stale() =>
+        generation != _personalDjGeneration || !_personalDjActive || _disposed;
+    final discovery = _personalDjIncludeDiscovery && !usesOfficialYouTubeMusic;
+    final current = currentTrack;
+    final profile = _tasteProfile();
+    final byId = {for (final track in _nativeLibrary) track.id: track};
+    final candidates = <DjCandidate>[];
     final local = recommendTracks(
       library: _nativeLibrary,
       favoriteIds: favoriteIds,
       playlists: playlists,
       history: recentTracks,
-      currentTrackId: currentTrack?.id,
+      currentTrackId: current?.id,
       limit: 24,
       filters: djFilters,
     );
-    for (final recommendation in local) {
-      final track = recommendation.track;
-      final keys = recommendationTrackKeys(track);
-      if (keys.any(_personalDjSeenKeys.contains)) continue;
-      addTrack(track);
-      if (added >= target) break;
+    for (var i = 0; i < local.length; i++) {
+      candidates.add(
+        DjCandidate(local[i].track, local[i].reason, prior: 0.6 / (1 + i / 5)),
+      );
     }
 
-    if (added < target &&
-        !usesOfficialYouTubeMusic &&
-        _personalDjIncludeDiscovery &&
-        _personalDjDiscoverySearches < 2 &&
-        generation == _personalDjGeneration &&
-        _personalDjActive) {
-      final artist =
-          strongestTasteArtist(
-            library: tracks,
-            favoriteIds: favoriteIds,
-            playlists: playlists,
-            history: recentTracks,
-          ) ??
-          currentTrack?.artist;
-      if (artist != null) {
-        _personalDjDiscoverySearches++;
+    // Vector store: nearest neighbours of the profile and the current track.
+    try {
+      await _embedDjTracks(tracks);
+      if (stale()) return;
+      await database.saveTasteProfile(profile.vector);
+      final neighbours = [
+        if (!profile.isEmpty)
+          for (final n in await database.nearestTracks(profile.vector, k: 40))
+            (track: n.track, continuity: false),
+        if (current != null)
+          for (final n in await database.nearestTracks(
+            embedDjTrack(current),
+            k: 20,
+            exclude: {current.id},
+          ))
+            (track: n.track, continuity: true),
+      ];
+      if (stale()) return;
+      for (var i = 0; i < neighbours.length; i++) {
+        // Without discovery the DJ only uses tracks from the library.
+        final track =
+            byId[neighbours[i].track.id] ??
+            (discovery ? neighbours[i].track : null);
+        if (track == null) continue;
+        candidates.add(
+          DjCandidate(
+            track,
+            favoriteIds.contains(track.id)
+                ? 'De tus favoritos'
+                : neighbours[i].continuity
+                ? 'Porque escuchaste ${current!.title}'
+                : 'Parecido a tus favoritos',
+            prior: 0.3 / (1 + i / 10),
+          ),
+        );
+      }
+    } catch (_) {
+      if (stale()) return;
+    }
+
+    // Discovery: queries built from the taste profile, results embedded.
+    if (discovery) {
+      final queries = djDiscoveryQueries(
+        profile,
+        used: _djUsedQueries,
+        fallback: current,
+      );
+      for (final query in queries) {
+        if (stale()) return;
+        _djUsedQueries.add(query.query);
         try {
-          final results = await source.search('$artist songs', limit: 12);
-          if (generation == _personalDjGeneration &&
-              _personalDjActive &&
-              _personalDjIncludeDiscovery &&
-              !_disposed) {
-            final libraryKeys = tracks.expand(recommendationTrackKeys).toSet();
-            for (final track in results) {
-              final keys = recommendationTrackKeys(track);
-              if (!djFilters.permits(track) ||
-                  track.isPendingSpotifyMatch ||
-                  track.pageUrl == null ||
-                  keys.any(libraryKeys.contains) ||
-                  keys.any(_personalDjSeenKeys.contains)) {
-                continue;
-              }
-              addTrack(track);
-              if (added >= target) break;
-            }
+          final results = await source.search(query.query, limit: 12);
+          if (stale() || !_personalDjIncludeDiscovery) return;
+          await _embedDjTracks(results);
+          if (stale()) return;
+          for (var i = 0; i < results.length; i++) {
+            candidates.add(
+              DjCandidate(results[i], query.reason, prior: 0.5 / (1 + i / 5)),
+            );
           }
         } catch (exception) {
-          if (generation == _personalDjGeneration &&
-              _personalDjActive &&
-              _personalDjIncludeDiscovery) {
-            personalDjError = exception.toString();
-            _notify();
-          }
+          if (stale()) return;
+          personalDjError = exception.toString();
+          _notify();
         }
       }
     }
-    if (added > 0 && generation == _personalDjGeneration && !_disposed) {
+    if (stale()) return;
+
+    // Recompute after the awaits: the user may have queued tracks meanwhile.
+    final limit = djUpcomingTarget - _upcomingCount;
+    if (limit <= 0) return;
+    _personalDjSeenKeys.addAll(queue.expand(recommendationTrackKeys));
+    final skippedArtists = {
+      for (final event in _djEvents.reversed.take(30))
+        if (event.signal == DjSignal.skip)
+          if (byId[event.trackId] case final track?) djPrimaryArtist(track),
+    };
+    final picks = rankDjCandidates(
+      candidates: [
+        for (final candidate in candidates)
+          if (isNativePlayable(candidate.track)) candidate,
+      ],
+      profile: profile.vector,
+      limit: limit,
+      current: current,
+      blockedKeys: _personalDjSeenKeys,
+      recentKeys: recentTracks.take(20).expand(recommendationTrackKeys).toSet(),
+      skippedArtists: skippedArtists,
+      queueTail: queue.skip(max(0, queueIndex)).toList(),
+      filters: djFilters,
+    );
+    for (final pick in picks) {
+      queue.add(pick.track);
+      _personalDjSeenKeys.addAll(recommendationTrackKeys(pick.track));
+      personalDjReasons[pick.track.id] = pick.reason;
+    }
+    if (picks.isNotEmpty) {
       await _saveQueue();
       _notify();
     }
+  }
+
+  /// Reason of the next DJ-picked track, for the DJ panel.
+  String? get personalDjNextReason {
+    if (!_personalDjActive || shuffle) return null;
+    for (final track in queue.skip(queueIndex + 1)) {
+      final reason = personalDjReasons[track.id];
+      if (reason != null) return '${track.title} · $reason';
+    }
+    return null;
   }
 
   Duration? get sleepRemaining {
@@ -609,6 +727,10 @@ class AppController extends ChangeNotifier {
           _djFilters = const DjFilters();
         }
       }
+      _djEvents = (preferences.getStringList('djEvents') ?? const [])
+          .map(DjEvent.decode)
+          .whereType<DjEvent>()
+          .toList();
       final savedPalette = preferences.getString('accentPalette');
       accentPalette =
           savedPalette == 'automatic' ||
@@ -935,6 +1057,7 @@ class AppController extends ChangeNotifier {
         result.addAll(linked.where((track) => seen.add(track.id)));
       }
       if (generation == _searchGeneration) searchResults = result;
+      unawaited(_embedDjTracks(result));
     } catch (exception) {
       if (generation == _searchGeneration) _report(exception);
     } finally {
@@ -1360,6 +1483,7 @@ class AppController extends ChangeNotifier {
         audio.position + const Duration(milliseconds: 750) < duration) {
       return;
     }
+    _recordDjSignal(DjSignal.complete);
     if (repeat == RepeatMode.one) {
       _resumePosition = Duration.zero;
       await _playCurrent();
@@ -1379,16 +1503,21 @@ class AppController extends ChangeNotifier {
         return;
       }
     }
-    await next();
+    await next(fromCompletion: true);
   }
 
-  Future<void> next() async {
+  Future<void> next({bool fromCompletion = false}) async {
     if (_jamPlaybackActive) return;
     if (_youtubeMusicActive) return;
     if (queue.isEmpty) return;
+    if (!fromCompletion &&
+        _loadedTrackId == currentTrack?.id &&
+        djIsSkip(audio.position, audio.duration)) {
+      _recordDjSignal(DjSignal.skip);
+    }
     _playIntent = true;
     if (shuffle && queue.length > 1) {
-      var candidates = List.generate(queue.length, (i) => i)
+      List<int> unplayed() => List.generate(queue.length, (i) => i)
           .where(
             (i) =>
                 !_shufflePlayed.contains(i) &&
@@ -1396,6 +1525,14 @@ class AppController extends ChangeNotifier {
                     isNativePlayable(queue[i])),
           )
           .toList();
+      var candidates = unplayed();
+      if (candidates.isEmpty && repeat != RepeatMode.all && _personalDjActive) {
+        // Autoplay: the DJ continues when the queue runs out.
+        final generation = _playGeneration;
+        await _refillPersonalDjQueue(force: true);
+        if (generation != _playGeneration || _disposed || !_playIntent) return;
+        candidates = unplayed();
+      }
       if (candidates.isEmpty) {
         if (repeat != RepeatMode.all) {
           await stopPlayback();
@@ -1421,22 +1558,31 @@ class AppController extends ChangeNotifier {
       queueIndex = candidates[_random.nextInt(candidates.length)];
       _shufflePlayed.add(queueIndex);
     } else {
-      final upcoming =
+      int? nextIndex() =>
           [
-            for (var i = queueIndex + 1; i < queue.length; i++) i,
-            if (repeat == RepeatMode.all)
-              for (var i = 0; i <= queueIndex && i < queue.length; i++) i,
-          ].where(
-            (i) =>
-                !(usesOfficialYouTubeMusic || usesYouTubeWebAudio) ||
-                isNativePlayable(queue[i]),
-          );
-      final nextIndex = upcoming.firstOrNull;
-      if (nextIndex == null) {
+                for (var i = queueIndex + 1; i < queue.length; i++) i,
+                if (repeat == RepeatMode.all)
+                  for (var i = 0; i <= queueIndex && i < queue.length; i++) i,
+              ]
+              .where(
+                (i) =>
+                    !(usesOfficialYouTubeMusic || usesYouTubeWebAudio) ||
+                    isNativePlayable(queue[i]),
+              )
+              .firstOrNull;
+      var target = nextIndex();
+      if (target == null && _personalDjActive) {
+        // Autoplay: the DJ continues when the queue runs out.
+        final generation = _playGeneration;
+        await _refillPersonalDjQueue(force: true);
+        if (generation != _playGeneration || _disposed || !_playIntent) return;
+        target = nextIndex();
+      }
+      if (target == null) {
         await stopPlayback();
         return;
       }
-      queueIndex = nextIndex;
+      queueIndex = target;
     }
     _resumePosition = Duration.zero;
     await _playCurrent();

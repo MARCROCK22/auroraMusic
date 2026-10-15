@@ -403,7 +403,9 @@ void main() {
       }
       await _waitFor(() => controller.queue.length > initialQueue.length);
 
-      expect(controller.queue.length, 7);
+      // The whole eight-track library becomes reachable, without duplicates.
+      expect(controller.queue.length, 8);
+      expect(controller.queue.map((t) => t.id).toSet(), hasLength(8));
       expect(controller.repeat, RepeatMode.all);
       expect(controller.shuffle, isTrue);
       expect(controller.audio.isPlaying, isTrue);
@@ -606,40 +608,47 @@ void main() {
     expect(controller.error, isNull);
   });
 
-  test('DJ caps discovery at two searches per session', () async {
-    final source = FakeSource()
-      ..searchMatches = [
-        for (var i = 0; i < 6; i++)
-          Track(
-            id: 'remote-$i',
-            title: 'Remote $i',
-            artist: 'Remote artist $i',
-            pageUrl: 'https://youtu.be/remote-$i',
-          ),
-      ];
-    final tracks = _djLibrary();
-    final controller = await createTestController(
-      tracks: tracks,
-      source: source,
-    );
-    addTearDown(() => closeTestController(controller));
-    await controller.toggleFavorite(tracks.first);
-    await controller.startPersonalDj(includeDiscovery: true);
-    final audio = controller.audio as FakeAudio;
-
-    for (var completion = 0; completion < 12; completion++) {
-      if (!controller.audio.isPlaying) break;
-      final loadCount = audio.loadCount;
-      audio.position = audio.duration;
-      audio.completions.add(null);
-      await _waitFor(
-        () => audio.loadCount > loadCount || !controller.audio.isPlaying,
+  test(
+    'DJ discovery never repeats a query and uses bounded searches',
+    () async {
+      final source = FakeSource()
+        ..searchMatches = [
+          for (var i = 0; i < 6; i++)
+            Track(
+              id: 'remote-$i',
+              title: 'Remote $i',
+              artist: 'Remote artist $i',
+              pageUrl: 'https://youtu.be/remote-$i',
+            ),
+        ];
+      final tracks = _djLibrary();
+      final controller = await createTestController(
+        tracks: tracks,
+        source: source,
       );
-    }
+      addTearDown(() => closeTestController(controller));
+      await controller.toggleFavorite(tracks.first);
+      await controller.startPersonalDj(includeDiscovery: true);
+      final audio = controller.audio as FakeAudio;
 
-    expect(source.searchQueries, hasLength(2));
-    expect(source.searchLimits, everyElement(12));
-  });
+      for (var completion = 0; completion < 12; completion++) {
+        if (!controller.audio.isPlaying) break;
+        final loadCount = audio.loadCount;
+        audio.position = audio.duration;
+        audio.completions.add(null);
+        await _waitFor(
+          () => audio.loadCount > loadCount || !controller.audio.isPlaying,
+        );
+      }
+
+      expect(source.searchQueries.first, 'artist 0 songs');
+      expect(
+        source.searchQueries.toSet(),
+        hasLength(source.searchQueries.length),
+      );
+      expect(source.searchLimits, everyElement(12));
+    },
+  );
 
   test('empty library has no DJ or discovery action', () async {
     final empty = await createTestController();

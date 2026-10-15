@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
@@ -22,7 +24,7 @@ class LibraryDatabase extends GeneratedDatabase {
   }
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
   @override
   Iterable<TableInfo<Table, Object?>> get allTables => const [];
   @override
@@ -45,7 +47,117 @@ class LibraryDatabase extends GeneratedDatabase {
       await customStatement(
         'CREATE TABLE downloads (id TEXT PRIMARY KEY, data TEXT NOT NULL)',
       );
+      await _createVectorTables();
     },
+    onUpgrade: (_, from, _) async {
+      if (from < 2) await _createVectorTables();
+    },
+  );
+
+  Future<void> _createVectorTables() async {
+    await customStatement(
+      'CREATE TABLE IF NOT EXISTS track_vectors (track_key TEXT PRIMARY KEY, '
+      'track TEXT NOT NULL, dims INTEGER NOT NULL, vector BLOB NOT NULL, '
+      'updated_at INTEGER NOT NULL)',
+    );
+    await customStatement(
+      'CREATE TABLE IF NOT EXISTS taste_profile (id INTEGER PRIMARY KEY '
+      'CHECK (id = 1), dims INTEGER NOT NULL, vector BLOB NOT NULL, '
+      'updated_at INTEGER NOT NULL)',
+    );
+  }
+
+  static const maxTrackVectors = 5000;
+  static Uint8List _bytes(Float32List vector) => Uint8List.fromList(
+    vector.buffer.asUint8List(vector.offsetInBytes, vector.lengthInBytes),
+  );
+  // Copy first: SQLite blobs are not guaranteed to be 4-byte aligned.
+  static Float32List _floats(Uint8List bytes) =>
+      Float32List.view(Uint8List.fromList(bytes).buffer, 0, bytes.length ~/ 4);
+
+  /// Stores track embeddings keyed by track ID, keeping the newest
+  /// [maxTrackVectors] rows.
+  Future<void> upsertTrackVectors(
+    Iterable<({Track track, Float32List vector})> entries,
+  ) async {
+    final items = entries.toList();
+    if (items.isEmpty) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await transaction(() async {
+      for (final item in items) {
+        await customStatement(
+          'INSERT INTO track_vectors VALUES (?,?,?,?,?) ON CONFLICT(track_key) '
+          'DO UPDATE SET track=excluded.track, dims=excluded.dims, '
+          'vector=excluded.vector, updated_at=excluded.updated_at',
+          [
+            item.track.id,
+            jsonEncode(item.track.toJson()),
+            item.vector.length,
+            _bytes(item.vector),
+            now,
+          ],
+        );
+      }
+      await customStatement(
+        'DELETE FROM track_vectors WHERE track_key NOT IN (SELECT track_key '
+        'FROM track_vectors ORDER BY updated_at DESC LIMIT $maxTrackVectors)',
+      );
+    });
+  }
+
+  Future<int> countTrackVectors() async => (await customSelect(
+    'SELECT COUNT(*) AS c FROM track_vectors',
+  ).getSingle()).read<int>('c');
+
+  /// Cosine nearest neighbours of [query], best first.
+  // shortcut: brute-force scan of every row; fine for a few thousand tracks,
+  // move to an ANN index (or sqlite-vec) if the store grows far beyond that.
+  Future<List<({Track track, double score})>> nearestTracks(
+    List<double> query, {
+    int k = 20,
+    Set<String> exclude = const {},
+  }) async {
+    final rows = await customSelect(
+      'SELECT track_key, track, vector FROM track_vectors WHERE dims=?',
+      variables: [Variable<int>(query.length)],
+    ).get();
+    var queryNorm = 0.0;
+    for (final value in query) {
+      queryNorm += value * value;
+    }
+    if (queryNorm == 0) return const [];
+    final scored = <({Track track, double score})>[];
+    for (final row in rows) {
+      if (exclude.contains(row.read<String>('track_key'))) continue;
+      final vector = _floats(row.read<Uint8List>('vector'));
+      var dot = 0.0, norm = 0.0;
+      for (var i = 0; i < vector.length; i++) {
+        dot += query[i] * vector[i];
+        norm += vector[i] * vector[i];
+      }
+      if (norm == 0) continue;
+      scored.add((
+        track: Track.fromJson(
+          jsonDecode(row.read<String>('track')) as Map<String, dynamic>,
+        ),
+        score: dot / math.sqrt(queryNorm * norm),
+      ));
+    }
+    scored.sort((a, b) => b.score.compareTo(a.score));
+    return scored.take(k).toList();
+  }
+
+  Future<Float32List?> readTasteProfile() async {
+    final row = await customSelect(
+      'SELECT vector FROM taste_profile WHERE id=1',
+    ).getSingleOrNull();
+    return row == null ? null : _floats(row.read<Uint8List>('vector'));
+  }
+
+  Future<void> saveTasteProfile(Float32List vector) => customStatement(
+    'INSERT INTO taste_profile VALUES (1,?,?,?) ON CONFLICT(id) DO UPDATE SET '
+    'dims=excluded.dims, vector=excluded.vector, updated_at=excluded.updated_at',
+    [vector.length, _bytes(vector), DateTime.now().millisecondsSinceEpoch],
   );
 
   Future<List<Track>> readTracks() async =>
