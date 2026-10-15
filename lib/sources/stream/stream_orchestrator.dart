@@ -148,12 +148,14 @@ class StreamOrchestrator {
     Duration? trackDuration,
     int? sameItag,
   }) {
-    final hit = _cache.remove(videoId);
-    final horizon = _now().add(
-      const Duration(seconds: 60) + (trackDuration ?? Duration.zero),
-    );
-    if (!forceRefresh && hit != null && hit.expiresAt.isAfter(horizon)) {
-      return Future.value(_cache[videoId] = hit); // re-insert: LRU touch
+    if (!forceRefresh) {
+      final hit = _cache.remove(videoId);
+      final horizon = _now().add(
+        const Duration(seconds: 60) + (trackDuration ?? Duration.zero),
+      );
+      if (hit != null && hit.expiresAt.isAfter(horizon)) {
+        return Future.value(_cache[videoId] = hit); // re-insert: LRU touch
+      }
     }
     final key = '$videoId|$forceRefresh';
     late final Future<ResolvedStream> future;
@@ -299,7 +301,7 @@ class StreamOrchestrator {
       );
     }
 
-    final url = Uri.parse(format['url'] as String);
+    final url = Uri.parse(format['url'] as String); // checked in _isUsable
     final length = _int(format['contentLength'])!;
     final headers = {'User-Agent': client.userAgent};
     try {
@@ -307,7 +309,7 @@ class StreamOrchestrator {
         ...headers,
         'Range': 'bytes=${length > 256 ? length - 256 : 0}-${length - 1}',
         'Accept-Encoding': 'identity',
-      });
+      }, timeout: _requestTimeout);
       if (probe.statusCode < 200 || probe.statusCode >= 300) {
         throw HttpStatusException(probe.statusCode);
       }
@@ -399,10 +401,21 @@ class StreamOrchestrator {
   }
 
   Map<String, dynamic>? _pickFormat(Object? raw, int? sameItag) {
-    final candidates = [
+    final formats = [
       for (final f in raw is List ? raw : const [])
-        if (f is Map<String, dynamic> && _isUsable(f)) f,
+        if (f is Map<String, dynamic>) f,
     ];
+    var candidates = [
+      for (final f in formats)
+        if (_isUsable(f, strictDub: true)) f,
+    ];
+    // Some tracks lack audioIsDefault: then accept anything not auto-dubbed.
+    if (candidates.isEmpty) {
+      candidates = [
+        for (final f in formats)
+          if (_isUsable(f, strictDub: false)) f,
+      ];
+    }
     if (candidates.isEmpty) return null;
     candidates.sort((a, b) {
       final ra = _rank(a), rb = _rank(b);
@@ -418,16 +431,18 @@ class StreamOrchestrator {
   }
 
   /// Plain-url audio with a known length, in the original language.
-  bool _isUsable(Map<String, dynamic> f) {
+  bool _isUsable(Map<String, dynamic> f, {required bool strictDub}) {
     final track = f['audioTrack'];
     return '${f['mimeType']}'.startsWith('audio/') &&
         f['url'] is String &&
+        Uri.tryParse(f['url'] as String) != null &&
         f['signatureCipher'] == null &&
         f['cipher'] == null &&
         (_int(f['contentLength']) ?? 0) > 0 &&
         _int(f['itag']) != null &&
         (track is! Map ||
-            (track['isAutoDubbed'] != true && track['audioIsDefault'] == true));
+            (track['isAutoDubbed'] != true &&
+                (!strictDub || track['audioIsDefault'] == true)));
   }
 
   /// Quality, channels, codec, bitrate: larger is better.

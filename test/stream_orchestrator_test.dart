@@ -64,10 +64,12 @@ class _Harness {
         gets.add((url: url, headers: headers));
         if (url.path == '/sw.js_data') {
           return HttpGetResult(
-            200,
+            swStatus,
             body: utf8.encode(')]}\'\n[[["x"],["en","Cgtvisitor%3D","Cgs2"]]]'),
           );
         }
+        final error = probeError;
+        if (error != null) throw error;
         return HttpGetResult(probe(headers['User-Agent']!));
       },
     );
@@ -89,6 +91,8 @@ class _Harness {
   Map<String, dynamic> Function(String client, String video) respond = (_, _) =>
       _ok([_fmt(251)]);
   int Function(String userAgent) probe = (_) => 206;
+  Object? probeError;
+  int swStatus = 200;
 
   /// Client of the first post made by a fresh resolve.
   Future<String> firstClient(String video) async {
@@ -165,6 +169,72 @@ void main() {
       expect(probe.headers['User-Agent'], 'UA-A');
     },
   );
+
+  test('probe network error costs the client 2 min', () async {
+    final h = _Harness()..probeError = const SocketException('down');
+    final e = await _failure(h.orch.resolve('v1'));
+    expect(e.kind, YouTubeFailure.transient);
+    h.probeError = null;
+    expect(await h.firstClient('v2'), 'A'); // both bad: original order
+    h.probeError = const SocketException('down');
+    await _failure(h.orch.resolve('v3')); // both bad again
+    h.probeError = null;
+    h.now = h.now.add(const Duration(minutes: 3));
+    expect(await h.firstClient('v4'), 'A');
+  });
+
+  test('length <= 256 probes from byte 0', () async {
+    final h = _Harness()..respond = (_, _) => _ok([_fmt(1, clen: '100')]);
+    await h.orch.resolve('v');
+    expect(h.gets.last.headers['Range'], 'bytes=0-99');
+  });
+
+  test('visitorData failure is not cached and retried', () async {
+    final h = _Harness()..swStatus = 500;
+    await h.orch.resolve('v');
+    expect(h.posts.last.headers.containsKey('x-goog-visitor-id'), isFalse);
+    h.swStatus = 200;
+    await h.orch.resolve('v', forceRefresh: true);
+    expect(h.posts.last.headers['x-goog-visitor-id'], 'Cgtvisitor%3D');
+    expect(h.gets.where((g) => g.url.path == '/sw.js_data'), hasLength(2));
+  });
+
+  test('forceRefresh with sameItag returns that itag', () async {
+    final h = _Harness()
+      ..respond = (_, _) =>
+          _ok([_fmt(251), _fmt(140, mime: 'audio/mp4; codecs="mp4a.40.2"')]);
+    expect((await h.orch.resolve('v')).itag, 251);
+    expect(
+      (await h.orch.resolve('v', forceRefresh: true, sameItag: 140)).itag,
+      140,
+    );
+  });
+
+  test('failed forceRefresh keeps the cached stream', () async {
+    final h = _Harness();
+    final first = await h.orch.resolve('v');
+    h.respond = (_, _) => throw const SocketException('down');
+    await _failure(h.orch.resolve('v', forceRefresh: true));
+    expect(await h.orch.resolve('v'), same(first));
+  });
+
+  test('malformed url is skipped without aborting clients', () async {
+    final h = _Harness()
+      ..respond = (_, _) => _ok([
+        {..._fmt(1, quality: 'AUDIO_QUALITY_HIGH'), 'url': 'http://[bad'},
+        _fmt(2),
+      ]);
+    expect((await h.orch.resolve('v')).itag, 2);
+  });
+
+  test('tracks without audioIsDefault still resolve', () async {
+    final h = _Harness()
+      ..respond = (_, _) => _ok([
+        _fmt(1, track: {'id': 'en'}),
+        _fmt(2, track: {'isAutoDubbed': true}),
+      ]);
+    expect((await h.orch.resolve('v')).itag, 1);
+  });
 
   group('format selection', () {
     Future<int> pick(
@@ -361,6 +431,18 @@ void main() {
       h.gate!.complete();
       await Future.wait([normal, forced1, forced2]);
       expect(h.posts, hasLength(2));
+    });
+
+    test('resolve after reportFailure does not join the stale one', () async {
+      final h = _Harness()..gate = Completer<void>();
+      final stale = h.orch.resolve('v');
+      await pumpEventQueue();
+      h.orch.reportFailure('v', httpStatus: 403);
+      final fresh = h.orch.resolve('v');
+      await pumpEventQueue();
+      expect(h.posts, hasLength(2));
+      h.gate!.complete();
+      await Future.wait([stale, fresh]);
     });
 
     test('reportFailure during a resolve is not undone by it', () async {
