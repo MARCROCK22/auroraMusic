@@ -8,10 +8,11 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// Upstream stand-in with Range support, request log and failure toggles.
 class FakeUpstream {
-  FakeUpstream(int length)
-    : data = Uint8List.fromList(
-        List.generate(length, (i) => (i * 7 + 3) % 251),
-      );
+  FakeUpstream(int length) : data = Uint8List(length) {
+    for (var i = 0; i < length; i++) {
+      data[i] = (i * 7 + 3) % 251;
+    }
+  }
 
   final Uint8List data;
   late final HttpServer server;
@@ -101,12 +102,13 @@ void main() {
   late HttpClient http;
 
   Future<void> startProxy({
+    int chunkBytes = chunk,
     int maxUpstream = 6,
     Duration header = const Duration(seconds: 5),
     Duration stall = const Duration(seconds: 5),
   }) async {
     proxy = await AudioProxy.start(
-      chunkBytes: chunk,
+      chunkBytes: chunkBytes,
       maxUpstream: maxUpstream,
       headerTimeout: header,
       stallTimeout: stall,
@@ -171,6 +173,7 @@ void main() {
 
   tearDown(() async {
     http.close(force: true);
+    await eventually(() => proxy.activeConnections == 0);
     await proxy.close();
     await eventually(() => up.openSockets == 0); // no leaked sockets
     await up.server.close(force: true);
@@ -475,6 +478,114 @@ void main() {
     expect(() => register(stream()), throwsStateError);
     await proxy.close();
   });
+
+  test('servedToEnd only after the last byte was written', () async {
+    await startProxy();
+    expect(proxy.servedToEnd('vid'), isFalse);
+    final u = register(stream());
+    await fetch(u, range: 'bytes=0-2000');
+    expect(proxy.servedToEnd('vid'), isFalse);
+    await fetch(u, method: 'HEAD');
+    expect(proxy.servedToEnd('vid'), isFalse);
+    await fetch(u, range: 'bytes=4000-');
+    await eventually(() => proxy.servedToEnd('vid')); // set right after flush
+    expect(proxy.servedToEnd('nope'), isFalse);
+    // A new registration starts clean; an aborted read never counts.
+    up.hangBody.add('s2');
+    final u2 = register(stream(path: 's2'));
+    final res = await (await http.getUrl(u2)).close();
+    await res.first;
+    http.close(force: true);
+    http = HttpClient();
+    await eventually(() => proxy.activeConnections == 0);
+    expect(proxy.servedToEnd('vid'), isFalse);
+  });
+
+  test('upstream 206 that does not match the request is refused', () async {
+    await startProxy();
+    final bad = up.data;
+    final rogue = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => rogue.close(force: true));
+    rogue.listen((r) async {
+      r.response
+        ..statusCode = 206
+        ..headers.set('content-range', 'bytes 5-1028/5000')
+        ..headers.contentLength = 1024
+        ..add(bad.sublist(5, 1029));
+      await r.response.close();
+    });
+    final s = stream();
+    final u = register(
+      ResolvedStream(
+        videoId: 'vid',
+        url: Uri.parse('http://127.0.0.1:${rogue.port}/x'),
+        expiresAt: s.expiresAt,
+        client: 'test',
+        itag: 251,
+        contentLength: 5000,
+      ),
+    );
+    expect((await fetch(u)).status, 410);
+  });
+
+  test('slow reader gets backpressure, no stall while paused', () async {
+    await up.server.close(force: true);
+    up = FakeUpstream(16 << 20);
+    await up.start();
+    await startProxy(
+      chunkBytes: 1 << 20,
+      stall: const Duration(milliseconds: 200),
+    );
+    final u = register(stream());
+    final socket = await Socket.connect('127.0.0.1', u.port);
+    var received = 0;
+    final sub = socket.listen((d) => received += d.length);
+    socket.write('GET ${u.path} HTTP/1.1\r\nHost: 127.0.0.1:${u.port}\r\n\r\n');
+    await eventually(() => received > 0);
+    sub.pause();
+    await Future<void>.delayed(const Duration(milliseconds: 700)); // > 3 stalls
+    expect(proxy.activeConnections, 1);
+    expect(up.log.length, lessThan(16)); // proxy did not read ahead unbounded
+    sub.resume();
+    await eventually(() => received >= (16 << 20));
+    await eventually(() => proxy.servedToEnd('vid'));
+    expect(up.log, hasLength(16));
+    socket.destroy();
+  });
+
+  test(
+    'client leaving during a pending flush raises no uncaught error',
+    () async {
+      final errors = <Object>[];
+      final done = Completer<void>();
+      runZonedGuarded(() async {
+        try {
+          await up.server.close(force: true);
+          up = FakeUpstream(16 << 20);
+          await up.start();
+          await startProxy(chunkBytes: 1 << 20);
+          final u = register(stream());
+          final socket = await Socket.connect('127.0.0.1', u.port);
+          final sub = socket.listen((_) {});
+          socket.write(
+            'GET ${u.path} HTTP/1.1\r\nHost: 127.0.0.1:${u.port}\r\n\r\n',
+          );
+          await eventually(() => up.log.isNotEmpty);
+          sub.pause();
+          await Future<void>.delayed(const Duration(milliseconds: 300));
+          socket.destroy();
+          await eventually(() => proxy.activeConnections == 0);
+          await eventually(() => up.openSockets == 0);
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          done.complete();
+        } catch (e, s) {
+          done.completeError(e, s);
+        }
+      }, (e, s) => errors.add(e));
+      await done.future;
+      expect(errors, isEmpty);
+    },
+  );
 
   test('upstream slot is released after errors', () async {
     await startProxy(maxUpstream: 1);

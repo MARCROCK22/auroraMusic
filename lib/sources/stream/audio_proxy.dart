@@ -42,7 +42,11 @@ class AudioProxy {
   }) async {
     if (chunkBytes <= 0 || maxUpstream <= 0) throw ArgumentError('limits');
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final http = client ?? (HttpClient()..userAgent = null);
+    final http =
+        client ??
+        (HttpClient()
+          ..userAgent = null
+          ..connectionTimeout = headerTimeout);
     final proxy = AudioProxy._(
       server,
       http,
@@ -84,6 +88,12 @@ class AudioProxy {
   }
 
   ResolvedStream? current(String videoId) => _entries[videoId]?.stream;
+
+  /// True once a response for this registration wrote the file's last byte.
+  bool servedToEnd(String videoId) => _entries[videoId]?.servedToEnd ?? false;
+
+  /// Open downstream connections (test hook for leak checks).
+  int get activeConnections => _active.length;
 
   /// In-flight requests keep their entry and finish; new ones get 404.
   void unregister(String videoId) => _entries.remove(videoId);
@@ -135,11 +145,13 @@ class AudioProxy {
     var headersSent = false;
     try {
       if (request.headers.value('host') != '127.0.0.1:${_server.port}') {
-        return _reply(response, HttpStatus.forbidden);
+        await _reply(response, HttpStatus.forbidden);
+        return;
       }
       final isHead = request.method == 'HEAD';
       if (!isHead && request.method != 'GET') {
-        return _reply(response, HttpStatus.methodNotAllowed);
+        await _reply(response, HttpStatus.methodNotAllowed);
+        return;
       }
       final parts = request.uri.pathSegments;
       _Entry? entry;
@@ -148,7 +160,10 @@ class AudioProxy {
           if (e.token == parts[0] && e.id == parts[2]) entry = e;
         }
       }
-      if (entry == null) return _reply(response, HttpStatus.notFound);
+      if (entry == null) {
+        await _reply(response, HttpStatus.notFound);
+        return;
+      }
       final rangeHeader = request.headers.value('range');
       // HttpServer cannot see a client leaving while we wait on upstream, so
       // the raw socket is owned from here on (one response per connection).
@@ -173,7 +188,10 @@ class AudioProxy {
       final start = range[0], end = range[1];
       final partial = range[2] == 1;
       final headers = <String, Object>{
-        'Content-Type': entry.stream.mimeType ?? 'audio/webm',
+        'Content-Type': (entry.stream.mimeType ?? 'audio/webm').replaceAll(
+          RegExp(r'[\r\n]'),
+          '',
+        ),
         'Accept-Ranges': 'bytes',
         'Content-Length': end - start + 1,
         if (partial) 'Content-Range': 'bytes $start-$end/$total',
@@ -199,6 +217,10 @@ class AudioProxy {
             // Manual listen: abort() must cancel the body, because
             // HttpClientRequest.abort() is a no-op once headers arrived.
             final done = Completer<void>();
+            void fail(Object error, [StackTrace? stack]) {
+              if (!done.isCompleted) done.completeError(error, stack);
+            }
+
             final sub = upstream
                 .timeout(stallTimeout)
                 .listen(null, cancelOnError: true);
@@ -206,16 +228,15 @@ class AudioProxy {
               got += data.length;
               sub.pause();
               socket!.add(data);
-              socket.flush().then(
-                (_) => sub.resume(),
-                onError: done.completeError,
-              );
+              socket.flush().then((_) => sub.resume(), onError: fail);
             });
-            sub.onError(done.completeError);
-            sub.onDone(done.complete);
+            sub.onError(fail);
+            sub.onDone(() {
+              if (!done.isCompleted) done.complete();
+            });
             ctx.cancelBody = () {
               sub.cancel();
-              if (!done.isCompleted) done.completeError(_Fail(null, 'aborted'));
+              fail(_Fail(null, 'aborted'));
             };
             await done.future;
             ctx.cancelBody = null;
@@ -230,6 +251,7 @@ class AudioProxy {
         }
       }
       if (isHead) sendHead();
+      if (!isHead && end == total - 1) entry.servedToEnd = true;
       ctx.finished = true;
       await socket.close();
     } catch (_) {
@@ -304,7 +326,9 @@ class AudioProxy {
       if (ctx.aborted || _closed) throw _Fail(null, 'aborted');
       HttpClientRequest? request;
       try {
-        request = await _client.getUrl(stream.url).timeout(headerTimeout);
+        request = await _client.getUrl(
+          stream.url,
+        ); // connectionTimeout bounds it
         ctx.upstream = request;
         if (ctx.aborted) request.abort();
         request.followRedirects = false;
@@ -318,8 +342,21 @@ class AudioProxy {
         }
         final response = await request.close().timeout(headerTimeout);
         final status = response.statusCode;
-        if (status == HttpStatus.partialContent) return response;
+        if (status == HttpStatus.partialContent) {
+          final m = RegExp(
+            r'^bytes (\d+)-(\d+)/',
+          ).firstMatch(response.headers.value('content-range') ?? '');
+          if (m == null ||
+              int.parse(m[1]!) != a ||
+              int.parse(m[2]!) != b ||
+              (response.contentLength != -1 &&
+                  response.contentLength != b - a + 1)) {
+            throw _Fail(null, 'upstream range mismatch');
+          }
+          return response;
+        }
         request.abort();
+        // Other statuses (3xx, 5xx, 416, ...) end as our 410 downstream.
         if (attempt == 0 && const {401, 403, 410}.contains(status)) {
           stream = await _renew(
             entry,
@@ -389,6 +426,7 @@ class _Entry {
   final void Function(int? status, String reason)? onFailure;
   ResolvedStream stream;
   int? total;
+  bool servedToEnd = false;
   Future<ResolvedStream>? refreshing;
 }
 
