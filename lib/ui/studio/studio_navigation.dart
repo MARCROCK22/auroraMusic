@@ -43,7 +43,7 @@ class StudioTitleBar extends StatelessWidget {
                     excludeFromSemantics: true,
                   ),
                   const SizedBox(width: 8),
-                  if (constraints.maxWidth > 400)
+                  if (constraints.maxWidth > (largeText ? 450 : 400))
                     Text(
                       'Aurora',
                       style: TextStyle(
