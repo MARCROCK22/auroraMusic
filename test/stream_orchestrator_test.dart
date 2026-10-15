@@ -69,7 +69,10 @@ class _Harness {
           );
         }
         final error = probeError;
-        if (error != null) throw error;
+        if (error != null &&
+            (probeErrorUa == null || probeErrorUa == headers['User-Agent'])) {
+          throw error;
+        }
         return HttpGetResult(probe(headers['User-Agent']!));
       },
     );
@@ -92,6 +95,7 @@ class _Harness {
       _ok([_fmt(251)]);
   int Function(String userAgent) probe = (_) => 206;
   Object? probeError;
+  String? probeErrorUa; // null: every client
   int swStatus = 200;
 
   /// Client of the first post made by a fresh resolve.
@@ -171,16 +175,14 @@ void main() {
   );
 
   test('probe network error costs the client 2 min', () async {
-    final h = _Harness()..probeError = const SocketException('down');
-    final e = await _failure(h.orch.resolve('v1'));
-    expect(e.kind, YouTubeFailure.transient);
+    final h = _Harness()
+      ..probeError = const SocketException('down')
+      ..probeErrorUa = 'UA-A';
+    expect((await h.orch.resolve('v1')).client, 'B');
     h.probeError = null;
-    expect(await h.firstClient('v2'), 'A'); // both bad: original order
-    h.probeError = const SocketException('down');
-    await _failure(h.orch.resolve('v3')); // both bad again
-    h.probeError = null;
+    expect(await h.firstClient('v2'), 'B');
     h.now = h.now.add(const Duration(minutes: 3));
-    expect(await h.firstClient('v4'), 'A');
+    expect(await h.firstClient('v3'), 'A');
   });
 
   test('length <= 256 probes from byte 0', () async {
