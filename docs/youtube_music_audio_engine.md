@@ -1,27 +1,79 @@
-# Motor de audio de YouTube: reproductor oficial en WebView oculto
+# Motor de audio de YouTube: InnerTube + proxy local, con respaldo web
 
-Decisión del usuario (15/10/2026, definitiva): todo el audio de YouTube suena en el
-reproductor **oficial** de `music.youtube.com`, dentro de un WebView completamente
-invisible, con la interfaz nativa de Aurora encima. Motivo: la extracción nativa
-(`youtube_explode_dart`) quedaba cortada por YouTube tras ~1 MiB (exigencia de
-tokens PO) y yt-dlp recibía HTTP 429. Aurora **no** genera tokens PO, **no** imita
-clientes ni cambia el user agent y **no** extrae URLs de audio de YouTube.
+Decisión del usuario (15/10/2026, revisada): la reproducción de YouTube usa el
+endpoint `player` de InnerTube con el cliente **VISIONOS** (como LIMusic); los motores
+nativos reproducen a través de un proxy de bucle local, y el reproductor oficial de
+`music.youtube.com` en un WebView invisible queda como **respaldo automático**.
+Antes (decisión del mismo día) todo iba por el WebView; se revisó porque el motor
+nativo da ecualizador, espectro y segundo plano estable.
+
+Sigue sin existir: tokens PO / BotGuard, descifrado de firma o `n`, saltarse
+restricciones Premium, ni pasar una URL cruda de YouTube a FFmpeg/Media3.
 
 ## Piezas
 
 | Pieza | Papel |
 | --- | --- |
-| [`InnerTubeSource`](../lib/sources/innertube_source.dart) | Búsqueda (canciones, álbumes, artistas, vídeos, continuación). `resolve()` devuelve `https://music.youtube.com/watch?v=<id>`; local → archivo; otras URLs → error explícito. Sin precarga. |
-| [`RoutedMusicAudio`](../lib/audio/routed_music_audio.dart) | Un único motor activo: páginas `music.youtube.com` → web; todo lo demás → nativo. Solo la finalización del motor activo avanza la cola. |
-| [`WebMusicAudio`](../lib/audio_web/web_music_audio.dart) | `AudioBackend` sobre la página oficial. Órdenes serializadas con generación por pista; estado observado cada 500 ms. |
-| [`NativeWebMusicBridge`](../lib/audio_web/web_music_bridge.dart) | `flutter_inappwebview` 6.1.5, política de navegación, filtros de anuncios y el script de página (`webMusicMediaScript`). |
-| [`aurora_shell.dart`](../lib/ui/aurora_shell.dart) | Monta el WebView una sola vez, en la misma posición del árbol. |
+| [`InnerTubeSource`](../lib/sources/innertube_source.dart) | Búsqueda (canciones, álbumes, artistas, vídeos, continuación). `resolve()` crea de forma perezosa orquestador y proxy, y devuelve la URL del proxy (motor nativo) o la página `watch?v=<id>` (motor web). |
+| [`StreamOrchestrator`](../lib/sources/stream/stream_orchestrator.dart) | `POST /youtubei/v1/player` sin clave de API; elige formato de audio, valida con sondeo de cola, caché LRU (50), lista negra de 30 min por vídeo y TTL de clientes malos. |
+| [`player_clients.dart`](../lib/sources/stream/player_clients.dart) | Tabla escrita a mano de clientes (VISIONOS primario). Solo sirven formatos con `url` plana; los de `signatureCipher` se omiten. |
+| [`AudioProxy`](../lib/sources/stream/audio_proxy.dart) | Servidor `127.0.0.1`: sirve el rango pedido en trozos de 4 MiB, renueva la URL si caduca o da 401/403/410 y reintenta el trozo. |
+| [`ResolvedStream`](../lib/sources/stream/resolved_stream.dart) | Resultado: URL, cabecera `User-Agent`, `expiresAt`, cliente, itag, longitud. |
+| [`stream_guard.dart`](../lib/audio/stream_guard.dart) | `assertNotRawYouTube`: error si FFmpeg/Media3 reciben youtube.com, googlevideo.com, ytimg.com, etc. Solo se admiten archivos locales y `http://127.0.0.1:<puerto>/...`. |
+| [`RoutedMusicAudio`](../lib/audio/routed_music_audio.dart) | Un único motor activo, según `ResolvedAudio.engine` (`native` o `web`). Solo la finalización del motor activo avanza la cola. |
+| [`WebMusicAudio`](../lib/audio_web/web_music_audio.dart) / [`NativeWebMusicBridge`](../lib/audio_web/web_music_bridge.dart) | Respaldo: `AudioBackend` sobre la página oficial (`flutter_inappwebview` 6.1.5, política de navegación, filtros de anuncios, `webMusicMediaScript`). |
+| [`aurora_shell.dart`](../lib/ui/aurora_shell.dart) | Monta el WebView una sola vez (siempre inicializado, necesario para el respaldo automático). |
 
-Los archivos locales siguen en Android Media3 (`AndroidMusicAudio`) y Windows
-SoLoud + FFmpeg (`MusicAudio`), con ecualizador y espectro. En canciones de YouTube
-`supportsEqualizer` y `supportsVisualization` son falsos y la interfaz lo indica.
+Locales: Android Media3 (`AndroidMusicAudio`) y Windows SoLoud + FFmpeg (`MusicAudio`).
+Con el motor nativo (local o YouTube vía proxy) hay ecualizador y espectro; con el
+respaldo web `supportsEqualizer` y `supportsVisualization` son falsos y la interfaz
+lo indica. `ffmpegHttpsOptions` (`audio_math.dart`) añade `-rw_timeout` y `-reconnect*`
+también al `http` de bucle local.
 
-## Nunca se ve la página
+## Flujo
+
+```mermaid
+flowchart TD
+  A[resolve track] --> B{local?}
+  B -- sí --> L[archivo local, motor nativo]
+  B -- no --> C{vídeo en lista negra?}
+  C -- sí --> W
+  C -- no --> D[Orchestrator: player VISIONOS]
+  D --> E[elegir audio, p. ej. itag 251]
+  E --> F[sondeo de cola: Range de los últimos 256 B]
+  F -- 2xx --> G[AudioProxy.register]
+  G --> H[http://127.0.0.1:puerto/token/a/id]
+  H --> I[FFmpeg / Media3 vía guard]
+  D -- bloqueado o login --> X[lista negra 30 min]
+  F -- fallo --> D2[siguiente cliente]
+  D2 -- todos fallan por bloqueo --> X
+  X --> W[WebView oficial: engine web]
+```
+
+## Matriz de fallos
+
+| Situación | Respuesta |
+| --- | --- |
+| 403/401/410 de googlevideo a mitad de reproducción, o URL a punto de caducar (margen 30 s) | El proxy renueva (`forceRefresh`, mismo itag, una sola renovación por vídeo) y reintenta el trozo una vez. |
+| La renovación falla o cambia la longitud | Sin cabeceras enviadas: `410`. Con cabeceras enviadas: corta el socket. La app lo trata como recuperable y vuelve a resolver. Nunca 403/502 hacia el reproductor. |
+| Flujo truncado (menos bytes que la longitud) | `validateCompletion` falla con «Premature EOF»; el controlador recupera la pista. |
+| Bot/login (`blocked`, `accessDenied`, LOGIN_REQUIRED, «not a bot») en todos los clientes | Respaldo web automático y lista negra de 30 min para ese vídeo. |
+| Transitorio (red, tiempo agotado, DNS) o no disponible (UNPLAYABLE, retirado) | Sin lista negra ni web: error normal con reintento. |
+| Cliente con 403 o sondeo fallido | Se marca malo 10 min (2 min si es error de red); se prueba el último. |
+
+## Qué se permite y qué sigue prohibido
+
+- Permitido: `player` de InnerTube con el cliente VISIONOS y cabeceras propias del
+  cliente; `visitorData` desde `sw.js_data`; formatos con `url` plana; proxy de bucle
+  local (solo `127.0.0.1`, nunca `localhost`).
+- Prohibido: tokens PO / BotGuard, descifrado de firma o `n`, saltarse restricciones
+  de Premium, pasar URLs crudas de YouTube/googlevideo a FFmpeg o Media3, guardar
+  secretos. yt-dlp, solo descargas explícitas e importación de listas.
+- Android: `network_security_config.xml` permite texto claro únicamente a
+  `127.0.0.1`; `AuroraPlaybackService` acepta `http` solo con host `127.0.0.1`,
+  puerto y sin usuario.
+
+## Respaldo web: nunca se ve la página
 
 - El WebView está siempre montado (no `Offstage`: seguiría sin pintar) en una caja
   de 1×1 en la esquina, tapada por un cuadro opaco, con `IgnorePointer`,
@@ -104,17 +156,21 @@ la visibilidad de la página ni el user agent para evitarlo.
   `WebViewEnvironment` antes de permitir el cierre (el entorno vivo retenía el
   proceso y `WebView2Loader.dll`).
 
-## Pruebas
+## Pruebas y verificación
 
-- `test/audio_only_engine_test.dart`: puente falso; órdenes, timeout de play,
-  nombres de error, bloqueo de gesto, consentimiento, anuncios sin finalización,
-  autoplay, generaciones obsoletas, montaje oculto 1×1 sin entrada.
-- `test/web_music_script_test.dart`: ejecuta el script real en Node con un DOM
-  mínimo (se omite sin Node): espera de eventos, reintento tras `AbortError`,
-  timeout, silencio/omisión de anuncios, búsqueda antes de metadatos.
-- `test/routed_music_audio_test.dart` y `test/web_engine_shell_test.dart`:
-  enrutado web↔local, espejo de sesión, hoja de consentimiento y «Anuncio».
+- Sonda real: `dart run tool/probe_innertube_clients.dart <videoId>`.
+- Pruebas: `test/stream_orchestrator_test.dart`, `test/audio_proxy_test.dart`,
+  `test/stream_guard_test.dart`, `test/routed_music_audio_test.dart`,
+  `test/audio_math_test.dart`, `test/innertube_source_test.dart`,
+  `test/stream_recovery_controller_test.dart`, `test/stream_engine_integration_test.dart`
+  y, del respaldo web, `test/audio_only_engine_test.dart`, `test/web_music_script_test.dart`
+  y `test/web_engine_shell_test.dart`.
+- Verificado: la sonda en vivo resolvió ids reales con VISIONOS (itag 251, validez
+  ~6 h, sondeo de cola 2xx) y FFmpeg real decodificó una canción completa y una
+  búsqueda (seek) a través del proxy en Windows.
+- **Requiere verificación en dispositivo (Android no verificado)**: canción normal;
+  URL caducada (pausa > 6 h o forzarla con el depurador); cliente bloqueado (debe
+  caer al WebView); segundo plano/pantalla apagada y notificación; anuncios del
+  respaldo; SMTC y salida limpia en Windows.
 
-Ninguna prueba contacta YouTube. **Requiere verificación en dispositivo**: sonido
-real, anuncios, segundo plano/pantalla apagada y notificación en Android, SMTC y
-salida limpia en Windows.
+Comportamiento inspirado en LIMusic/Metrolist (GPL-3.0); implementación propia, sin código copiado.
