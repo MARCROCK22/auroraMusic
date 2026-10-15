@@ -65,17 +65,27 @@ String decodeJamQrPixels(Uint8List rgba, int width, int height) {
     final blue = (rgba[offset + 2] * alpha + 255 * (255 - alpha)) ~/ 255;
     pixels[i] = (red << 16) | (green << 8) | blue;
   }
+  final bitmap = BinaryBitmap(
+    HybridBinarizer(RGBLuminanceSource(width, height, pixels)),
+  );
   try {
-    return QRCodeReader()
-        .decode(
-          BinaryBitmap(
-            HybridBinarizer(RGBLuminanceSource(width, height, pixels)),
-          ),
-        )
-        .text;
+    return _read(bitmap);
   } catch (_) {
-    throw const JamException(
-      'No se encontró un código QR legible en la imagen.',
-    );
+    // zxing2's detector misses ~2% of clean version 9 codes (bad alignment
+    // pattern estimate); a clean exported QR still decodes without it.
+    try {
+      return _read(bitmap, pure: true);
+    } catch (_) {
+      throw const JamException(
+        'No se encontró un código QR legible en la imagen.',
+      );
+    }
   }
 }
+
+String _read(BinaryBitmap bitmap, {bool pure = false}) => QRCodeReader()
+    .decode(
+      bitmap,
+      hints: pure ? (DecodeHints()..put(DecodeHintType.pureBarcode)) : null,
+    )
+    .text;

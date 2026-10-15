@@ -16,36 +16,40 @@ void main() {
   test(
     'Dart QR encoder and decoder roundtrip invitation without another image package',
     () {
-      final invite = JamInvite(
-        address: '192.168.1.2',
-        port: 12345,
-        sessionId: jamRandomSecret(16),
-        accessToken: jamRandomSecret(),
-        expiresAt: DateTime.now().add(const Duration(hours: 1)),
-      );
-      final encoded = invite.encode();
-      final matrix = Encoder.encode(encoded, ErrorCorrectionLevel.m).matrix!;
-      const scale = 4;
-      final side = (matrix.width + 8) * scale;
-      final pixels = Uint8List(side * side * 4)
-        ..fillRange(0, side * side * 4, 255);
-      for (var y = 0; y < matrix.height; y++) {
-        for (var x = 0; x < matrix.width; x++) {
-          if (matrix.get(x, y) == 1) {
-            for (var dy = 0; dy < scale; dy++) {
-              for (var dx = 0; dx < scale; dx++) {
-                final i =
-                    (((y + 4) * scale + dy) * side + (x + 4) * scale + dx) * 4;
-                pixels[i] = 0;
-                pixels[i + 1] = 0;
-                pixels[i + 2] = 0;
+      // Many random invites: zxing2's detector used to miss ~2% of them.
+      for (var n = 0; n < 400; n++) {
+        final invite = JamInvite(
+          address: '192.168.1.2',
+          port: 12345,
+          sessionId: jamRandomSecret(16),
+          accessToken: jamRandomSecret(),
+          expiresAt: DateTime.now().add(const Duration(hours: 1)),
+        );
+        final encoded = invite.encode();
+        final matrix = Encoder.encode(encoded, ErrorCorrectionLevel.m).matrix!;
+        const scale = 4;
+        final side = (matrix.width + 8) * scale;
+        final pixels = Uint8List(side * side * 4)
+          ..fillRange(0, side * side * 4, 255);
+        for (var y = 0; y < matrix.height; y++) {
+          for (var x = 0; x < matrix.width; x++) {
+            if (matrix.get(x, y) == 1) {
+              for (var dy = 0; dy < scale; dy++) {
+                for (var dx = 0; dx < scale; dx++) {
+                  final i =
+                      (((y + 4) * scale + dy) * side + (x + 4) * scale + dx) *
+                      4;
+                  pixels[i] = 0;
+                  pixels[i + 1] = 0;
+                  pixels[i + 2] = 0;
+                }
               }
             }
           }
         }
+        // Compare as a boolean so a failing assertion cannot print invitation credentials.
+        expect(decodeJamQrPixels(pixels, side, side) == encoded, isTrue);
       }
-      // Compare as a boolean so a failing assertion cannot print invitation credentials.
-      expect(decodeJamQrPixels(pixels, side, side) == encoded, isTrue);
     },
   );
   test('QR decoder validates allocation and malformed image bytes', () async {
