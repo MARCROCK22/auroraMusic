@@ -22,6 +22,7 @@ void main() {
       'http://127.0.0.1:4000/0123456789abcdef0123456789abcdef/a/0123456789abcdef',
       'http://127.0.0.1:4000/aurora-progressive/token',
       r'C:\Music\a.mp3',
+      r'C:\Music\youtube.com - x.mp3',
       '/storage/emulated/0/a.mp3',
       'file:///a.mp3',
       'https://example.test/notyoutube.com',

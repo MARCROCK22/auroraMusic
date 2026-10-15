@@ -24,7 +24,7 @@ void assertNotRawYouTube(String input) {
   }
   // Unparseable or host-less http-ish text: refuse if it names a blocked domain.
   final raw = text.toLowerCase();
-  if (RegExp(r'^[a-z][a-z0-9+.-]*:').hasMatch(raw) &&
+  if (RegExp(r'^https?:').hasMatch(raw) &&
       _blockedHosts.any(raw.contains)) {
     throw StateError('URL de YouTube sin proxy bloqueada.');
   }
