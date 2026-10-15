@@ -1,63 +1,123 @@
 # DJ personalizado
 
-`lib/dj/recommendations.dart` contiene un recomendador local determinista y sus
-filtros. El controlador conserva la coordinación de reproducción, persistencia,
-cola y búsquedas en los proveedores de audio existentes. No usa IA ni claves.
+El DJ es un algoritmo propio, local y determinista: no usa servicios de IA,
+claves de API ni la radio/«up next» de YouTube. YouTube es solo la fuente de
+audio; las búsquedas sirven únicamente para obtener canciones reproducibles.
 
-## Señales reales
+- `lib/dj/ai_dj.dart`: vectores de canciones, perfil de gustos, consultas de
+  descubrimiento y ordenación (MMR + enfriamiento de artistas). Dart puro.
+- `lib/dj/recommendations.dart`: recomendador clásico por afinidad (favoritos,
+  playlists, historial) y `DjFilters`. Sigue alimentando Inicio y la vista DJ.
+- `lib/library/library_database.dart`: base vectorial persistente (SQLite/drift).
+- `AppController`: registra señales, coordina la recarga y la cola.
 
-- Favoritos: afinidad de artista y géneros conocidos, peso 4 por canción.
-- Pertenencia a una o más playlists: peso 1,5, contado una vez por canción.
-- Historial reciente: peso `2,5 / (1 + posición / 4)` por artista y géneros.
-  El historial guarda el último uso de cada canción, no la frecuencia.
-- Una candidata incluida en playlists recibe 1,5 adicional; si ya estuvo en el
-  historial pierde 2 puntos para favorecer variedad.
-- Se seleccionan como máximo dos canciones por artista en cada lote. Se omite
-  la canción actual, los favoritos ya conocidos y canciones pendientes de una
-  coincidencia de audio. Sin señales, el orden estable es artista/título.
+## Vectores de canciones
 
-Cada resultado explica la señal más relevante: artista favorito, playlist,
-escucha reciente o género conocido. No hay datos de saltos, finalizaciones ni
-frecuencia; no se simulan. Los favoritos, playlists e historial que el usuario
-modifica se reflejan al recalcular las recomendaciones.
+Cada canción se convierte en un vector de 256 dimensiones mediante *feature
+hashing* (FNV-1a de 32 bits, con signo) y se normaliza (L2). Rasgos y pesos:
 
-## Filtros y actualización
+- Artistas: el principal 1,0 y los colaboradores 0,7. Se separan por `feat.`,
+  `ft.`, `featuring`, `&`, `,`, `;` y ` x `; también `(feat. X)` del título.
+- Álbum 0,5 (si existe y no es igual al título). Géneros reales 0,8 cada uno.
+- Palabras del título 0,25 cada una, sin ruido («official video», «lyrics»,
+  «letra», «audio», «hd», «remastered»…) ni palabras del nombre del artista.
+
+Las colisiones de hash son posibles y aceptadas: es una aproximación.
+
+## Base vectorial
+
+Esquema 2 de la base (`aurora.sqlite`). La migración desde el esquema 1 solo
+crea tablas nuevas y conserva los datos existentes:
+
+- `track_vectors(track_key PK, track JSON, dims, vector BLOB Float32,
+  updated_at)`: se guardan como máximo 5000 filas (las más recientes).
+- `taste_profile(id = 1, dims, vector BLOB, updated_at)`: último perfil.
+
+API: `upsertTrackVectors`, `nearestTracks(consulta, k, exclude)` con similitud
+coseno y `readTasteProfile`/`saveTasteProfile`. La búsqueda de vecinos recorre
+todas las filas en Dart (fuerza bruta): suficiente para miles de canciones.
+
+Se incrustan una vez por sesión: toda la biblioteca (favoritos, playlists,
+historial y lo reproducido), cada canción con señal de salto/finalización y
+cada resultado de búsqueda, de «Buscar novedades» y del descubrimiento del DJ.
+
+## Señales y perfil
+
+Solo se usan señales observadas:
+
+- Favorito: +3,0. Pertenencia a playlists: +1,5. No tienen fecha: no decaen.
+- Historial reciente (posición `i`): `+0,8 / (1 + i/4)`; no registra frecuencia.
+- Finalización (la pista llegó al final): +1,0 × decaimiento.
+- Salto (el usuario pulsó «siguiente» antes de 30 s o del 30 % de la pista):
+  −1,5 × decaimiento. Avanzar más tarde no genera ninguna señal.
+- Decaimiento temporal de eventos: `0,5^(edad / 14 días)`.
+
+Los eventos se guardan en `SharedPreferences` (`djEvents`, formato
+`tipo|milisegundos|id`, últimos 500). El perfil es la suma ponderada de los
+vectores de esas canciones, normalizada; se recalcula en cada recarga.
+
+## Candidatos
+
+1. Recomendaciones locales clásicas (hasta 24).
+2. Vecinos más cercanos en la base vectorial al perfil (k = 40) y a la canción
+   actual (k = 20). Sin «Incluir novedades» solo se usan canciones de la
+   biblioteca.
+3. Con «Incluir novedades»: hasta 2 búsquedas por recarga construidas desde el
+   perfil (artistas, géneros y álbumes con más peso, alternados). Una consulta
+   no se repite en la misma sesión del DJ. Los resultados se incrustan y pasan
+   por la misma ordenación.
+
+## Ordenación
+
+`puntuación = 0,55·coseno(perfil, c) + 0,25·prior + 0,20·coseno(actual, c)
+− 0,35 (escuchada entre las últimas 20) − 0,30 (artista saltado en los últimos
+30 eventos)`. El *prior* refleja la posición en su lista de origen: locales
+`0,6/(1 + i/5)`, búsquedas `0,5/(1 + i/5)`, vecinos `0,3/(1 + i/10)`.
+
+Se excluyen siempre: la canción actual, todo lo que ya está en la cola o fue
+añadido por el DJ en esta sesión (identidad por ID, URL canónica y URI de
+Spotify, `recommendationTrackKeys`), lo que no es reproducible y lo que
+rechazan los `DjFilters` (las exclusiones siempre prevalecen).
+
+La selección es voraz con MMR (λ = 0,7): `0,7·puntuación − 0,3·máxima
+similitud con lo ya elegido`, con enfriamiento de artistas: nunca el mismo
+artista dos veces seguidas y como máximo dos por cada diez canciones (contando
+la cola pendiente). Si todos los artistas restantes están en enfriamiento se
+permite una única elección por recarga, para que una biblioteca de un solo
+artista no detenga el DJ.
+
+Cada elección conserva un motivo breve: «Porque escuchaste X», «Parecido a tus
+favoritos», «De tus favoritos», «Porque escuchas a X», «Por tu gusto por X» o
+el motivo del recomendador clásico. El panel DJ muestra el siguiente motivo.
+
+## Cola
+
+- Al iniciar, el DJ llena hasta unas 20 canciones pendientes; después recarga
+  cuando quedan menos de 5. Solo añade al final: no toca la canción actual ni lo
+  que eligió el usuario.
+- Autoplay: si la cola se termina con el DJ activo, recarga y continúa.
+- Contadores de generación descartan resultados tardíos al detener el DJ o
+  cambiar filtros. Pausar no descarta la recarga, pero no reanuda.
+
+## Filtros
 
 `DjFilters` acepta inclusiones `artists`, `trackIds`, `genres` y exclusiones
 `excludedArtists`, `excludedTrackIds`, `excludedGenres`. Una inclusión vacía no
-restringe esa dimensión. Se acepta cualquiera de sus valores dentro de una
-dimensión y deben cumplirse todas las dimensiones configuradas. Las exclusiones
-siempre prevalecen. Artistas y géneros usan coincidencia exacta tras quitar
-espacios externos y normalizar mayúsculas; canciones usan su ID exacto.
+restringe esa dimensión. Las exclusiones siempre prevalecen. Artistas y géneros
+usan coincidencia exacta normalizada; canciones usan su ID exacto.
+`AppController.setDjFilters` los persiste (`djFilters`), invalida búsquedas
+pendientes y descarta novedades. El encolado manual no está limitado por ellos.
+`Track.genres` guarda solo géneros reales; no se infieren.
 
-`AppController.setDjFilters` persiste preferencias en `SharedPreferences` bajo
-`djFilters`, invalida búsquedas pendientes y descarta resultados descubiertos.
-Los filtros se aplican al inicio, recomendaciones, descubrimiento y recarga del
-DJ. Se conserva la cola ya elegida por el usuario y la reproducción actual;
-cambiar filtros afecta nuevas incorporaciones. El encolado manual sigue siendo
-una elección explícita y no está limitado por los filtros del DJ.
-`refreshRecommendations` recalcula la lista local y renueva el descubrimiento
-cuando hay un artista de referencia disponible.
+## Limitaciones
 
-`Track.genres` guarda únicamente géneros proporcionados por datos reales. Las
-canciones anteriores se restauran con una lista vacía; se conserva la base de
-datos y no necesita migración. No se infieren géneros a partir del título ni del
-artista. Un filtro inclusivo de género descarta canciones sin géneros conocidos,
-por lo que puede dejar las recomendaciones vacías.
+- Sin señales (biblioteca nueva) el perfil está vacío y manda el orden local.
+- El hashing no entiende sonido ni letra: dos canciones parecidas con metadatos
+  distintos no se reconocen como similares.
+- Las búsquedas dependen del proveedor; sin red se usa solo la biblioteca.
+- Pruebas: `test/dj_ai_test.dart` (proveedores simulados, base en memoria).
+  No se valida la calidad musical con usuarios reales.
 
-## Cola y audio
-
-La identidad compartida considera ID, URL canónica y URI de Spotify, incluso
-cuando la URL ya apunta a una coincidencia de YouTube. Se impiden duplicados en
-recomendaciones, descubrimiento, recargas y encolado manual concurrente. El DJ
-conserva el límite de 24 canciones y dos búsquedas de descubrimiento por sesión.
-
-`importSpotifyMetadataMatch(metadata, match, play: false)` conserva las
-descripciones, portada, álbum, géneros y URI de Spotify mientras toma el ID y
-enlace de audio de una coincidencia seleccionada del proveedor existente. Solo
-acepta una fuente local o HTTPS de YouTube/youtu.be, nunca audio de Spotify. Una
-coincidencia seleccionada por el usuario puede ser incorrecta; no se afirma que
-el título/artista garantice identidad del audio.
-
-Las pruebas usan proveedores simulados y cubren compatibilidad JSON, filtros,
-persistencia, puntuación por géneros, invalidación, recarga y duplicados.
+`importSpotifyMetadataMatch(metadata, match, play: false)` conserva metadatos
+de Spotify tomando el audio de una coincidencia de YouTube elegida por el
+usuario; nunca reproduce audio de Spotify.
