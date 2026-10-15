@@ -1,9 +1,10 @@
 # Aurora Music — guía para Claude
 
 Lee también `AGENTS.md` (estilo, comandos) y `DESIGN.md` (estética). Este archivo
-manda sobre `RETOMAR_AURORA.md` cuando se contradicen. Decisión final del usuario
-(15/10/2026): el audio de YouTube suena en el reproductor oficial de
-music.youtube.com dentro de un WebView invisible, con la interfaz de Aurora encima.
+manda sobre `RETOMAR_AURORA.md` cuando se contradicen. Decisión del usuario
+(15/10/2026, revisada): el audio de YouTube se resuelve por InnerTube `player`
+(cliente VISIONOS, como LIMusic) y suena en el motor nativo a través de un proxy
+local; el reproductor oficial en WebView queda como respaldo automático.
 
 ## Qué es
 
@@ -16,18 +17,29 @@ cola nativa), pero con la interfaz de Aurora. **No cambiar la estética.**
 
 - Búsqueda: `lib/sources/innertube_source.dart` (InnerTube WEB_REMIX: canciones,
   álbumes, artistas, vídeos, continuación). No volver a la búsqueda por DOM.
-  `resolve()` devuelve `https://music.youtube.com/watch?v=<id>`; no extrae nada.
-- Reproducción YouTube: `lib/audio_web/` (`WebMusicAudio` + `NativeWebMusicBridge`):
-  WebView siempre montado en `aurora_shell.dart`, 1×1 y tapado, sin puntero/foco/
-  semántica; solo se muestra como hoja cuando el sitio pide consentimiento/acceso
-  («Revisar sitio»). Metadatos desde el `Track`; estado/progreso/fin desde el
-  elemento multimedia. Anuncios: filtros `adblocker_webview` (solo Windows) +
-  silenciar/omitir; no es garantía.
-- Local: Android `AndroidMusicAudio` (Media3, servicio; además refleja el WebView en
-  la sesión/notificación con bloqueos de CPU/Wi-Fi), Windows `MusicAudio`
-  (SoLoud + FFmpeg) con EQ/espectro. `RoutedMusicAudio` elige un único motor.
-- **Prohibido**: tokens PO, imitar clientes/UA, extraer URLs de audio de YouTube,
-  saltarse restricciones del sitio (p. ej. reproducción en segundo plano de Premium).
+- Resolución YouTube: `lib/sources/stream/` — `StreamOrchestrator` pide `player`
+  con la tabla de clientes de `player_clients.dart` (VISIONOS: URLs directas sin
+  cifrado ni PO), elige audio, valida con una petición al final del archivo,
+  marca clientes/vídeos fallidos con TTL y re-resuelve ante 403/expiración.
+  `AudioProxy` sirve `http://127.0.0.1:<puerto>/…` y pide al CDN trozos acotados
+  de 4 MiB. `InnerTubeSource.resolve()` devuelve esa URL con `engine: native`.
+- Respaldo: si el resultado es bloqueo/acceso («not a bot», login) o el proxy no
+  arranca, `resolve()` devuelve `music.youtube.com/watch?v=<id>` con
+  `engine: web` → `lib/audio_web/` (`WebMusicAudio`): WebView siempre montado en
+  `aurora_shell.dart`, 1×1 y tapado; solo se muestra como hoja cuando el sitio
+  pide consentimiento/acceso («Revisar sitio»).
+- Motores: Android `AndroidMusicAudio` (Media3, servicio), Windows `MusicAudio`
+  (SoLoud + FFmpeg) con EQ/espectro. `RoutedMusicAudio` elige por
+  `ResolvedAudio.engine`, nunca por host. `lib/audio/stream_guard.dart` impide que
+  una URL de YouTube/googlevideo llegue a FFmpeg/Media3 sin pasar por el proxy.
+- Android: `network_security_config.xml` permite texto claro solo a `127.0.0.1`.
+- Comprobación manual del cliente: `dart run tool/probe_innertube_clients.dart <id>`.
+- **Permitido** (decisión del usuario): InnerTube `player` imitando clientes de la
+  tabla y extraer URLs de audio para el proxy.
+- **Prohibido**: tokens PO/BotGuard, descifrar firmas/`n`, saltarse restricciones
+  del sitio (p. ej. funciones de Premium), y que una URL de YouTube/googlevideo
+  llegue a FFmpeg/Media3 sin el proxy. LIMusic es GPL: solo referencia de
+  comportamiento, no copiar su código ni sus archivos de configuración.
 - yt-dlp: solo descargas explícitas (audio y vídeo) e importación de listas.
 - DJ: `lib/dj/` — IA propia y local: base de datos vectorial (drift/SQLite) con
   embeddings de pistas y perfil de gustos del usuario; ranking por similitud +
