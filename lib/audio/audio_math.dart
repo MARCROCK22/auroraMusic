@@ -11,7 +11,19 @@ double equalizerPreamp(List<double> gainsDb) {
 /// Input-scoped HTTPS options; Schannel checks the Windows certificate store.
 List<String> ffmpegHttpsOptions(String input) =>
     Uri.tryParse(input)?.scheme == 'https'
-    ? const ['-tls_verify', '1', '-rw_timeout', '15000000']
+    ? const [
+        '-tls_verify',
+        '1',
+        '-rw_timeout',
+        '15000000',
+        // Survive dropped connections while streaming instead of ending early.
+        '-reconnect',
+        '1',
+        '-reconnect_streamed',
+        '1',
+        '-reconnect_delay_max',
+        '5',
+      ]
     : const [];
 
 String redactAudioError(Object error) => '$error'

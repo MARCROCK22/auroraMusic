@@ -12,12 +12,24 @@ void main() {
         '1',
         '-rw_timeout',
         '15000000',
+        '-reconnect',
+        '1',
+        '-reconnect_streamed',
+        '1',
+        '-reconnect_delay_max',
+        '5',
       ]);
       expect(ffmpegHttpsOptions('HTTPS://host/audio'), [
         '-tls_verify',
         '1',
         '-rw_timeout',
         '15000000',
+        '-reconnect',
+        '1',
+        '-reconnect_streamed',
+        '1',
+        '-reconnect_delay_max',
+        '5',
       ]);
       expect(ffmpegHttpsOptions('C:/music/tone.wav'), isEmpty);
     },

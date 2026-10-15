@@ -10,12 +10,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app_controller.dart';
 import 'audio/music_audio.dart';
 import 'audio/android_music_audio.dart';
-import 'audio/routed_music_audio.dart';
-import 'audio_web/web_music_audio.dart';
-import 'audio_web/web_music_metadata.dart';
 import 'library/library_database.dart';
 import 'sources/yt_dlp_source.dart';
-import 'sources/web_music_source.dart';
+import 'sources/innertube_source.dart';
 import 'ui/aurora_shell.dart';
 
 void main() {
@@ -43,22 +40,9 @@ class _AuroraBootstrapState extends State<AuroraBootstrap> {
     final directory = await getApplicationSupportDirectory();
     await directory.create(recursive: true);
     final database = await LibraryDatabase.open();
-    final metadata = WebMusicMetadata();
     final controller = AppController(
-      audio: RoutedMusicAudio(
-        native: Platform.isAndroid ? AndroidMusicAudio() : MusicAudio(),
-        web: WebMusicAudio(),
-        metadata: metadata,
-      ),
-      source: WebMusicSource(
-        YtDlpSource(preferences),
-        audioOnly: true,
-        metadataSearch: (query, {int limit = 20}) async {
-          final results = await metadata.search(query, limit: limit);
-          if (metadata.error != null) throw StateError(metadata.error!);
-          return results;
-        },
-      ),
+      audio: Platform.isAndroid ? AndroidMusicAudio() : MusicAudio(),
+      source: InnerTubeSource(YtDlpSource(preferences)),
       database: database,
       preferences: preferences,
       supportDirectory: directory,

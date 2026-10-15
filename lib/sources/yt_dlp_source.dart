@@ -956,6 +956,12 @@ class YtDlpSource extends SourceBackend {
     }
   });
 
+  /// One yt-dlp extraction of a streamable HTTPS URL; never downloads audio.
+  Future<ResolvedAudio> resolveStreamUrl(Track track) => _resolveAndroidAudio(
+    track,
+    validateYouTube(track.pageUrl ?? '').toString(),
+  );
+
   Future<ResolvedAudio> _resolveAndroidAudio(Track track, String target) {
     final uri = Uri.parse(target);
     final targetId = uri.host == 'youtu.be'
@@ -991,7 +997,16 @@ class YtDlpSource extends SourceBackend {
     _resolveJobs.putIfAbsent(videoId, () => <String>{}).add(jobId);
     _startingJobs.add(jobId);
     try {
-      final raw = await _native('resolve', {'target': target, 'jobId': jobId});
+      final raw = _isAndroid
+          ? await _native('resolve', {'target': target, 'jobId': jobId})
+          : await _run([
+              '--no-playlist',
+              '-f',
+              'bestaudio',
+              '--dump-single-json',
+              '--',
+              target,
+            ]);
       _throwIfResolveCancelled(jobId);
       final data = jsonDecode(raw) as Map<String, dynamic>;
       final input = data['url'] as String?;

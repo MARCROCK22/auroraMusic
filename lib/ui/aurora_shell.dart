@@ -30,9 +30,6 @@ import 'offline_settings_panel.dart';
 import '../youtube_music/youtube_music_page.dart';
 import 'video_downloads_page.dart';
 import 'artists_page.dart';
-import '../audio/routed_music_audio.dart';
-import '../audio_web/web_music_audio.dart';
-import '../audio_web/web_music_metadata.dart';
 
 const _sections = [
   'Inicio',
@@ -99,10 +96,6 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _audio = ref.read(controllerProvider).audio;
-    _audio.addListener(_guardWebClose);
-    if (_audio is RoutedMusicAudio) {
-      _audio.metadata?.addListener(_metadataChanged);
-    }
     WindowControls.setCloseConfirmation(_confirmWindowClose);
     _audio.setVisualizationEnabled(false);
   }
@@ -134,27 +127,13 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     }
   }
 
-  void _guardWebClose() {
-    final webPlaying =
-        _audio is RoutedMusicAudio &&
-        _audio.usingWeb &&
-        (_audio.isPlaying || _audio.isBuffering);
-    WindowControls.guardClose(webPlaying || _section == 10);
-  }
-
-  void _metadataChanged() {
-    if (mounted) setState(() {});
-  }
+  void _guardWebClose() => WindowControls.guardClose(_section == 10);
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     WindowControls.setCloseConfirmation(null);
     WindowControls.guardClose(false);
-    _audio.removeListener(_guardWebClose);
-    if (_audio is RoutedMusicAudio) {
-      _audio.metadata?.removeListener(_metadataChanged);
-    }
     _jam?.removeListener(_jamChanged);
     if (_analysisEnabled) _audio.setVisualizationEnabled(false);
     _search.dispose();
@@ -220,36 +199,8 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     });
   }
 
-  Future<bool> _confirmWindowClose() async {
-    if (_musicKey.currentState != null) {
-      return _musicKey.currentState!.confirmExit();
-    }
-    if (_audio is! RoutedMusicAudio ||
-        !_audio.usingWeb ||
-        (!_audio.isPlaying && !_audio.isBuffering)) {
-      return true;
-    }
-    return await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('¿Cerrar Aurora?'),
-            content: const Text(
-              'Se detendrá la reproducción de YouTube Music.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Continuar escuchando'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('Cerrar'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-  }
+  Future<bool> _confirmWindowClose() async =>
+      await _musicKey.currentState?.confirmExit() ?? true;
 
   Future<void> _openLibrary({
     MusicPlaylist? playlist,
@@ -733,78 +684,8 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             ),
           ),
         ),
-      if (c.audio is RoutedMusicAudio &&
-          (c.audio as RoutedMusicAudio).web is WebMusicAudio &&
-          (c.audio as RoutedMusicAudio).webInitializationError == null)
-        _webEngine(c.audio as RoutedMusicAudio),
-      if (c.audio is RoutedMusicAudio &&
-          (c.audio as RoutedMusicAudio).metadata != null)
-        _metadataEngine((c.audio as RoutedMusicAudio).metadata!),
     ],
   );
-
-  Widget _metadataEngine(WebMusicMetadata metadata) => Positioned(
-    top: 0,
-    left: 0,
-    width: 1,
-    height: 1,
-    child: ExcludeSemantics(
-      child: ExcludeFocus(
-        child: IgnorePointer(
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              metadata.buildMetadataView(),
-              const Positioned.fill(child: ColoredBox(color: Colors.black)),
-            ],
-          ),
-        ),
-      ),
-    ),
-  );
-
-  Widget _webEngine(RoutedMusicAudio audio) {
-    final web = audio.web as WebMusicAudio;
-    final visible = _section == 10;
-    return Positioned.fill(
-      child: Stack(
-        children: [
-          Align(
-            alignment: Alignment.topLeft,
-            child: SizedBox(
-              width: visible ? double.infinity : 1,
-              height: visible ? double.infinity : 1,
-              child: ExcludeSemantics(
-                excluding: !visible,
-                child: IgnorePointer(
-                  ignoring: !visible,
-                  child: web.buildEngineView(showWebsite: visible),
-                ),
-              ),
-            ),
-          ),
-          if (!visible)
-            const Positioned(
-              top: 0,
-              left: 0,
-              width: 1,
-              height: 1,
-              child: ColoredBox(color: Colors.black),
-            ),
-          if (visible)
-            Positioned(
-              top: 8,
-              right: 8,
-              child: IconButton.filled(
-                tooltip: 'Volver a Aurora',
-                onPressed: () => _navigate(0),
-                icon: const Icon(Icons.close),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
 
   Widget _page(AppController c) {
     switch (_section) {
