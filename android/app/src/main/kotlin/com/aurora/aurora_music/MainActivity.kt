@@ -40,6 +40,8 @@ class MainActivity : FlutterActivity() {
     override fun shouldDestroyEngineWithHost(): Boolean = false
     // audio_service starts its own engine (running main() again) unless the
     // activity uses it; two app instances would race on the same database.
+    // Relies on audio_service's own AudioService staying undeclared on Android
+    // (its onDestroy would dispose this shared engine).
     override fun provideFlutterEngine(context: Context): FlutterEngine =
         AudioServicePlugin.getFlutterEngine(context)
     private val sourceWorkers = ThreadPoolExecutor(2, 2, 0, TimeUnit.MILLISECONDS, ArrayBlockingQueue<Runnable>(8))
