@@ -12,6 +12,9 @@ void main() {
       'https://i.ytimg.com/vi/x/a.jpg',
       'https://yt3.ggpht.com/a',
       'https://YouTube.com/x',
+      'https://rr1.googlevideo.com./videoplayback',
+      ' https://rr1.googlevideo.com/x',
+      'https://[bad.googlevideo.com/x',
     ]) {
       expect(() => assertNotRawYouTube(bad), throwsStateError, reason: bad);
     }

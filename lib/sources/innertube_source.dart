@@ -39,6 +39,7 @@ class InnerTubeSource extends SourceBackend {
   Future<AudioProxy>? _proxyFuture;
   AudioProxy? _proxy;
   String? _registeredId;
+  int _resolveGeneration = 0;
   String? _currentVideoId;
   bool _disposed = false;
 
@@ -370,7 +371,16 @@ class InnerTubeSource extends SourceBackend {
 
   Future<AudioProxy> _startProxy() async {
     if (_disposed) throw StateError('La fuente ya se cerró.');
-    return _proxy = await (_proxyFuture ??= _proxyFactory());
+    final future = _proxyFuture ??= _proxyFactory();
+    try {
+      final proxy = await future;
+      if (_disposed) throw StateError('La fuente ya se cerró.');
+      return _proxy = proxy;
+    } catch (_) {
+      // A failed start must not be cached forever.
+      if (identical(_proxyFuture, future)) _proxyFuture = null;
+      rethrow;
+    }
   }
 
   @override
@@ -410,6 +420,7 @@ class InnerTubeSource extends SourceBackend {
       );
     }
     _currentVideoId = id;
+    final generation = ++_resolveGeneration;
     final orch = _orch;
     if (orch.isBlacklisted(id)) return _webFallback(id, track);
     final ResolvedStream stream;
@@ -422,10 +433,20 @@ class InnerTubeSource extends SourceBackend {
       }
       rethrow;
     }
-    final proxy = await _startProxy();
-    final previous = _registeredId;
-    if (previous != null && previous != id) proxy.unregister(previous);
-    _registeredId = id;
+    final AudioProxy proxy;
+    try {
+      proxy = await _startProxy();
+    } catch (_) {
+      if (_disposed) rethrow;
+      return _webFallback(id, track); // proxy unavailable: official player
+    }
+    // Only the newest resolve may drop the previous video; a superseded call
+    // registers without unregistering (the registry's FIFO cap cleans up).
+    if (generation == _resolveGeneration) {
+      final previous = _registeredId;
+      if (previous != null && previous != id) proxy.unregister(previous);
+      _registeredId = id;
+    }
     final uri = proxy.register(
       id,
       stream,

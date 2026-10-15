@@ -8,9 +8,24 @@ const _blockedHosts = [
   'ggpht.com',
 ];
 
+bool _blocked(String host) {
+  final h = host.toLowerCase().replaceAll(RegExp(r'\.+$'), '');
+  return _blockedHosts.any((b) => h == b || h.endsWith('.$b'));
+}
+
 void assertNotRawYouTube(String input) {
-  final host = Uri.tryParse(input)?.host.toLowerCase() ?? '';
-  if (_blockedHosts.any((h) => host == h || host.endsWith('.$h'))) {
+  final text = input.trim();
+  final uri = Uri.tryParse(text);
+  if (uri != null && uri.host.isNotEmpty) {
+    if (_blocked(uri.host)) {
+      throw StateError('URL de YouTube sin proxy bloqueada.');
+    }
+    return;
+  }
+  // Unparseable or host-less http-ish text: refuse if it names a blocked domain.
+  final raw = text.toLowerCase();
+  if (RegExp(r'^[a-z][a-z0-9+.-]*:').hasMatch(raw) &&
+      _blockedHosts.any(raw.contains)) {
     throw StateError('URL de YouTube sin proxy bloqueada.');
   }
 }

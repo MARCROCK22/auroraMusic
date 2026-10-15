@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:aurora_music/core/models.dart';
 import 'package:aurora_music/dj/recommendations.dart';
 import 'package:aurora_music/sources/innertube_source.dart';
@@ -137,6 +139,7 @@ class _FakeOrch implements StreamOrchestrator {
   final blacklisted = <String>{};
   Duration? lastDuration;
   Object? error;
+  final gates = <String, Completer<void>>{};
   @override
   bool get preferMp4a => false;
   @override
@@ -149,6 +152,7 @@ class _FakeOrch implements StreamOrchestrator {
     if (forceRefresh) forced.add(sameItag);
     resolved.add(videoId);
     lastDuration = trackDuration;
+    await gates[videoId]?.future;
     if (error != null) throw error!;
     return _stream();
   }
@@ -353,4 +357,74 @@ void main() {
     );
     expect(delegate.resolved, isEmpty);
   });
+
+  test(
+    'out-of-order resolves: only the newest unregisters the previous',
+    () async {
+      final orch = _FakeOrch();
+      final proxy = _FakeProxy();
+      final source = InnerTubeSource(
+        FakeSource(),
+        proxyFactory: () async => proxy,
+        orchestratorFactory: () => orch,
+      );
+      await source.resolve(_song);
+      orch.gates['6geljA2OZSY'] = Completer();
+      final stale = source.resolve(_other); // superseded below
+      await Future<void>.delayed(Duration.zero);
+      await source.resolve(_song); // newer call, same id as registered
+      proxy.unregistered.clear();
+      orch.gates['6geljA2OZSY']!.complete();
+      await stale;
+      expect(proxy.unregistered, isEmpty);
+    },
+  );
+
+  test('proxy start failure falls back to web and is retried', () async {
+    var calls = 0;
+    final proxy = _FakeProxy();
+    final source = InnerTubeSource(
+      FakeSource(),
+      proxyFactory: () async {
+        if (calls++ == 0) throw StateError('bind');
+        return proxy;
+      },
+      orchestratorFactory: () => _FakeOrch(),
+    );
+    expect((await source.resolve(_song)).engine, AudioEngine.web);
+    expect((await source.resolve(_song)).engine, AudioEngine.native);
+  });
+
+  test('prefetch never sets the failure target nor registers', () async {
+    final orch = _FakeOrch();
+    final proxy = _FakeProxy();
+    final source = InnerTubeSource(
+      FakeSource(),
+      proxyFactory: () async => proxy,
+      orchestratorFactory: () => orch,
+    );
+    await source.prefetch(_song);
+    source.reportPlaybackFailure('HTTP 410');
+    expect(orch.failures, isEmpty);
+    expect(proxy.refresh, isNull);
+  });
+
+  test(
+    'dispose during an in-flight resolve throws instead of registering',
+    () async {
+      final orch = _FakeOrch()..gates['19y35jAcG6k'] = Completer();
+      final proxy = _FakeProxy();
+      final source = InnerTubeSource(
+        FakeSource(),
+        proxyFactory: () async => proxy,
+        orchestratorFactory: () => orch,
+      );
+      final pending = source.resolve(_song);
+      await Future<void>.delayed(Duration.zero);
+      source.dispose();
+      orch.gates['19y35jAcG6k']!.complete();
+      await expectLater(pending, throwsStateError);
+      expect(proxy.refresh, isNull);
+    },
+  );
 }
