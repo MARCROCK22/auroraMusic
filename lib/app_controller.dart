@@ -528,9 +528,14 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  int? _djSignalGeneration;
+
   void _recordDjSignal(DjSignal signal) {
     final track = currentTrack;
     if (track == null || _loadedTrackId != track.id) return;
+    // One signal per playback: duplicate completion events must not skew taste.
+    if (_djSignalGeneration == _playGeneration) return;
+    _djSignalGeneration = _playGeneration;
     _djEvents = [..._djEvents, DjEvent(signal, track.id, DateTime.now())];
     if (_djEvents.length > djMaxEvents) {
       _djEvents = _djEvents.sublist(_djEvents.length - djMaxEvents);
@@ -1564,6 +1569,10 @@ class AppController extends ChangeNotifier {
       _recordDjSignal(DjSignal.skip);
     }
     _playIntent = true;
+    final pendingNext =
+        _playNextCount > 0 && _playNextAnchorId == currentTrack?.id
+        ? queueIndex + 1
+        : null;
     if (shuffle && queue.length > 1) {
       List<int> unplayed() => List.generate(queue.length, (i) => i)
           .where(
@@ -1603,7 +1612,10 @@ class AppController extends ChangeNotifier {
         return;
       }
       _shuffleHistory.add(queueIndex);
-      queueIndex = candidates[_random.nextInt(candidates.length)];
+      // «Reproducir a continuación» wins over the random pick.
+      queueIndex = candidates.contains(pendingNext)
+          ? pendingNext!
+          : candidates[_random.nextInt(candidates.length)];
       _shufflePlayed.add(queueIndex);
     } else {
       int? nextIndex() =>
@@ -1631,6 +1643,11 @@ class AppController extends ChangeNotifier {
         return;
       }
       queueIndex = target;
+    }
+    if (queueIndex == pendingNext) {
+      // Keep the remaining play-next items queued FIFO behind the new track.
+      _playNextAnchorId = queue[queueIndex].id;
+      _playNextCount--;
     }
     _resumePosition = Duration.zero;
     await _playCurrent();

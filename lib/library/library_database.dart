@@ -126,7 +126,7 @@ class LibraryDatabase extends GeneratedDatabase {
       queryNorm += value * value;
     }
     if (queryNorm == 0) return const [];
-    final scored = <({Track track, double score})>[];
+    final scored = <({QueryRow row, double score})>[];
     for (final row in rows) {
       if (exclude.contains(row.read<String>('track_key'))) continue;
       final vector = _floats(row.read<Uint8List>('vector'));
@@ -136,15 +136,19 @@ class LibraryDatabase extends GeneratedDatabase {
         norm += vector[i] * vector[i];
       }
       if (norm == 0) continue;
-      scored.add((
-        track: Track.fromJson(
-          jsonDecode(row.read<String>('track')) as Map<String, dynamic>,
-        ),
-        score: dot / math.sqrt(queryNorm * norm),
-      ));
+      scored.add((row: row, score: dot / math.sqrt(queryNorm * norm)));
     }
     scored.sort((a, b) => b.score.compareTo(a.score));
-    return scored.take(k).toList();
+    // Decode JSON only for the top k, not for every stored vector.
+    return [
+      for (final entry in scored.take(k))
+        (
+          track: Track.fromJson(
+            jsonDecode(entry.row.read<String>('track')) as Map<String, dynamic>,
+          ),
+          score: entry.score,
+        ),
+    ];
   }
 
   Future<Float32List?> readTasteProfile() async {

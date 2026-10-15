@@ -9,7 +9,7 @@ Track _t(String id) =>
 
 void main() {
   final all = [
-    for (final id in ['a', 'b', 'c', 'd', 'e']) _t(id),
+    for (final id in ['a', 'b', 'c', 'd', 'e', 'f']) _t(id),
   ];
 
   Future<AppController> start() async {
@@ -58,5 +58,25 @@ void main() {
     expect(c.currentTrack?.id, 'd');
     await c.playNext(all[4]);
     expect(ids(c), ['a', 'd', 'e', 'b', 'c']);
+  });
+
+  test('pending play-next items stay FIFO after advancing', () async {
+    final c = await start();
+    await c.playNext(all[3]);
+    await c.playNext(all[4]);
+    await c.next();
+    expect(c.currentTrack?.id, 'd');
+    await c.playNext(all[5]);
+    expect(ids(c), ['a', 'd', 'e', 'f', 'b', 'c']);
+  });
+
+  test('shuffle plays the play-next track first', () async {
+    for (var run = 0; run < 10; run++) {
+      final c = await start();
+      c.setShuffle(true);
+      await c.playNext(all[3]);
+      await c.next();
+      expect(c.currentTrack?.id, 'd');
+    }
   });
 }
