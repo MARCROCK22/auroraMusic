@@ -71,6 +71,7 @@ class MediaControls {
               id: track.id,
               title: track.title,
               artist: track.artist,
+              album: track.album,
               duration: track.duration,
               artUri: track.artworkUrl == null
                   ? null
@@ -137,6 +138,7 @@ class _MediaHandler extends BaseAudioHandler with SeekHandler {
     await seekForward(false);
     await controls.onStop();
   }
+
   @override
   Future<void> skipToNext() => controls.onNext();
   @override

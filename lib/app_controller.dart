@@ -1103,6 +1103,8 @@ class AppController extends ChangeNotifier {
       if (generation != _playGeneration || _disposed) return;
       _pendingResolveVideoId = null;
       _loadedAudioInput = resolved.input;
+      // Before load so the system session never shows the previous track.
+      _publishMetadata(track);
       await audio.load(
         resolved,
         ffmpegExecutable: source.ffmpegExecutable,
@@ -1138,8 +1140,7 @@ class AppController extends ChangeNotifier {
       }
       await _remember(readyTrack);
       if (generation != _playGeneration || _disposed) return;
-      _controls?.updateTrack(readyTrack);
-      await audio.updateTrackMetadata(readyTrack);
+      _publishMetadata(readyTrack);
       await database.recordPlay(track.id);
       if (generation != _playGeneration || _disposed) return;
       recentTracks = [
@@ -1932,6 +1933,11 @@ class AppController extends ChangeNotifier {
       _report(exception);
       return false;
     }
+  }
+
+  void _publishMetadata(Track track) {
+    _controls?.updateTrack(track);
+    unawaited(audio.updateTrackMetadata(track).catchError((Object _) {}));
   }
 
   Future<bool> matchSpotifyTrack(

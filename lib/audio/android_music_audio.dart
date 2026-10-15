@@ -183,11 +183,15 @@ class AndroidMusicAudio extends AudioBackend {
     required String id,
     required String title,
     String? artist,
+    String? album,
+    Duration? duration,
     String? artworkUrl,
   }) => _invoke('metadata', {
     'id': id,
     'title': title,
     'artist': artist,
+    'album': album,
+    'durationMs': duration?.inMilliseconds,
     'artworkUrl': artworkUrl,
   });
 
@@ -196,6 +200,8 @@ class AndroidMusicAudio extends AudioBackend {
     id: track.id,
     title: track.title,
     artist: track.artist,
+    album: track.album,
+    duration: track.duration,
     artworkUrl: track.artworkUrl,
   );
 

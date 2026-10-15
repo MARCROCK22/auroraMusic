@@ -78,7 +78,8 @@ class AuroraPlaybackService : MediaSessionService() {
             setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
                 .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             setHandleAudioBecomingNoisy(true)
-            setWakeMode(C.WAKE_MODE_LOCAL)
+            // Streams need the Wi-Fi lock too, or screen-off playback stalls; ExoPlayer releases both when not playing.
+            setWakeMode(C.WAKE_MODE_NETWORK)
             volume = 0.8f
             addListener(object : Player.Listener {
                 override fun onEvents(player: Player, events: Player.Events) { publishState() }
@@ -260,7 +261,9 @@ class AuroraPlaybackService : MediaSessionService() {
         val artwork = (arguments["artworkUrl"] as? String)?.let { Uri.parse(it) }
         require(artwork == null || artwork.scheme == "https") { "Portada invalida" }
         metadata = MediaMetadata.Builder().setTitle(arguments["title"] as? String ?: "Aurora")
-            .setArtist(arguments["artist"] as? String).setArtworkUri(artwork).build()
+            .setArtist(arguments["artist"] as? String).setAlbumTitle(arguments["album"] as? String)
+            .setDurationMs(((arguments["durationMs"] as? Number)?.toLong() ?: 0L).takeIf { it > 0 })
+            .setArtworkUri(artwork).build()
         player.currentMediaItem?.let { current ->
             player.replaceMediaItem(0, current.buildUpon().setMediaMetadata(metadata).build())
         }

@@ -53,6 +53,36 @@ void main() {
     messenger.setMockMethodCallHandler(MethodChannel(events.name), null);
   });
 
+  test('maps metadata for the system session', () async {
+    await audio.updateMetadata(
+      id: 'a',
+      title: 'T',
+      artist: 'A',
+      album: 'Al',
+      duration: const Duration(seconds: 90),
+      artworkUrl: 'https://example.com/a.jpg',
+    );
+    expect(calls.last.method, 'metadata');
+    expect(calls.last.arguments, {
+      'id': 'a',
+      'title': 'T',
+      'artist': 'A',
+      'album': 'Al',
+      'durationMs': 90000,
+      'artworkUrl': 'https://example.com/a.jpg',
+    });
+  });
+
+  test('forwards each system action once and drops unknown ones', () async {
+    final seen = <String>[];
+    final sub = audio.mediaActions.listen(seen.add);
+    for (final action in ['play', 'next', 'previous', 'pause', 'bogus']) {
+      await emit({'type': 'action', 'generation': 0, 'action': action});
+    }
+    expect(seen, ['play', 'next', 'previous', 'pause']);
+    await sub.cancel();
+  });
+
   test(
     'passes stream headers, load offset and controls to the single player',
     () async {
