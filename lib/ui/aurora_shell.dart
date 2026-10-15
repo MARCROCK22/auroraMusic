@@ -1340,6 +1340,8 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                   c.toggleFavorite(t);
                 case 'queue':
                   c.addToQueue(t);
+                case 'next':
+                  c.playNext(t);
                 case 'download':
                   c.downloadTrack(t);
                 case 'playlist':
@@ -1382,6 +1384,10 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
               const PopupMenuItem(
                 value: 'queue',
                 child: Text('Añadir a la cola'),
+              ),
+              const PopupMenuItem(
+                value: 'next',
+                child: Text('Reproducir a continuación'),
               ),
               const PopupMenuItem(
                 value: 'playlist',

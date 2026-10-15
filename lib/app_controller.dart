@@ -1499,6 +1499,59 @@ class AppController extends ChangeNotifier {
     _notify();
   }
 
+  String? _playNextAnchorId;
+  int _playNextCount = 0;
+
+  /// Inserts [track] right after the current one, FIFO among play-next calls.
+  Future<void> playNext(Track track) async {
+    if (queue.isEmpty || queueIndex < 0 || queueIndex >= queue.length) {
+      return addToQueue(track);
+    }
+    bool matches(Track queued) => recommendationTracksMatch(queued, track);
+    if (queue.indexWhere(matches) == queueIndex) return;
+    if (!queue.any(matches)) await _remember(track);
+    // Recheck after persistence: the queue may have changed meanwhile.
+    if (queueIndex < 0 || queueIndex >= queue.length) return addToQueue(track);
+    final currentId = queue[queueIndex].id;
+    if (_playNextAnchorId != currentId) {
+      _playNextAnchorId = currentId;
+      _playNextCount = 0;
+    }
+    var moved = track;
+    final from = queue.indexWhere(matches);
+    if (from == queueIndex) return;
+    if (from >= 0) {
+      moved = queue.removeAt(from);
+      if (from < queueIndex) {
+        queueIndex--;
+      } else if (from <= queueIndex + _playNextCount) {
+        _playNextCount--;
+      }
+      _shuffleHistory.clear();
+      _shufflePlayed
+        ..clear()
+        ..add(queueIndex);
+    } else {
+      final insertAt = queueIndex + 1 + _playNextCount;
+      for (var i = 0; i < _shuffleHistory.length; i++) {
+        if (_shuffleHistory[i] >= insertAt) _shuffleHistory[i]++;
+      }
+      final shifted = _shufflePlayed
+          .map((i) => i >= insertAt ? i + 1 : i)
+          .toList();
+      _shufflePlayed
+        ..clear()
+        ..addAll(shifted);
+    }
+    queue.insert(queueIndex + 1 + _playNextCount, moved);
+    _playNextCount++;
+    if (_personalDjActive) {
+      _personalDjSeenKeys.addAll(recommendationTrackKeys(moved));
+    }
+    await _saveQueue();
+    _notify();
+  }
+
   Future<void> removeFromQueue(int index) async {
     if (index < 0 || index >= queue.length) return;
     final currentRemoved = index == queueIndex;
