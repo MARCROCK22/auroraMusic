@@ -1,4 +1,4 @@
-> **Actualización v1.1.0.** La resolución principal ya no es yt-dlp: la URL de solo audio llega por InnerTube + `youtube_explode_dart` 3.1.0 y Media3 la reproduce con streaming real; yt-dlp es respaldo (un intento) y descargas. Lo que sigue describe el flujo previo y las descargas, que siguen vigentes. Pendiente en dispositivo real: segundo plano/pantalla apagada y Bluetooth. Android añade `WAKE_MODE_NETWORK` y `ACCESS_WIFI_STATE`.
+> **Actualización.** Las canciones de YouTube ya no se resuelven ni pasan por Media3: suenan en el reproductor oficial de music.youtube.com dentro de un WebView oculto ([youtube_music_audio_engine.md](youtube_music_audio_engine.md)). Media3 reproduce los archivos locales y además refleja el estado del WebView en su sesión/notificación (servicio en primer plano, bloqueos de CPU y Wi-Fi mientras suena) para que Android no congele la app en segundo plano. yt-dlp queda para descargas. Lo que sigue describe descargas y reproducción local. Pendiente en dispositivo real: segundo plano/pantalla apagada y Bluetooth.
 
 # Reproducción Android, streaming y música sin conexión
 

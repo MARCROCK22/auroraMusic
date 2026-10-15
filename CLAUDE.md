@@ -1,8 +1,9 @@
 # Aurora Music — guía para Claude
 
 Lee también `AGENTS.md` (estilo, comandos) y `DESIGN.md` (estética). Este archivo
-manda sobre `RETOMAR_AURORA.md` cuando se contradicen: el motor WebView quedó
-reemplazado por el motor de audio InnerTube (15/10/2026, pedido del usuario).
+manda sobre `RETOMAR_AURORA.md` cuando se contradicen. Decisión final del usuario
+(15/10/2026): el audio de YouTube suena en el reproductor oficial de
+music.youtube.com dentro de un WebView invisible, con la interfaz de Aurora encima.
 
 ## Qué es
 
@@ -13,19 +14,25 @@ cola nativa), pero con la interfaz de Aurora. **No cambiar la estética.**
 
 ## Motor de audio (actual)
 
-- `lib/sources/innertube_source.dart`: búsqueda de canciones en YouTube Music
-  (InnerTube WEB_REMIX) y resolución de **solo audio**.
-  Si la resolución falla, yt-dlp solo **extrae la URL** (fallback, un intento).
-- **Streaming real en Android y Windows por igual**: el audio suena mientras
-  llega. Nunca descargar el archivo completo antes de reproducir (causó
-  bloqueos de yt-dlp).
-- Reproducción nativa: Android `AndroidMusicAudio` (Media3, servicio en segundo
-  plano); Windows `MusicAudio` (SoLoud + FFmpeg). Sin WebView en la reproducción.
-- yt-dlp: descargas explícitas (audio y vídeo) y fallback de resolución.
+- Búsqueda: `lib/sources/innertube_source.dart` (InnerTube WEB_REMIX: canciones,
+  álbumes, artistas, vídeos, continuación). No volver a la búsqueda por DOM.
+  `resolve()` devuelve `https://music.youtube.com/watch?v=<id>`; no extrae nada.
+- Reproducción YouTube: `lib/audio_web/` (`WebMusicAudio` + `NativeWebMusicBridge`):
+  WebView siempre montado en `aurora_shell.dart`, 1×1 y tapado, sin puntero/foco/
+  semántica; solo se muestra como hoja cuando el sitio pide consentimiento/acceso
+  («Revisar sitio»). Metadatos desde el `Track`; estado/progreso/fin desde el
+  elemento multimedia. Anuncios: filtros `adblocker_webview` (solo Windows) +
+  silenciar/omitir; no es garantía.
+- Local: Android `AndroidMusicAudio` (Media3, servicio; además refleja el WebView en
+  la sesión/notificación con bloqueos de CPU/Wi-Fi), Windows `MusicAudio`
+  (SoLoud + FFmpeg) con EQ/espectro. `RoutedMusicAudio` elige un único motor.
+- **Prohibido**: tokens PO, imitar clientes/UA, extraer URLs de audio de YouTube,
+  saltarse restricciones del sitio (p. ej. reproducción en segundo plano de Premium).
+- yt-dlp: solo descargas explícitas (audio y vídeo) e importación de listas.
 - DJ: `lib/dj/` — IA propia y local: base de datos vectorial (drift/SQLite) con
   embeddings de pistas y perfil de gustos del usuario; ranking por similitud +
-  diversidad (MMR). No usa recomendaciones de YouTube: YouTube solo da el audio
-  (y la búsqueda para encontrar pistas reproducibles).
+  diversidad (MMR). No usa recomendaciones de YouTube.
+- Detalle: `docs/youtube_music_audio_engine.md`.
 
 ## Comandos (PowerShell, Windows)
 

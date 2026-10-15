@@ -1,150 +1,120 @@
-> **Reemplazado (v1.1.0, 2026-10-15).** El motor WebView descrito aquí fue sustituido por el motor InnerTube de solo audio con streaming nativo (Media3 en Android, SoLoud + FFmpeg en Windows). Se conserva como historial. Ver [README](../README.md) y [architecture.md](architecture.md).
+# Motor de audio de YouTube: reproductor oficial en WebView oculto
 
-# Official Music WebView engine for Aurora's native audio interface
+Decisión del usuario (15/10/2026, definitiva): todo el audio de YouTube suena en el
+reproductor **oficial** de `music.youtube.com`, dentro de un WebView completamente
+invisible, con la interfaz nativa de Aurora encima. Motivo: la extracción nativa
+(`youtube_explode_dart`) quedaba cortada por YouTube tras ~1 MiB (exigencia de
+tokens PO) y yt-dlp recibía HTTP 429. Aurora **no** genera tokens PO, **no** imita
+clientes ni cambia el user agent y **no** extrae URLs de audio de YouTube.
 
-Updated 2026-10-13 for the latest requirement: preserve Aurora's native library,
-artists, playlists, queue and player; stream through the official Music website
-without visible video; keep yt-dlp for explicit downloads only.
+## Piezas
 
-## Implemented scope
-
-[WebMusicAudio](../lib/audio_web/web_music_audio.dart) extends Aurora's
-[AudioBackend](../lib/core/audio_backend.dart). It hosts `music.youtube.com` with
-the installed `flutter_inappwebview` 6.1.5 plugin. JavaScript controls the page's
-ordinary `HTMLMediaElement`: `play()`, `pause()`, `currentTime` and `volume`. Actual
-media state, duration/progress, errors, public MediaSession/DOM metadata and the
-`ended` event supply Aurora's state. No elapsed timer fabricates playback or
-completion. Polling samples observed state every 500 ms; an event listener retains
-the final snapshot if the website advances before the next poll.
-
-The page remains mounted behind Aurora's widgets in a covered 1 × 1 Flutter host
-with pointer, focus and semantics excluded. CSS hides video presentation without
-removing its media element. Optional website access exposes consent, ordinary site
-controls and errors, with video still hidden. Aurora remains the primary player.
-
-**Hidden video presentation does not establish audio-only network transport.** The
-website can download or decode audiovisual streams even when no video is displayed.
-This prototype neither selects media formats nor intercepts media URLs/segments.
-Do not claim reduced video bandwidth without measuring it. The official product's
-audio mode and account entitlements remain website-owned.
-
-This replaces the earlier feasibility report, whose whole-site/visible-player
-constraints no longer match the request. Absence of a public Music API or IFrame
-developer conditions was not used as proof that ordinary page media cannot be
-bridged. This is an experimental website-DOM integration with no claim of a stable
-provider contract; runtime observations determine its actual limitations.
-
-## API for the integration owner
-
-```dart
-final web = WebMusicAudio();
-await web.initialize();
-// Mount once after initialize, in the same persistent shell slot.
-final host = web.buildEngineView(showWebsite: false);
-await web.load(const ResolvedAudio(
-  input: 'https://music.youtube.com/watch?v=6geljA2OZSY',
-));
-await web.play(); // Triggered by a native Aurora user action.
-```
-
-| Contract | Behavior |
+| Pieza | Papel |
 | --- | --- |
-| `initialize()` | Android WebView or Windows WebView2; unsupported platforms fail explicitly. |
-| `buildEngineView(showWebsite: false)` | Persistent hidden engine; toggle visibility in place, never move between tabs or mount twice. |
-| `load(ResolvedAudio, start: ...)` | Exact HTTPS Music `/watch?v=` URL and 11-character ID only; no extra parameters, fragments, credentials, custom ports or headers. |
-| `play/pause/seek/setVolume/stop` | Ordinary media commands; seek refused for detected ads or unrecognized player DOM. Stop pauses and unloads the watch page. |
-| `isPlaying/isBuffering/position/duration/completed` | Observed media state, one completion per selected track; advertisements do not complete the queue entry. |
-| `currentTrackMetadata/title/artist/artworkUrl` | Observed metadata, never fake provider songs; artwork accepts HTTPS image hosts only. |
-| `needsWebsiteAccess/lastError` | Actionable consent, blocked play, timeout, navigation, renderer or media failures. |
-| `adPlaying/adBlocker` | Best-effort DOM ad indication and existing protected-domain filter adapter; no in-stream advertisement-removal guarantee. |
-| `supportsEqualizer/supportsVisualization` | Both false; EQ no-op and zero spectrum. No PCM is available to Aurora. |
-| `refresh()` | Explicit sample and deterministic fake-bridge seam. |
+| [`InnerTubeSource`](../lib/sources/innertube_source.dart) | Búsqueda (canciones, álbumes, artistas, vídeos, continuación). `resolve()` devuelve `https://music.youtube.com/watch?v=<id>`; local → archivo; otras URLs → error explícito. Sin precarga. |
+| [`RoutedMusicAudio`](../lib/audio/routed_music_audio.dart) | Un único motor activo: páginas `music.youtube.com` → web; todo lo demás → nativo. Solo la finalización del motor activo avanza la cola. |
+| [`WebMusicAudio`](../lib/audio_web/web_music_audio.dart) | `AudioBackend` sobre la página oficial. Órdenes serializadas con generación por pista; estado observado cada 500 ms. |
+| [`NativeWebMusicBridge`](../lib/audio_web/web_music_bridge.dart) | `flutter_inappwebview` 6.1.5, política de navegación, filtros de anuncios y el script de página (`webMusicMediaScript`). |
+| [`aurora_shell.dart`](../lib/ui/aurora_shell.dart) | Monta el WebView una sola vez, en la misma posición del árbol. |
 
-The integration owner routes official Music watch inputs here, local/direct audio
-to the existing native backend, and advances Aurora's actual queue on `completed`.
-Controller, source, bootstrap and shell changes are outside this engine's ownership.
-Source resolution must never fall back to yt-dlp streaming on a web failure.
+Los archivos locales siguen en Android Media3 (`AndroidMusicAudio`) y Windows
+SoLoud + FFmpeg (`MusicAudio`), con ecualizador y espectro. En canciones de YouTube
+`supportsEqualizer` y `supportsVisualization` son falsos y la interfaz lo indica.
 
-Commands are serialized. Load generations reject stale results and cancel outdated
-play/stop requests. Play waits at most 45 seconds by default. Pause while initial
-volume/seek is pending cancels remaining play intent. Missing media, site changes
-and failures stay explicit. Open shadow roots are searched; cross-origin iframes
-or closed shadow roots would require another integration if the site adopts them.
+## Nunca se ve la página
 
-## Browser/session boundary
+- El WebView está siempre montado (no `Offstage`: seguiría sin pintar) en una caja
+  de 1×1 en la esquina, tapada por un cuadro opaco, con `IgnorePointer`,
+  `ExcludeFocus` y `ExcludeSemantics`. CSS oculta además el `<video>`.
+- No hay ningún botón que muestre el sitio durante el uso normal (se quitó la
+  entrada «Acceso a YouTube Music» del menú).
+- Solo si el sitio exige algo al usuario (página de consentimiento, inicio de
+  sesión, verificación o un bloqueo de gesto) Aurora muestra un aviso en español
+  con **Revisar sitio**. Ese botón agranda el mismo WebView como hoja sobre Aurora
+  (sin reparentarlo); **Listo** la oculta y vuelve a intentar la canción.
+- El inicio de sesión de Google dentro del WebView sigue bloqueado por la política
+  de navegación existente: Google no admite ese acceso embebido.
 
-[The HTML media standard](https://html.spec.whatwg.org/multipage/media.html#media-elements)
-defines the ordinary media controls/state used here.
-[The plugin's JavaScript documentation](https://inappwebview.dev/docs/webview/javascript/communication/)
-describes script evaluation; the plugin serializes command arguments rather than
-interpolating track IDs or values into script text.
+## Órdenes y errores (antes «El sitio no pudo aplicar ese control»)
 
-Native UA, TLS verification and normal component cookies remain intact. Native
-Aurora play actions use `mediaPlaybackRequiresUserGesture: false` so that a
-WebView-only tap is not also required; this does not grant login, Premium or DRM
-access. `NotAllowedError` is distinguished from other failures. Failed/timed-out
-play is paused and surfaced for recovery.
+La causa del síntoma A era `play()` en carrera contra 4 s, colapsado en
+`commandFailed`. Ahora el script de página:
 
-Windows checks runtime availability and reuses the existing application-support
-`youtube_music_webview` profile.
-[Microsoft documents this folder](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/user-data-folder)
-as storage for component cookies/site data; it does not transfer external-browser
-login. Android uses normal app WebView storage. Consent HTTPS origins may load;
-embedded Google account navigation is rejected by the existing navigation policy,
-with an explanation that browser sessions are independent.
+- espera eventos reales `playing`/`timeupdate` con el elemento sin pausar, con un
+  límite de 20 s (`playTimeout`); la llamada Dart tiene 5 s de margen extra;
+- ante `AbortError` (el sitio cambió la fuente) vuelve a buscar el elemento,
+  espera `loadeddata` y reintenta una vez;
+- distingue `NotAllowedError` (`playBlocked`, pide revisar el sitio) y
+  `TimeoutError` (`playTimeout`, basta con pulsar reproducir);
+- solo busca posición con `readyState >= 1`; si no, la aplica en `loadedmetadata`;
+- en los mensajes solo incluye nombres de error de una lista cerrada
+  (`AbortError`, `NotSupportedError`, …), nunca mensajes, URLs ni DOM.
 
-No cookie/token export, UA spoofing, login/Premium/DRM bypass, private player API,
-media URL extraction, native YouTube ExoPlayer, automatic download, ad skip or
-forced private audio-mode setting is implemented. Existing generic filters protect
-media/authentication origins and are not repurposed to block video segments.
-Advertisement DOM detection is best effort, not a provider guarantee.
+La espera inicial a que aparezca el elemento multimedia está acotada (30 s). Si el
+sitio reproduce solo al navegar sin intención de Aurora, se pausa. No hay
+reintentos automáticos de flujo: la recuperación del controlador ignora el motor web.
 
-## Verification and reproducible device probe
+## Anuncios (sin garantías)
 
-At this checkpoint ten unit/widget tests pass using the public
-[WebMusicBridge](../lib/audio_web/web_music_bridge.dart) fake seam. Coverage includes
-input validation, commands/metadata, bounded missing media, failure/recovery, ad
-completion isolation, stale responses, artwork validation, stop cancellation,
-pause-during-play cancellation and persistent hidden/visible mounting. Fake state
-validates Aurora behavior, not successful website playback or audible output.
+1. Filtros de red de `adblocker_webview` (EasyList/AdGuard) en la intercepción
+   nativa, con dominios de YouTube/Google protegidos. **Solo Windows**: en Android
+   la intercepción se desactiva por un ANR observado del plugin 1.1.3.
+2. Si se muestra un anuncio (`.ad-showing`/`.ad-interrupting` en el reproductor),
+   la página silencia su elemento multimedia, pulsa el botón «Omitir» del propio
+   sitio en cuanto está visible y habilitado, y quita el silencio al terminar.
+3. Aurora muestra «Anuncio · tu canción sigue después» en lugar del artista, no
+   actualiza posición/duración con las del anuncio y nunca cuenta su final como fin
+   de canción.
 
-```powershell
-flutter test --no-pub test/audio_only_engine_test.dart
-flutter analyze --no-pub lib/audio_web test/audio_only_engine_test.dart
-```
+Los selectores de anuncios dependen del DOM del sitio y pueden cambiar.
 
-Prior observations preserved in the root `RETOMAR_AURORA.md` used the older
-whole-page Android x86_64 API 36 emulator build with WebView 134.0.6998.135. The
-official song `6geljA2OZSY` exposed a real VIDEO element, title "Que Se Mueran",
-artist "Romeo Santos", duration 251 seconds, readyState 4, paused true and
-currentTime 0. A bridge play attempt with the prior default gesture configuration
-returned `playBlocked`, mediaError 0. This measures element access and gesture
-blocking; it does not establish successful playback in the new engine.
+## Metadatos y controles del sistema
 
-The latest gesture setting must be tested after rebuilding the integrated app.
-The coordinator owns all device mutations/builds; this worker did not reinstall,
-navigate media, change debugger forwarding or run another app. On the coordinator's
-existing debug Music target, the sanitized probe is:
+Título, artista, álbum y portada salen del `Track` de Aurora (InnerTube); posición,
+duración y fin, del elemento multimedia. Windows: `MediaControls` (SMTC) escucha el
+`RoutedMusicAudio`, así que refleja la reproducción web y envía
+reproducir/pausa/siguiente/anterior/buscar al controlador. Android: el servicio
+Media3 recibe `external` dos veces por segundo y expone ese estado en su sesión
+(`SessionPlayer.getState()`); sus órdenes vuelven como acciones (`seek:<ms>`
+incluido).
 
-```powershell
-python test/audio_only_engine_cdp_probe.py --port 9223
-python test/audio_only_engine_cdp_probe.py --port 9223 --run-bridge --action snapshot
-python test/audio_only_engine_cdp_probe.py --port 9223 --run-bridge --action play
-python test/audio_only_engine_cdp_probe.py --port 9223 --run-bridge --action pause
-python test/audio_only_engine_cdp_probe.py --port 9223 --run-bridge --action seek --value 30
-python test/audio_only_engine_cdp_probe.py --port 9223 --run-bridge --action volume --value 0.5
-```
+## Android en segundo plano / pantalla apagada
 
-Requires a loopback ADB/CDP forward, existing Python `websocket-client`, and exactly
-one official Music target. Default mode is read-only; `--run-bridge` explicitly
-permits shipped CSS/listener code and the chosen ordinary command. Avoid play/seek
-on another person's active queue. Output excludes media URLs, credentials and raw
-evaluation exceptions.
+Causa probable de las pausas anteriores: durante la reproducción web el servicio
+Media3 no estaba reproduciendo, así que no pasaba a primer plano y Android podía
+congelar o matar el proceso al salir de la app. Ahora:
 
-After integration verify increasing currentTime, pause/resume, seek and transitions
-through actual Aurora UI controls; CDP play alone does not prove Flutter wiring.
-Observe foreground/background/screen-off, local↔web switching and search while
-playing. A headless `-no-audio` emulator cannot establish audible output. Windows
-runtime, physical-device sound, Bluetooth, background service/session controls,
-provider accounts/regions, completed songs and audio-only network bytes remain
-unverified at this worker checkpoint; do not report them as shipped or universal.
+- la sesión Media3 refleja la reproducción web → notificación y servicio en primer
+  plano mientras suena;
+- el servicio toma un `PARTIAL_WAKE_LOCK` (renovado, caduca solo a los 10 min sin
+  noticias) y un bloqueo Wi-Fi mientras la web reproduce;
+- `mediaPlaybackRequiresUserGesture: false`; el plugin no llama a
+  `onPause`/`pauseTimers` por sí mismo y Aurora tampoco; la prioridad del renderer
+  queda en la predeterminada (importante aun sin ser visible).
+
+Pendiente y fuera de alcance legítimo: con un user agent móvil, el sitio puede
+pausar la reproducción en segundo plano para cuentas sin Premium. Aurora no falsea
+la visibilidad de la página ni el user agent para evitarlo.
+
+## Windows
+
+- Perfil WebView2 persistente en `<soporte>/youtube_music_webview`, reutilizado.
+- Salida limpia: con el motor montado, cerrar la ventana pasa por
+  `_confirmWindowClose`, que desmonta el WebView, espera un frame y libera el
+  `WebViewEnvironment` antes de permitir el cierre (el entorno vivo retenía el
+  proceso y `WebView2Loader.dll`).
+
+## Pruebas
+
+- `test/audio_only_engine_test.dart`: puente falso; órdenes, timeout de play,
+  nombres de error, bloqueo de gesto, consentimiento, anuncios sin finalización,
+  autoplay, generaciones obsoletas, montaje oculto 1×1 sin entrada.
+- `test/web_music_script_test.dart`: ejecuta el script real en Node con un DOM
+  mínimo (se omite sin Node): espera de eventos, reintento tras `AbortError`,
+  timeout, silencio/omisión de anuncios, búsqueda antes de metadatos.
+- `test/routed_music_audio_test.dart` y `test/web_engine_shell_test.dart`:
+  enrutado web↔local, espejo de sesión, hoja de consentimiento y «Anuncio».
+
+Ninguna prueba contacta YouTube. **Requiere verificación en dispositivo**: sonido
+real, anuncios, segundo plano/pantalla apagada y notificación en Android, SMTC y
+salida limpia en Windows.
