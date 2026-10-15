@@ -1,11 +1,37 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
+import 'dart:math';
 
 import 'resolved_stream.dart';
 
 /// Loopback range proxy in front of googlevideo (127.0.0.1 only).
+///
+/// The player sees one stable URL per video and any `Range`; upstream is read
+/// in bounded chunks so an expired URL can be refreshed mid-stream.
 class AudioProxy {
-  AudioProxy._();
+  AudioProxy._(
+    this._server,
+    this._client,
+    this.chunkBytes,
+    int maxUpstream,
+    this.headerTimeout,
+    this.stallTimeout,
+  ) : _free = maxUpstream;
+
+  static const _maxEntries = 64;
+
+  final HttpServer _server;
+  final HttpClient _client;
+  final int chunkBytes;
+  final Duration headerTimeout;
+  final Duration stallTimeout;
+  final _entries = <String, _Entry>{};
+  final _active = <_Ctx>{};
+  final _waiters = Queue<Completer<void>>();
+  int _free;
+  bool _closed = false;
+  Future<void>? _closing;
 
   static Future<AudioProxy> start({
     int chunkBytes = 4 << 20,
@@ -13,18 +39,381 @@ class AudioProxy {
     Duration headerTimeout = const Duration(seconds: 15),
     Duration stallTimeout = const Duration(seconds: 20),
     HttpClient? client,
-  }) => throw UnimplementedError();
+  }) async {
+    if (chunkBytes <= 0 || maxUpstream <= 0) throw ArgumentError('limits');
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final http = client ?? (HttpClient()..userAgent = null);
+    final proxy = AudioProxy._(
+      server,
+      http,
+      chunkBytes,
+      maxUpstream,
+      headerTimeout,
+      stallTimeout,
+    );
+    server.listen(
+      (request) => unawaited(proxy._serve(request)),
+      onError: (Object _) {},
+    );
+    return proxy;
+  }
 
   Uri register(
     String videoId,
     ResolvedStream stream, {
     required Future<ResolvedStream> Function() refresh,
     void Function(int? status, String reason)? onFailure,
-  }) => throw UnimplementedError();
+  }) {
+    if (_closed) throw StateError('AudioProxy is closed.');
+    final old = _entries.remove(videoId);
+    final entry = _Entry(
+      videoId,
+      old?.token ?? _hex(16),
+      old?.id ?? _hex(8),
+      stream,
+      refresh,
+      onFailure,
+    );
+    _entries[videoId] = entry;
+    while (_entries.length > _maxEntries) {
+      _entries.remove(_entries.keys.first);
+    }
+    return Uri.parse(
+      'http://127.0.0.1:${_server.port}/${entry.token}/a/${entry.id}',
+    );
+  }
 
-  ResolvedStream? current(String videoId) => throw UnimplementedError();
+  ResolvedStream? current(String videoId) => _entries[videoId]?.stream;
 
-  void unregister(String videoId) => throw UnimplementedError();
+  /// In-flight requests keep their entry and finish; new ones get 404.
+  void unregister(String videoId) => _entries.remove(videoId);
 
-  Future<void> close() => throw UnimplementedError();
+  Future<void> close() => _closing ??= () async {
+    _closed = true;
+    _entries.clear();
+    for (final ctx in _active.toList()) {
+      ctx.abort();
+    }
+    while (_waiters.isNotEmpty) {
+      _waiters.removeFirst().completeError(StateError('closed'));
+    }
+    _client.close(force: true);
+    await _server.close(force: true);
+  }();
+
+  static String _hex(int bytes) {
+    final random = Random.secure();
+    return List.generate(
+      bytes,
+      (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ).join();
+  }
+
+  Future<void> _acquire() {
+    if (_closed) return Future.error(StateError('closed'));
+    if (_free > 0) {
+      _free--;
+      return Future.value();
+    }
+    final waiter = Completer<void>();
+    _waiters.add(waiter);
+    return waiter.future;
+  }
+
+  void _release() {
+    if (_waiters.isNotEmpty) {
+      _waiters.removeFirst().complete();
+    } else {
+      _free++;
+    }
+  }
+
+  Future<void> _serve(HttpRequest request) async {
+    final response = request.response;
+    final ctx = _Ctx();
+    Socket? socket;
+    var headersSent = false;
+    try {
+      if (request.headers.value('host') != '127.0.0.1:${_server.port}') {
+        return _reply(response, HttpStatus.forbidden);
+      }
+      final isHead = request.method == 'HEAD';
+      if (!isHead && request.method != 'GET') {
+        return _reply(response, HttpStatus.methodNotAllowed);
+      }
+      final parts = request.uri.pathSegments;
+      _Entry? entry;
+      if (parts.length == 3 && parts[1] == 'a') {
+        for (final e in _entries.values) {
+          if (e.token == parts[0] && e.id == parts[2]) entry = e;
+        }
+      }
+      if (entry == null) return _reply(response, HttpStatus.notFound);
+      final rangeHeader = request.headers.value('range');
+      // HttpServer cannot see a client leaving while we wait on upstream, so
+      // the raw socket is owned from here on (one response per connection).
+      socket = ctx.socket = await response.detachSocket(writeHeaders: false);
+      _active.add(ctx);
+      socket.listen(
+        (_) {},
+        onDone: ctx.abort,
+        onError: (Object _) => ctx.abort(),
+      );
+
+      final total = entry.total ?? await _learnTotal(entry, ctx);
+      final range = _parseRange(rangeHeader, total);
+      if (range == null) {
+        _head(socket, 416, 'Range Not Satisfiable', {
+          'Content-Range': 'bytes */$total',
+          'Content-Length': 0,
+        });
+        await socket.close();
+        return;
+      }
+      final start = range[0], end = range[1];
+      final partial = range[2] == 1;
+      final headers = <String, Object>{
+        'Content-Type': entry.stream.mimeType ?? 'audio/webm',
+        'Accept-Ranges': 'bytes',
+        'Content-Length': end - start + 1,
+        if (partial) 'Content-Range': 'bytes $start-$end/$total',
+      };
+      void sendHead() {
+        headersSent = true;
+        _head(
+          socket!,
+          partial ? 206 : 200,
+          partial ? 'Partial Content' : 'OK',
+          headers,
+        );
+      }
+
+      for (var pos = start; !isHead && pos <= end; pos += chunkBytes) {
+        final last = min(pos + chunkBytes - 1, end);
+        await _acquire();
+        try {
+          final upstream = await _open(entry, pos, last, ctx);
+          if (!headersSent) sendHead();
+          var got = 0;
+          try {
+            // Manual listen: abort() must cancel the body, because
+            // HttpClientRequest.abort() is a no-op once headers arrived.
+            final done = Completer<void>();
+            final sub = upstream
+                .timeout(stallTimeout)
+                .listen(null, cancelOnError: true);
+            sub.onData((data) {
+              got += data.length;
+              sub.pause();
+              socket!.add(data);
+              socket.flush().then(
+                (_) => sub.resume(),
+                onError: done.completeError,
+              );
+            });
+            sub.onError(done.completeError);
+            sub.onDone(done.complete);
+            ctx.cancelBody = () {
+              sub.cancel();
+              if (!done.isCompleted) done.completeError(_Fail(null, 'aborted'));
+            };
+            await done.future;
+            ctx.cancelBody = null;
+            if (got != last - pos + 1) throw _Fail(null, 'premature EOF');
+          } catch (_) {
+            ctx.cancelBody?.call();
+            ctx.upstream?.abort();
+            rethrow;
+          }
+        } finally {
+          _release();
+        }
+      }
+      if (isHead) sendHead();
+      ctx.finished = true;
+      await socket.close();
+    } catch (_) {
+      ctx.upstream?.abort();
+      try {
+        if (socket != null && !headersSent && !ctx.aborted) {
+          _head(socket, 410, 'Gone', {'Content-Length': 0});
+          await socket.close();
+        }
+      } catch (_) {}
+      // After headers the player sees a premature EOF / closed connection.
+    } finally {
+      ctx.finished = true;
+      socket?.destroy();
+      _active.remove(ctx);
+    }
+  }
+
+  static void _head(Socket s, int status, String text, Map<String, Object> h) {
+    final lines = h.entries.map((e) => '${e.key}: ${e.value}\r\n').join();
+    s.write('HTTP/1.1 $status $text\r\n${lines}Connection: close\r\n\r\n');
+  }
+
+  static Future<void> _reply(HttpResponse response, int status) {
+    response.statusCode = status;
+    return response.close();
+  }
+
+  /// `[start, end, partial]` or null when unsatisfiable.
+  static List<int>? _parseRange(String? header, int total) {
+    if (header == null) return total == 0 ? null : [0, total - 1, 0];
+    final m = RegExp(r'^bytes=(\d*)-(\d*)$').firstMatch(header.trim());
+    if (m == null || (m[1]!.isEmpty && m[2]!.isEmpty)) return null;
+    int start, end;
+    if (m[1]!.isEmpty) {
+      final n = int.parse(m[2]!);
+      if (n == 0) return null;
+      start = max(0, total - n);
+      end = total - 1;
+    } else {
+      start = int.parse(m[1]!);
+      end = m[2]!.isEmpty ? total - 1 : min(int.parse(m[2]!), total - 1);
+    }
+    if (start >= total || end < start) return null;
+    return [start, end, 1];
+  }
+
+  Future<int> _learnTotal(_Entry entry, _Ctx ctx) async {
+    await _acquire();
+    try {
+      final response = await _open(entry, 0, 0, ctx);
+      final match = RegExp(
+        r'/(\d+)$',
+      ).firstMatch(response.headers.value('content-range') ?? '');
+      if (match == null) throw _Fail(null, 'no total length');
+      await response.drain<void>().timeout(stallTimeout);
+      return entry.total ??= int.parse(match[1]!);
+    } catch (_) {
+      ctx.upstream?.abort();
+      rethrow;
+    } finally {
+      _release();
+    }
+  }
+
+  /// Opens one upstream chunk. Refreshes an expiring URL up front and, on
+  /// 401/403/410, reports once, refreshes (single-flight) and retries once.
+  Future<HttpClientResponse> _open(_Entry entry, int a, int b, _Ctx ctx) async {
+    var stream = entry.stream;
+    if (stream.expiredAt(DateTime.now())) stream = await _renew(entry, stream);
+    for (var attempt = 0; ; attempt++) {
+      if (ctx.aborted || _closed) throw _Fail(null, 'aborted');
+      HttpClientRequest? request;
+      try {
+        request = await _client.getUrl(stream.url).timeout(headerTimeout);
+        ctx.upstream = request;
+        if (ctx.aborted) request.abort();
+        request.followRedirects = false;
+        request.headers
+          ..set('range', 'bytes=$a-$b')
+          ..set('accept-encoding', 'identity');
+        for (final h in stream.headers.entries) {
+          if (h.key.toLowerCase() == 'user-agent') {
+            request.headers.set('user-agent', h.value);
+          }
+        }
+        final response = await request.close().timeout(headerTimeout);
+        final status = response.statusCode;
+        if (status == HttpStatus.partialContent) return response;
+        request.abort();
+        if (attempt == 0 && const {401, 403, 410}.contains(status)) {
+          stream = await _renew(
+            entry,
+            stream,
+            status: status,
+            reason: 'HTTP $status',
+          );
+          continue;
+        }
+        throw _Fail(status, 'HTTP $status');
+      } catch (error) {
+        request?.abort();
+        if (error is _Fail) rethrow;
+        throw _Fail(null, '$error');
+      }
+    }
+  }
+
+  Future<ResolvedStream> _renew(
+    _Entry entry,
+    ResolvedStream used, {
+    int? status,
+    String? reason,
+  }) async {
+    if (!identical(entry.stream, used)) return entry.stream; // already swapped
+    var pending = entry.refreshing;
+    if (pending == null) {
+      if (reason != null) entry.onFailure?.call(status, reason);
+      pending = entry.refreshing = entry
+          .refresh()
+          .then((fresh) {
+            final known = entry.total;
+            if (known != null &&
+                fresh.contentLength != null &&
+                fresh.contentLength != known) {
+              throw _Fail(null, 'content length changed');
+            }
+            entry
+              ..stream = fresh
+              ..total ??= fresh.contentLength;
+            return fresh;
+          })
+          .whenComplete(() => entry.refreshing = null);
+    }
+    try {
+      return await pending;
+    } catch (error) {
+      throw error is _Fail ? error : _Fail(null, 'refresh failed: $error');
+    }
+  }
+}
+
+class _Entry {
+  _Entry(
+    this.videoId,
+    this.token,
+    this.id,
+    this.stream,
+    this.refresh,
+    this.onFailure,
+  ) : total = stream.contentLength;
+
+  final String videoId;
+  final String token;
+  final String id;
+  final Future<ResolvedStream> Function() refresh;
+  final void Function(int? status, String reason)? onFailure;
+  ResolvedStream stream;
+  int? total;
+  Future<ResolvedStream>? refreshing;
+}
+
+class _Ctx {
+  HttpClientRequest? upstream;
+  Socket? socket;
+  void Function()? cancelBody;
+  bool aborted = false;
+  bool finished = false;
+
+  /// Client gone or proxy closing: stop upstream and drop the connection.
+  void abort() {
+    if (finished) return;
+    aborted = true;
+    cancelBody?.call();
+    upstream?.abort();
+    socket?.destroy();
+  }
+}
+
+class _Fail implements Exception {
+  _Fail(this.status, this.reason);
+  final int? status;
+  final String reason;
+
+  @override
+  String toString() => reason;
 }
