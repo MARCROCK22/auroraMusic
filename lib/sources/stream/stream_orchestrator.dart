@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show SocketException;
 
 import 'player_clients.dart';
 import 'resolved_stream.dart';
@@ -10,15 +11,29 @@ typedef PlayerPost =
       Map<String, Object?> body,
     );
 
+/// Non-2xx reply from [PlayerPost]/[HttpGet] implementations. Network
+/// failures throw [SocketException]/[TimeoutException] instead.
+class HttpStatusException implements Exception {
+  const HttpStatusException(this.statusCode, [this.message = '']);
+
+  final int statusCode;
+  final String message;
+
+  @override
+  String toString() => 'HTTP $statusCode $message'.trim();
+}
+
 class HttpGetResult {
   const HttpGetResult(
     this.statusCode, {
-    this.body = '',
+    this.body = const [],
     this.headers = const {},
   });
 
   final int statusCode;
-  final String body;
+
+  /// Raw bytes; the tail probe gets binary data, so never decode strictly.
+  final List<int> body;
   final Map<String, String> headers;
 }
 
@@ -26,6 +41,7 @@ typedef HttpGet =
     Future<HttpGetResult> Function(
       Uri url,
       Map<String, String> headers, {
+      // Implementations declare a default (10 s).
       Duration timeout,
     });
 
