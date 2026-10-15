@@ -1,6 +1,36 @@
 import 'dart:io';
 import 'models.dart';
 
+enum SearchKind { songs, albums, artists, videos }
+
+/// Album or artist search hit; [browseId] opens its tracks via browse.
+class SearchEntry {
+  const SearchEntry({
+    required this.kind,
+    required this.browseId,
+    required this.title,
+    this.subtitle = '',
+    this.artworkUrl,
+  });
+  final SearchKind kind;
+  final String browseId;
+  final String title;
+  final String subtitle;
+  final String? artworkUrl;
+}
+
+/// One page of search results; [continuation] is null on the last page.
+class SearchPage {
+  const SearchPage({
+    this.tracks = const [],
+    this.entries = const [],
+    this.continuation,
+  });
+  final List<Track> tracks;
+  final List<SearchEntry> entries;
+  final String? continuation;
+}
+
 abstract class SourceBackend {
   bool get usesOfficialYouTubeMusic => false;
   bool get usesYouTubeWebAudio => false;
@@ -18,6 +48,18 @@ abstract class SourceBackend {
   /// Returns bytes removed while preserving the loaded audio at [protectedPath].
   Future<int> clearPlaybackCache({String? protectedPath}) async => 0;
   Future<List<Track>> search(String query, {int limit = 20});
+
+  /// Paged, categorised search. Sources without it only offer songs.
+  Future<SearchPage> searchPage(
+    String query,
+    SearchKind kind, {
+    String? continuation,
+  }) async => continuation != null || kind != SearchKind.songs
+      ? const SearchPage()
+      : SearchPage(tracks: await search(query));
+
+  /// Tracks of an album or an artist's top songs.
+  Future<List<Track>> browseTracks(SearchEntry entry) async => const [];
   Future<List<Track>> importPlaylist(Uri url);
   Future<ResolvedAudio> resolve(Track track);
 

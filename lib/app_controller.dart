@@ -165,9 +165,19 @@ class AppController extends ChangeNotifier {
   DjFilters _djFilters = const DjFilters();
   DjFilters get djFilters => _djFilters;
   String _searchQuery = '';
-  int _searchLimit = 20;
-  bool get hasMoreSearchResults =>
-      searchResults.length >= _searchLimit && _searchLimit < 50;
+  SearchKind searchKind = SearchKind.songs;
+  List<SearchEntry> searchEntries = [];
+  String? _searchContinuation;
+  bool searchLoadingMore = false;
+  String? searchError;
+  SearchEntry? searchDetail;
+  List<Track> searchDetailTracks = [];
+  bool searchDetailLoading = false;
+  String? searchDetailError;
+  bool get hasMoreSearchResults => _searchContinuation != null;
+  String get searchQuery => _searchQuery;
+  List<String> get recentSearches =>
+      preferences.getStringList('recentSearches') ?? const [];
   List<Track> recentTracks = [];
   List<MusicPlaylist> playlists = [];
   List<DownloadJob> downloads = [];
@@ -195,6 +205,7 @@ class AppController extends ChangeNotifier {
   int _playGeneration = 0;
   int _recoveryGeneration = 0;
   int _searchGeneration = 0;
+  int _searchDetailGeneration = 0;
   int _recommendationDiscoveryGeneration = 0;
   int _personalDjGeneration = 0;
   bool _personalDjActive = false;
@@ -1072,47 +1083,62 @@ class AppController extends ChangeNotifier {
     await database.saveTrack(track);
   }
 
-  Future<void> search(String query, {int limit = 20}) async {
+  /// Searches [query]; a new query discards any response still in flight.
+  Future<void> search(String query, {SearchKind? kind}) async {
     final generation = ++_searchGeneration;
     _searchQuery = query.trim();
-    _searchLimit = limit.clamp(1, 50);
-    if (query.trim().isEmpty) {
-      searchResults = [];
+    if (kind != null) searchKind = kind;
+    searchDetail = null;
+    searchError = null;
+    searchLoadingMore = false;
+    _searchContinuation = null;
+    searchResults = [];
+    searchEntries = [];
+    if (_searchQuery.isEmpty) {
       searching = false;
       _notify();
       return;
     }
     searching = true;
     error = null;
+    unawaited(_rememberSearch(_searchQuery));
     _notify();
     try {
-      final needle = query.trim().toLowerCase();
-      final result = usesOfficialYouTubeMusic || usesYouTubeWebAudio
-          ? _nativeLibrary
-                .where(
-                  (track) => [
-                    track.title,
-                    track.artist,
-                    track.album ?? '',
-                    ...track.genres,
-                  ].any((text) => text.toLowerCase().contains(needle)),
-                )
-                .take(_searchLimit)
-                .toList()
-          : await source.search(query.trim(), limit: _searchLimit);
-      if (usesYouTubeWebAudio && result.length < _searchLimit) {
-        if (generation == _searchGeneration) searchResults = result;
-        final linked = await source.search(
-          query.trim(),
-          limit: _searchLimit - result.length,
+      if (usesOfficialYouTubeMusic || usesYouTubeWebAudio) {
+        final needle = _searchQuery.toLowerCase();
+        final local = _nativeLibrary.where(
+          (track) => [
+            track.title,
+            track.artist,
+            track.album ?? '',
+            ...track.genres,
+          ].any((text) => text.toLowerCase().contains(needle)),
         );
-        final seen = result.map((track) => track.id).toSet();
-        result.addAll(linked.where((track) => seen.add(track.id)));
+        final result = local.toList();
+        if (generation == _searchGeneration) searchResults = result;
+        if (usesYouTubeWebAudio) {
+          try {
+            final linked = await source.search(_searchQuery);
+            final seen = result.map((track) => track.id).toSet();
+            result.addAll(linked.where((track) => seen.add(track.id)));
+          } catch (exception) {
+            if (generation == _searchGeneration) _report(exception);
+          }
+          if (generation == _searchGeneration) searchResults = result;
+        }
+      } else {
+        final page = await source.searchPage(_searchQuery, searchKind);
+        if (generation != _searchGeneration) return;
+        searchResults = page.tracks;
+        searchEntries = page.entries;
+        _searchContinuation = page.continuation;
       }
-      if (generation == _searchGeneration) searchResults = result;
-      unawaited(_embedDjTracks(result));
+      // Search results feed the DJ vector store.
+      if (generation == _searchGeneration) {
+        unawaited(_embedDjTracks(searchResults));
+      }
     } catch (exception) {
-      if (generation == _searchGeneration) _report(exception);
+      if (generation == _searchGeneration) searchError = _plain(exception);
     } finally {
       if (generation == _searchGeneration) {
         searching = false;
@@ -1121,8 +1147,91 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> loadMoreSearch() =>
-      search(_searchQuery, limit: (_searchLimit + 20).clamp(1, 50));
+  Future<void> setSearchKind(SearchKind kind) =>
+      kind == searchKind && _searchQuery.isEmpty
+      ? Future.value()
+      : search(_searchQuery, kind: kind);
+
+  Future<void> loadMoreSearch() async {
+    final token = _searchContinuation;
+    if (token == null || searching || searchLoadingMore) return;
+    final generation = _searchGeneration;
+    searchLoadingMore = true;
+    searchError = null;
+    _notify();
+    try {
+      final page = await source.searchPage(
+        _searchQuery,
+        searchKind,
+        continuation: token,
+      );
+      if (generation != _searchGeneration) return;
+      final tracks = {for (final t in searchResults) t.id};
+      final entries = {for (final e in searchEntries) e.browseId};
+      searchResults = [
+        ...searchResults,
+        ...page.tracks.where((t) => tracks.add(t.id)),
+      ];
+      searchEntries = [
+        ...searchEntries,
+        ...page.entries.where((e) => entries.add(e.browseId)),
+      ];
+      _searchContinuation = page.continuation;
+    } catch (exception) {
+      if (generation == _searchGeneration) searchError = _plain(exception);
+    } finally {
+      if (generation == _searchGeneration) {
+        searchLoadingMore = false;
+        _notify();
+      }
+    }
+  }
+
+  Future<void> openSearchEntry(SearchEntry? entry) async {
+    final generation = ++_searchDetailGeneration;
+    searchDetail = entry;
+    searchDetailTracks = [];
+    searchDetailError = null;
+    searchDetailLoading = entry != null;
+    _notify();
+    if (entry == null) return;
+    try {
+      final loaded = await source.browseTracks(entry);
+      if (generation == _searchDetailGeneration) searchDetailTracks = loaded;
+    } catch (exception) {
+      if (generation == _searchDetailGeneration) {
+        searchDetailError = _plain(exception);
+      }
+    } finally {
+      if (generation == _searchDetailGeneration) {
+        searchDetailLoading = false;
+        _notify();
+      }
+    }
+  }
+
+  Future<void> _rememberSearch(String query) => preferences.setStringList(
+    'recentSearches',
+    [query, ...recentSearches.where((item) => item != query)].take(10).toList(),
+  );
+
+  Future<void> removeRecentSearch(String query) async {
+    await preferences.setStringList(
+      'recentSearches',
+      recentSearches.where((item) => item != query).toList(),
+    );
+    _notify();
+  }
+
+  Future<void> clearRecentSearches() async {
+    await preferences.remove('recentSearches');
+    _notify();
+  }
+
+  String _plain(Object exception) => exception.toString().replaceFirst(
+    RegExp(r'^(Exception|StateError|Bad state):\s*'),
+    '',
+  );
 
   Future<void> playTrack(Track track, {List<Track>? context}) async {
     if (_jamPlaybackActive) return;

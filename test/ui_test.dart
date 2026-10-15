@@ -176,7 +176,7 @@ void main() {
   );
 
   testWidgets(
-    'typing and repeated submission cannot duplicate a pending YouTube search',
+    'typing never searches; a newer submission supersedes the pending one',
     (tester) async {
       await mount(tester, const Size(800, 900));
       await tester.tap(find.byTooltip('Buscar música'));
@@ -193,7 +193,7 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pump(const Duration(seconds: 1));
       expect(controller.searching, isTrue);
-      expect(source.searchQueries, ['Me at the zoo']);
+      expect(source.searchQueries, ['Me at the zoo', 'ab']);
       source.pendingSearch!.complete([controller.tracks.first]);
       await tester.pumpAndSettle();
       expect(controller.searching, isFalse);

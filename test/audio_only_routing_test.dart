@@ -589,7 +589,7 @@ void main() {
       );
       await app.database.saveTrack(saved);
       await app.initialize(mediaControls: false);
-      await app.search('Known', limit: 3);
+      await app.search('Known');
       expect(app.searchResults.map((track) => track.id), [
         saved.id,
         'yt:lmnopqrstuv',

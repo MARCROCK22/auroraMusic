@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../app_controller.dart';
 import '../core/audio_backend.dart';
 import '../core/models.dart';
+import '../core/source_backend.dart';
 import '../core/window_controls.dart';
 import '../jam/jam_controller.dart';
 import 'studio/studio_navigation.dart';
@@ -84,8 +85,6 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   bool _likesSelected = false;
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
-  String _submittedQuery = '';
-  final List<String> _recentSearches = [];
   late final AudioBackend _audio;
   bool _playerOpen = false;
   bool _foreground = true;
@@ -94,6 +93,9 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   @override
   void initState() {
     super.initState();
+    _searchFocus.addListener(() {
+      if (mounted) setState(() {});
+    });
     WidgetsBinding.instance.addObserver(this);
     _audio = ref.read(controllerProvider).audio;
     WindowControls.setCloseConfirmation(_confirmWindowClose);
@@ -215,16 +217,8 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   }
 
   void _submitSearch(AppController c, String query) {
-    if (c.searching) return;
-    setState(() => _submittedQuery = query.trim());
     final value = query.trim();
     if (value.isEmpty) return;
-    setState(() {
-      _submittedQuery = value;
-      _recentSearches.remove(value);
-      _recentSearches.insert(0, value);
-      if (_recentSearches.length > 6) _recentSearches.removeLast();
-    });
     c.search(value);
   }
 
@@ -861,9 +855,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             suffixIcon: IconButton(
               tooltip: 'Buscar',
               icon: const Icon(Icons.arrow_forward),
-              onPressed: c.searching
-                  ? null
-                  : () => _submitSearch(c, _search.text),
+              onPressed: () => _submitSearch(c, _search.text),
             ),
             border: const OutlineInputBorder(),
           ),
@@ -871,6 +863,29 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
           onChanged: (_) => setState(() {}),
         ),
       ),
+      if (!c.usesOfficialYouTubeMusic && !c.usesYouTubeWebAudio)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              spacing: 8,
+              children: [
+                for (final (kind, label) in const [
+                  (SearchKind.songs, 'Canciones'),
+                  (SearchKind.albums, 'Álbumes'),
+                  (SearchKind.artists, 'Artistas'),
+                  (SearchKind.videos, 'Vídeos'),
+                ])
+                  ChoiceChip(
+                    label: Text(label),
+                    selected: c.searchKind == kind,
+                    onSelected: (_) => c.setSearchKind(kind),
+                  ),
+              ],
+            ),
+          ),
+        ),
       if (c.searching) const LinearProgressIndicator(minHeight: 2),
       if (c.usesYouTubeWebAudio)
         const Padding(
@@ -896,79 +911,15 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         child: LayoutBuilder(
           builder: (context, constraints) {
             final hasSidebar = constraints.maxWidth >= 900;
-            final results = c.searchResults.isEmpty
-                ? _empty(
-                    Icons.travel_explore,
-                    c.searching
-                        ? 'Buscando tu próxima canción…'
-                        : _submittedQuery.isNotEmpty &&
-                              _submittedQuery == _search.text.trim()
-                        ? 'Sin resultados'
-                        : 'Encuentra algo que te mueva',
-                    c.searching
-                        ? 'La búsqueda puede tardar unos segundos.'
-                        : _submittedQuery.isNotEmpty &&
-                              _submittedQuery == _search.text.trim()
-                        ? 'Prueba con otro título o artista, o pega un enlace directo.'
-                        : 'Escribe un título, artista o pega un enlace compatible.',
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount:
-                        c.searchResults.length +
-                        (c.hasMoreSearchResults ? 1 : 0),
-                    itemBuilder: (_, i) => i == c.searchResults.length
-                        ? Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: OutlinedButton.icon(
-                              onPressed: c.searching ? null : c.loadMoreSearch,
-                              icon: const Icon(Icons.expand_more),
-                              label: Text(
-                                c.searching
-                                    ? 'Buscando…'
-                                    : 'Ver más resultados',
-                              ),
-                            ),
-                          )
-                        : _trackTile(c, c.searchResults[i], c.searchResults),
-                  );
+            final results = c.searchDetail != null
+                ? _searchDetail(c, c.searchDetail!)
+                : _searchFocus.hasFocus && _search.text.trim().isEmpty
+                ? _recentSearchList(c)
+                : _searchResults(c);
             if (!hasSidebar) return results;
             return Row(
               children: [
-                SizedBox(
-                  width: 220,
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 12, 16),
-                    children: [
-                      Text(
-                        'Búsquedas recientes',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 8),
-                      if (_recentSearches.isEmpty)
-                        Text(
-                          'Tus búsquedas aparecerán aquí.',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        )
-                      else
-                        for (final query in _recentSearches)
-                          ListTile(
-                            dense: true,
-                            contentPadding: EdgeInsets.zero,
-                            leading: const Icon(Icons.history, size: 18),
-                            title: Text(
-                              query,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            onTap: () {
-                              _search.text = query;
-                              _submitSearch(c, query);
-                            },
-                          ),
-                    ],
-                  ),
-                ),
+                SizedBox(width: 220, child: _recentSearchList(c)),
                 const VerticalDivider(width: 1),
                 Expanded(child: results),
               ],
@@ -978,6 +929,229 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       ),
     ],
   );
+
+  Widget _recentSearchList(AppController c) {
+    final recent = c.recentSearches;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 12, 16),
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Búsquedas recientes',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            if (recent.isNotEmpty)
+              TextButton(
+                onPressed: c.clearRecentSearches,
+                child: const Text('Borrar'),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (recent.isEmpty)
+          Text(
+            'Tus búsquedas aparecerán aquí.',
+            style: Theme.of(context).textTheme.bodySmall,
+          )
+        else
+          for (final query in recent)
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.history, size: 18),
+              title: Text(query, maxLines: 2, overflow: TextOverflow.ellipsis),
+              trailing: IconButton(
+                tooltip: 'Quitar de recientes',
+                icon: const Icon(Icons.close, size: 16),
+                onPressed: () => c.removeRecentSearch(query),
+              ),
+              onTap: () {
+                _search.text = query;
+                _searchFocus.unfocus();
+                _submitSearch(c, query);
+              },
+            ),
+      ],
+    );
+  }
+
+  Widget _searchResults(AppController c) {
+    final entries =
+        c.searchKind == SearchKind.albums || c.searchKind == SearchKind.artists;
+    final count = entries ? c.searchEntries.length : c.searchResults.length;
+    if (count == 0) {
+      if (c.searchError != null && !c.searching) {
+        return Column(
+          children: [
+            Expanded(
+              child: _empty(
+                Icons.error_outline,
+                'No se pudo buscar',
+                c.searchError!,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: OutlinedButton.icon(
+                onPressed: () => c.search(c.searchQuery),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Reintentar'),
+              ),
+            ),
+          ],
+        );
+      }
+      final done = c.searchQuery.isNotEmpty && !c.searching;
+      return _empty(
+        Icons.travel_explore,
+        c.searching
+            ? 'Buscando tu próxima canción…'
+            : done
+            ? 'Sin resultados'
+            : 'Encuentra algo que te mueva',
+        c.searching
+            ? 'La búsqueda puede tardar unos segundos.'
+            : done
+            ? 'Prueba con otro título o artista, o pega un enlace directo.'
+            : 'Escribe un título, artista o pega un enlace compatible.',
+      );
+    }
+    final hasFooter = c.hasMoreSearchResults || c.searchError != null;
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      itemCount: count + (hasFooter ? 1 : 0),
+      itemBuilder: (_, i) {
+        if (i < count) {
+          return entries
+              ? _entryTile(c, c.searchEntries[i])
+              : _trackTile(c, c.searchResults[i], c.searchResults);
+        }
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              if (c.searchError != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    'No se pudieron cargar más resultados: ${c.searchError}',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              if (c.hasMoreSearchResults)
+                OutlinedButton.icon(
+                  onPressed: c.searchLoadingMore ? null : c.loadMoreSearch,
+                  icon: const Icon(Icons.expand_more),
+                  label: Text(c.searchLoadingMore ? 'Cargando…' : 'Cargar más'),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _entryTile(AppController c, SearchEntry entry) => ListTile(
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+    leading: Artwork(
+      track: Track(
+        id: 'entry:${entry.browseId}',
+        title: entry.title,
+        artist: entry.subtitle,
+        artworkUrl: entry.artworkUrl,
+      ),
+      artworkContext: ArtworkContext.thumbnail,
+      radius: entry.kind == SearchKind.artists ? 28 : 8,
+    ),
+    title: Text(entry.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+    subtitle: Text(
+      entry.subtitle,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    ),
+    trailing: const Icon(Icons.chevron_right),
+    onTap: () => c.openSearchEntry(entry),
+  );
+
+  Widget _searchDetail(AppController c, SearchEntry entry) {
+    final tracks = c.searchDetailTracks;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 0, 16, 0),
+          child: Row(
+            children: [
+              IconButton(
+                tooltip: 'Volver a los resultados',
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => c.openSearchEntry(null),
+              ),
+              Expanded(
+                child: Text(
+                  entry.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (c.searchDetailLoading) const LinearProgressIndicator(minHeight: 2),
+        if (tracks.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  FilledButton.icon(
+                    onPressed: () => c.playTrack(tracks.first, context: tracks),
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text('Reproducir todo'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      for (final track in tracks) {
+                        await c.addToQueue(track);
+                      }
+                    },
+                    icon: const Icon(Icons.queue_music),
+                    label: const Text('Añadir a la cola'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        Expanded(
+          child: tracks.isNotEmpty
+              ? ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: tracks.length,
+                  itemBuilder: (_, i) => _trackTile(c, tracks[i], tracks),
+                )
+              : c.searchDetailLoading
+              ? _empty(Icons.album_outlined, 'Cargando…', entry.title)
+              : _empty(
+                  c.searchDetailError != null
+                      ? Icons.error_outline
+                      : Icons.music_off_outlined,
+                  c.searchDetailError != null
+                      ? 'No se pudo cargar'
+                      : 'Sin canciones',
+                  c.searchDetailError ?? 'Este resultado no tiene canciones.',
+                ),
+        ),
+      ],
+    );
+  }
+
   Widget _library(AppController c) {
     if (_playlist != null || _likesSelected) {
       final playlist = _likesSelected
