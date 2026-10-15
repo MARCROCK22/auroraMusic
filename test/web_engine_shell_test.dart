@@ -15,6 +15,7 @@ class _WatchSource extends FakeSource {
   Future<ResolvedAudio> resolve(Track track) async => ResolvedAudio(
     input: 'https://music.youtube.com/watch?v=${track.id.substring(3)}',
     duration: track.duration,
+    engine: AudioEngine.web,
   );
 }
 

@@ -4,9 +4,10 @@ import 'package:flutter/foundation.dart';
 
 import '../core/audio_backend.dart';
 import '../core/models.dart';
+import 'stream_guard.dart';
 
-/// Aurora owns one queue; the resolved input selects the engine. YouTube
-/// watch pages play in [web], everything else in [native]. One engine is
+/// Aurora owns one queue; [ResolvedAudio.engine] selects the engine. The
+/// official-site fallback plays in [web], everything else in [native]. One engine is
 /// active at a time and only its completion reaches the controller.
 class RoutedMusicAudio extends AudioBackend {
   RoutedMusicAudio({required this.native, required this.web})
@@ -32,11 +33,6 @@ class RoutedMusicAudio extends AudioBackend {
   double _volume = 0.75;
   String? webInitializationError;
   bool get usingWeb => identical(_active, web);
-
-  static bool isWebInput(String input) {
-    final uri = Uri.tryParse(input);
-    return uri?.scheme == 'https' && uri?.host == 'music.youtube.com';
-  }
 
   void _nativeChanged() {
     if (!_disposed && !usingWeb) notifyListeners();
@@ -105,7 +101,8 @@ class RoutedMusicAudio extends AudioBackend {
     Duration start = Duration.zero,
   }) async {
     final revision = ++_generation;
-    final next = isWebInput(source.input) ? web : native;
+    final next = source.engine == AudioEngine.web ? web : native;
+    if (identical(next, native)) assertNotRawYouTube(source.input);
     if (identical(next, web) && webInitializationError != null) {
       throw StateError(webInitializationError!);
     }

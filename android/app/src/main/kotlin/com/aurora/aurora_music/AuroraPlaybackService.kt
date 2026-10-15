@@ -274,8 +274,10 @@ class AuroraPlaybackService : MediaSessionService() {
         val input = arguments["input"] as? String ?: throw IllegalArgumentException("Audio requerido")
         require(input.isNotBlank() && !input.contains('\n') && !input.contains('\r')) { "Audio invalido" }
         val parsed = Uri.parse(input)
-        require(parsed.scheme in listOf(null, "https", "file", "content")) { "Protocolo de audio no permitido" }
+        require(parsed.scheme in listOf(null, "http", "https", "file", "content")) { "Protocolo de audio no permitido" }
         if (parsed.scheme == "https") require(!parsed.host.isNullOrBlank() && parsed.userInfo == null) { "URL de audio invalida" }
+        // Cleartext is only for the app's own loopback proxy.
+        if (parsed.scheme == "http") require(parsed.host == "127.0.0.1" && parsed.port > 0 && parsed.userInfo == null) { "URL de audio invalida" }
         val headers = (arguments["headers"] as? Map<*, *> ?: emptyMap<Any, Any>()).entries.associate { (key, value) ->
             require(key is String && value is String && key.matches(Regex("[!#$%&'*+.^_`|~0-9A-Za-z-]+")) &&
                 !value.contains('\r') && !value.contains('\n')) { "Cabecera invalida" }

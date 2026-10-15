@@ -12,7 +12,63 @@ const song = Track(
   artist: 'Artist',
   pageUrl: 'https://www.youtube.com/watch?v=abcdefghijk',
 );
+
+class _EngineSource extends FakeSource {
+  _EngineSource(this.audio);
+  final ResolvedAudio audio;
+  @override
+  Future<ResolvedAudio> resolve(Track track) async => audio;
+}
+
 void main() {
+  for (final audio in [
+    const ResolvedAudio(input: 'http://127.0.0.1:4000/t/a/i'),
+    const ResolvedAudio(
+      input: 'https://music.youtube.com/watch?v=abcdefghijk',
+      engine: AudioEngine.web,
+    ),
+  ]) {
+    test('Jam plays ${audio.engine.name} resolved audio', () async {
+      final now = DateTime.utc(2026, 10, 12);
+      final out = FakeAudio();
+      final app = await createTestController(
+        audio: out,
+        source: _EngineSource(audio),
+      );
+      final service = JamService(clock: () => now);
+      service.queue = [
+        JamQueueEntry(
+          id: 'entry',
+          track: JamTrack.fromTrack(song),
+          addedBy: 'host',
+        ),
+      ];
+      final bridge = JamPlaybackBridge(
+        app: app,
+        service: service,
+        clock: () => now,
+      );
+      addTearDown(() async {
+        await bridge.disable();
+        bridge.dispose();
+        service.dispose();
+        await closeTestController(app);
+      });
+      await bridge.enable();
+      await bridge.apply(
+        JamPlayback(
+          sequence: 1,
+          serverTimeMs: now.millisecondsSinceEpoch,
+          entryId: 'entry',
+          isPlaying: true,
+          positionMs: 1000,
+        ),
+      );
+      expect(out.loaded?.input, audio.input);
+      expect(out.loaded?.engine, audio.engine);
+    });
+  }
+
   test(
     'clock offset projects host position with bounded stale frame extrapolation',
     () {

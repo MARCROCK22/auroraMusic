@@ -1,6 +1,12 @@
+import 'dart:async';
+
 import 'package:aurora_music/core/models.dart';
 import 'package:aurora_music/dj/recommendations.dart';
 import 'package:aurora_music/sources/innertube_source.dart';
+import 'package:aurora_music/sources/stream/audio_proxy.dart';
+import 'package:aurora_music/sources/stream/resolved_stream.dart';
+import 'package:aurora_music/sources/stream/stream_orchestrator.dart';
+import 'package:aurora_music/sources/youtube_request_policy.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fakes.dart';
@@ -111,6 +117,79 @@ const _song = Track(
   pageUrl: 'https://music.youtube.com/watch?v=19y35jAcG6k',
 );
 
+const _other = Track(
+  id: 'yt:6geljA2OZSY',
+  title: 'Otra',
+  artist: 'X',
+  duration: Duration(seconds: 100),
+);
+
+ResolvedStream _stream({bool expired = false}) => ResolvedStream(
+  videoId: '19y35jAcG6k',
+  url: Uri.parse('https://rr1.googlevideo.com/videoplayback?x=1'),
+  expiresAt: DateTime.now().add(Duration(hours: expired ? -1 : 1)),
+  client: 'VISIONOS',
+  itag: 7,
+);
+
+class _FakeOrch implements StreamOrchestrator {
+  final resolved = <String>[];
+  final failures = <String>[];
+  final forced = <int?>[];
+  final blacklisted = <String>{};
+  Duration? lastDuration;
+  Object? error;
+  final gates = <String, Completer<void>>{};
+  @override
+  bool get preferMp4a => false;
+  @override
+  Future<ResolvedStream> resolve(
+    String videoId, {
+    bool forceRefresh = false,
+    Duration? trackDuration,
+    int? sameItag,
+  }) async {
+    if (forceRefresh) forced.add(sameItag);
+    resolved.add(videoId);
+    lastDuration = trackDuration;
+    await gates[videoId]?.future;
+    if (error != null) throw error!;
+    return _stream();
+  }
+
+  @override
+  void reportFailure(String videoId, {int? httpStatus, String? reason}) =>
+      failures.add('$videoId:$httpStatus');
+  @override
+  bool isBlacklisted(String videoId) => blacklisted.contains(videoId);
+}
+
+class _FakeProxy implements AudioProxy {
+  Future<ResolvedStream> Function()? refresh;
+  void Function(int?, String)? onFailure;
+  ResolvedStream? currentStream;
+  final unregistered = <String>[];
+  bool closed = false;
+  @override
+  Uri register(
+    String videoId,
+    ResolvedStream stream, {
+    required Future<ResolvedStream> Function() refresh,
+    void Function(int? status, String reason)? onFailure,
+  }) {
+    this.refresh = refresh;
+    this.onFailure = onFailure;
+    return Uri.parse('http://127.0.0.1:1/tok/a/$videoId');
+  }
+
+  @override
+  ResolvedStream? current(String videoId) => currentStream;
+  @override
+  void unregister(String videoId) => unregistered.add(videoId);
+  @override
+  Future<void> close() async => closed = true;
+}
+
 void main() {
   test('search parses songs rows into canonical YouTube tracks', () async {
     final requests = <(String, Map<String, Object?>)>[];
@@ -173,16 +252,98 @@ void main() {
     expect(InnerTubeSource.isValidVideoId('../etc/pass'), isFalse);
   });
 
-  test('resolve hands YouTube tracks to the official watch page', () async {
+  test('constructing the source opens no orchestrator or proxy', () {
+    var created = 0;
+    InnerTubeSource(
+      FakeSource(),
+      proxyFactory: () async => throw StateError('${++created}'),
+      orchestratorFactory: () => throw StateError('${++created}'),
+    );
+    expect(created, 0);
+  });
+
+  test('resolve serves YouTube through the loopback proxy', () async {
+    final delegate = FakeSource();
+    final orch = _FakeOrch();
+    final proxy = _FakeProxy();
+    final source = InnerTubeSource(
+      delegate,
+      proxyFactory: () async => proxy,
+      orchestratorFactory: () => orch,
+    );
+    expect(source.isExpiredStream(_song), isFalse);
+    final audio = await source.resolve(_song);
+    expect(audio.input, 'http://127.0.0.1:1/tok/a/19y35jAcG6k');
+    expect(audio.headers, isEmpty);
+    expect(audio.engine, AudioEngine.native);
+    expect(audio.duration, _song.duration);
+    expect(orch.resolved, ['19y35jAcG6k']);
+    expect(orch.lastDuration, _song.duration);
+
+    // Proxy-side failure reports once through the orchestrator.
+    proxy.onFailure!(403, 'x');
+    expect(orch.failures, ['19y35jAcG6k:403']);
+    // Refresh forces a new resolve of the same itag.
+    await proxy.refresh!();
+    expect(orch.forced, [7]);
+
+    // Playback errors reach the orchestrator, never the yt-dlp delegate.
+    source.reportPlaybackFailure('HTTP 410 Gone');
+    expect(orch.failures.last, '19y35jAcG6k:410');
+    source.reportPlaybackFailure('premature EOF');
+    expect(orch.failures.last, '19y35jAcG6k:null');
+    expect(delegate.playbackFailures, isEmpty);
+
+    // Expiry comes from the proxy's current stream, keyed by track id.
+    proxy.currentStream = _stream(expired: true);
+    expect(source.isExpiredStream(_song), isTrue);
+    source.invalidateResolvedAudio(_song);
+    expect(orch.failures.last, '19y35jAcG6k:null');
+    expect(proxy.unregistered, ['19y35jAcG6k']);
+
+    // Track change unregisters the previous video.
+    await source.resolve(_song);
+    await source.resolve(_other);
+    expect(proxy.unregistered.last, '19y35jAcG6k');
+
+    source.dispose();
+    await Future<void>.delayed(Duration.zero);
+    expect(proxy.closed, isTrue);
+  });
+
+  test('blocked videos fall back to the web engine, others rethrow', () async {
+    final orch = _FakeOrch();
+    final source = InnerTubeSource(
+      FakeSource(),
+      proxyFactory: () async => _FakeProxy(),
+      orchestratorFactory: () => orch,
+    );
+    orch.blacklisted.add('19y35jAcG6k');
+    var audio = await source.resolve(_song);
+    expect(audio.engine, AudioEngine.web);
+    expect(audio.input, 'https://music.youtube.com/watch?v=19y35jAcG6k');
+    orch.blacklisted.clear();
+    for (final kind in [YouTubeFailure.blocked, YouTubeFailure.accessDenied]) {
+      orch.error = StreamResolveException(kind, 'x');
+      audio = await source.resolve(_song);
+      expect(audio.engine, AudioEngine.web);
+    }
+    for (final kind in [YouTubeFailure.transient, YouTubeFailure.unavailable]) {
+      orch.error = StreamResolveException(kind, 'x');
+      await expectLater(
+        source.resolve(_song),
+        throwsA(isA<StreamResolveException>()),
+      );
+    }
+    // Prefetch warms the orchestrator only and swallows errors.
+    orch.resolved.clear();
+    await source.prefetch(_song);
+    expect(orch.resolved, ['19y35jAcG6k']);
+  });
+
+  test('resolve rejects non-YouTube tracks', () async {
     final delegate = FakeSource();
     final source = InnerTubeSource(delegate);
-    final audio = await source.resolve(_song);
-    expect(audio.input, 'https://music.youtube.com/watch?v=19y35jAcG6k');
-    expect(audio.headers, isEmpty);
-    expect(audio.duration, _song.duration);
-    expect(source.isExpiredStream(_song), isFalse);
-    // No extraction, no yt-dlp fallback.
-    expect(delegate.resolved, isEmpty);
     await expectLater(
       source.resolve(
         const Track(
@@ -196,4 +357,74 @@ void main() {
     );
     expect(delegate.resolved, isEmpty);
   });
+
+  test(
+    'out-of-order resolves: only the newest unregisters the previous',
+    () async {
+      final orch = _FakeOrch();
+      final proxy = _FakeProxy();
+      final source = InnerTubeSource(
+        FakeSource(),
+        proxyFactory: () async => proxy,
+        orchestratorFactory: () => orch,
+      );
+      await source.resolve(_song);
+      orch.gates['6geljA2OZSY'] = Completer();
+      final stale = source.resolve(_other); // superseded below
+      await Future<void>.delayed(Duration.zero);
+      await source.resolve(_song); // newer call, same id as registered
+      proxy.unregistered.clear();
+      orch.gates['6geljA2OZSY']!.complete();
+      await stale;
+      expect(proxy.unregistered, isEmpty);
+    },
+  );
+
+  test('proxy start failure falls back to web and is retried', () async {
+    var calls = 0;
+    final proxy = _FakeProxy();
+    final source = InnerTubeSource(
+      FakeSource(),
+      proxyFactory: () async {
+        if (calls++ == 0) throw StateError('bind');
+        return proxy;
+      },
+      orchestratorFactory: () => _FakeOrch(),
+    );
+    expect((await source.resolve(_song)).engine, AudioEngine.web);
+    expect((await source.resolve(_song)).engine, AudioEngine.native);
+  });
+
+  test('prefetch never sets the failure target nor registers', () async {
+    final orch = _FakeOrch();
+    final proxy = _FakeProxy();
+    final source = InnerTubeSource(
+      FakeSource(),
+      proxyFactory: () async => proxy,
+      orchestratorFactory: () => orch,
+    );
+    await source.prefetch(_song);
+    source.reportPlaybackFailure('HTTP 410');
+    expect(orch.failures, isEmpty);
+    expect(proxy.refresh, isNull);
+  });
+
+  test(
+    'dispose during an in-flight resolve throws instead of registering',
+    () async {
+      final orch = _FakeOrch()..gates['19y35jAcG6k'] = Completer();
+      final proxy = _FakeProxy();
+      final source = InnerTubeSource(
+        FakeSource(),
+        proxyFactory: () async => proxy,
+        orchestratorFactory: () => orch,
+      );
+      final pending = source.resolve(_song);
+      await Future<void>.delayed(Duration.zero);
+      source.dispose();
+      orch.gates['19y35jAcG6k']!.complete();
+      await expectLater(pending, throwsStateError);
+      expect(proxy.refresh, isNull);
+    },
+  );
 }

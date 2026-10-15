@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../core/audio_backend.dart';
 import '../core/models.dart';
 import 'audio_math.dart';
+import 'stream_guard.dart';
 
 /// Android's service owns playback; the application controller owns the queue.
 class AndroidMusicAudio extends AudioBackend {
@@ -164,6 +165,7 @@ class AndroidMusicAudio extends AudioBackend {
     String? ffmpegExecutable,
     Duration start = Duration.zero,
   }) async {
+    assertNotRawYouTube(source.input);
     ++_generation;
     _source = source;
     _completedGeneration = null;

@@ -10,6 +10,7 @@ import 'package:flutter_soloud/flutter_soloud.dart';
 import '../core/audio_backend.dart';
 import '../core/models.dart';
 import 'audio_math.dart';
+import 'stream_guard.dart';
 
 /// A single native mixer: playback, EQ and FFT all use the same output.
 class MusicAudio extends AudioBackend {
@@ -86,6 +87,7 @@ class MusicAudio extends AudioBackend {
     String? ffmpegExecutable,
     Duration start = Duration.zero,
   }) {
+    assertNotRawYouTube(source.input);
     _playIntent = false;
     ++_seekGeneration;
     return _load(source, ffmpegExecutable: ffmpegExecutable, start: start);
