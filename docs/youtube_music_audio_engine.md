@@ -59,6 +59,7 @@ flowchart TD
 | Flujo truncado (menos bytes que la longitud) | `validateCompletion` falla con «Premature EOF»; el controlador recupera la pista. |
 | Bot/login (`blocked`, `accessDenied`, LOGIN_REQUIRED, «not a bot») en todos los clientes | Respaldo web automático y lista negra de 30 min para ese vídeo. El cliente que respondió así queda relegado 2 min. |
 | Respuesta inesperada o sin formato reproducible (p. ej. todas las URLs cifradas) | Respaldo web automático para esa pista, sin lista negra. |
+| Android (sin respaldo web) | El WebView oculto no carga en Android: en vez de usarlo, se reintenta una vez la resolución nativa y, si vuelve a fallar, se muestra el error real. |
 | Transitorio (red, tiempo agotado, DNS) o no disponible (UNPLAYABLE, retirado) | Sin lista negra ni web: error normal con reintento. |
 | Cliente con 403 o sondeo fallido | Se marca malo 10 min (2 min si es error de red); se prueba el último. |
 

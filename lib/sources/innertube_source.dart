@@ -24,7 +24,10 @@ class InnerTubeSource extends SourceBackend {
     InnerTubePost? post,
     Future<AudioProxy> Function()? proxyFactory,
     StreamOrchestrator Function()? orchestratorFactory,
+    bool? webFallback,
   }) : _post = post ?? _httpPost,
+       // The hidden official player never loads on Android (blank sheet).
+       _webFallbackEnabled = webFallback ?? !Platform.isAndroid,
        _proxyFactory = proxyFactory ?? AudioProxy.start,
        _orchestratorFactory =
            orchestratorFactory ??
@@ -32,6 +35,7 @@ class InnerTubeSource extends SourceBackend {
 
   final SourceBackend delegate;
   final InnerTubePost _post;
+  final bool _webFallbackEnabled;
   final Future<AudioProxy> Function() _proxyFactory;
   final StreamOrchestrator Function() _orchestratorFactory;
   // Created on the first YouTube resolve, never in the constructor.
@@ -422,10 +426,13 @@ class InnerTubeSource extends SourceBackend {
     _currentVideoId = id;
     final generation = ++_resolveGeneration;
     final orch = _orch;
-    if (orch.isBlacklisted(id)) return _webFallback(id, track);
-    final ResolvedStream stream;
+    if (_webFallbackEnabled && orch.isBlacklisted(id)) {
+      return _webFallback(id, track);
+    }
+    final duration = _knownDuration(track);
+    ResolvedStream stream;
     try {
-      stream = await orch.resolve(id, trackDuration: _knownDuration(track));
+      stream = await orch.resolve(id, trackDuration: duration);
     } on StreamResolveException catch (error) {
       // Network and removed videos are real errors; anything else (bot check,
       // login, ciphered or changed responses) still plays in the official player.
@@ -433,13 +440,19 @@ class InnerTubeSource extends SourceBackend {
           error.kind == YouTubeFailure.unavailable) {
         rethrow;
       }
-      return _webFallback(id, track);
+      if (_webFallbackEnabled) return _webFallback(id, track);
+      // No official player here: one fresh attempt, then the real error.
+      stream = await orch.resolve(
+        id,
+        forceRefresh: true,
+        trackDuration: duration,
+      );
     }
     final AudioProxy proxy;
     try {
       proxy = await _startProxy();
     } catch (_) {
-      if (_disposed) rethrow;
+      if (_disposed || !_webFallbackEnabled) rethrow;
       return _webFallback(id, track); // proxy unavailable: official player
     }
     // Only the newest resolve may drop the previous video; a superseded call

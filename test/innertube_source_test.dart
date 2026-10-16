@@ -139,6 +139,7 @@ class _FakeOrch implements StreamOrchestrator {
   final blacklisted = <String>{};
   Duration? lastDuration;
   Object? error;
+  Object? failOnce;
   final gates = <String, Completer<void>>{};
   @override
   bool get preferMp4a => false;
@@ -153,6 +154,11 @@ class _FakeOrch implements StreamOrchestrator {
     resolved.add(videoId);
     lastDuration = trackDuration;
     await gates[videoId]?.future;
+    if (failOnce != null) {
+      final once = failOnce!;
+      failOnce = null;
+      throw once;
+    }
     if (error != null) throw error!;
     return _stream();
   }
@@ -377,6 +383,39 @@ void main() {
     await source.prefetch(_song);
     expect(orch.resolved, ['19y35jAcG6k']);
   });
+
+  test(
+    'without web fallback a failure retries natively, then surfaces',
+    () async {
+      final orch = _FakeOrch();
+      final source = InnerTubeSource(
+        FakeSource(),
+        proxyFactory: () async => _FakeProxy(),
+        orchestratorFactory: () => orch,
+        webFallback: false,
+      );
+      orch.blacklisted.add('19y35jAcG6k'); // ignored: no official player
+      orch.failOnce = const StreamResolveException(YouTubeFailure.blocked, 'x');
+      var audio = await source.resolve(_song);
+      expect(audio.engine, AudioEngine.native);
+      expect(orch.forced, [null]);
+      orch.error = const StreamResolveException(YouTubeFailure.other, 'boom');
+      await expectLater(
+        source.resolve(_song),
+        throwsA(isA<StreamResolveException>()),
+      );
+      orch.error = null;
+      final failing = InnerTubeSource(
+        FakeSource(),
+        proxyFactory: () async => throw StateError('bind'),
+        orchestratorFactory: () => orch,
+        webFallback: false,
+      );
+      await expectLater(failing.resolve(_song), throwsStateError);
+      source.dispose();
+      failing.dispose();
+    },
+  );
 
   test('resolve rejects non-YouTube tracks', () async {
     final delegate = FakeSource();

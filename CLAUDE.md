@@ -27,7 +27,9 @@ cola nativa), pero con la interfaz de Aurora. **No cambiar la estética.**
   arranca, `resolve()` devuelve `music.youtube.com/watch?v=<id>` con
   `engine: web` → `lib/audio_web/` (`WebMusicAudio`): WebView siempre montado en
   `aurora_shell.dart`, 1×1 y tapado; solo se muestra como hoja cuando el sitio
-  pide consentimiento/acceso («Revisar sitio»).
+  pide consentimiento/acceso («Revisar sitio»). Solo Windows: en Android el WebView
+  oculto no carga (hoja en blanco), así que allí `resolve()` reintenta una vez el
+  camino nativo y si falla muestra el error real.
 - Motores: Android `AndroidMusicAudio` (Media3, servicio), Windows `MusicAudio`
   (SoLoud + FFmpeg) con EQ/espectro. `RoutedMusicAudio` elige por
   `ResolvedAudio.engine`, nunca por host. `lib/audio/stream_guard.dart` impide que
