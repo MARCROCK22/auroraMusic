@@ -441,6 +441,7 @@ class InnerTubeSource extends SourceBackend {
         rethrow;
       }
       if (_webFallbackEnabled) return _webFallback(id, track);
+      if (generation != _resolveGeneration) rethrow; // user moved on
       // No official player here: one fresh attempt, then the real error.
       stream = await orch.resolve(
         id,
