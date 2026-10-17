@@ -187,7 +187,8 @@ class StreamOrchestrator {
     return false;
   }
 
-  static bool _isAuthStatus(int? s) => s == 401 || s == 403 || s == 410;
+  static bool _isAuthStatus(int? s) =>
+      s == 400 || s == 401 || s == 403 || s == 410;
 
   void _markBad(String client, bool long) =>
       _badUntil[client] = _now().add(Duration(minutes: long ? 10 : 2));
@@ -320,12 +321,25 @@ class StreamOrchestrator {
       videoId: videoId,
       url: url,
       headers: headers,
-      expiresAt: _now().add(Duration(seconds: expires)),
+      expiresAt: _expiry(url, expires),
       client: client.name,
       itag: _int(format['itag'])!,
       mimeType: format['mimeType'] as String,
       contentLength: length,
     );
+  }
+
+  /// The CDN rejects a URL after its signed `expire` (unix seconds), which can
+  /// be earlier than `expiresInSeconds`: honour whichever comes first.
+  DateTime _expiry(Uri url, int expiresInSeconds) {
+    final byTtl = _now().add(Duration(seconds: expiresInSeconds));
+    final unix = int.tryParse(url.queryParameters['expire'] ?? '');
+    if (unix == null) return byTtl;
+    final signed = DateTime.fromMillisecondsSinceEpoch(
+      unix * 1000,
+      isUtc: _now().isUtc,
+    );
+    return signed.isBefore(byTtl) ? signed : byTtl;
   }
 
   Map<String, Object?> _body(PlayerClient c, String videoId, String? visitor) =>

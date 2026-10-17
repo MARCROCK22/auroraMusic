@@ -316,7 +316,7 @@ class AuroraPlaybackService : MediaSessionService() {
                 override fun getRetryDelayMsFor(info: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
                     val denied = generateSequence(info.exception as Throwable) { it.cause }
                         .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
-                        .any { it.responseCode == 403 || it.responseCode == 429 }
+                        .any { it.responseCode in setOf(400, 403, 410, 429) // el proxy ya renovó la URL una vez }
                     return if (denied) C.TIME_UNSET else super.getRetryDelayMsFor(info)
                 }
             })

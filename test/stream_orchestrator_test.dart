@@ -106,6 +106,19 @@ class _Harness {
   }
 }
 
+void _expireTest() {
+  test('expiresAt honours an earlier signed `expire` of the URL', () async {
+    final h = _Harness();
+    final unix =
+        h.now.add(const Duration(minutes: 5)).millisecondsSinceEpoch ~/ 1000;
+    h.respond = (_, _) => _ok([
+      {..._fmt(251, clen: 1000), 'url': 'https://g/v?itag=251&expire=$unix'},
+    ]);
+    final s = await h.orch.resolve('vid1');
+    expect(s.expiresAt, h.now.add(const Duration(minutes: 5)));
+  });
+}
+
 Future<StreamResolveException> _failure(Future<ResolvedStream> f) async {
   try {
     await f;
@@ -116,6 +129,7 @@ Future<StreamResolveException> _failure(Future<ResolvedStream> f) async {
 }
 
 void main() {
+  _expireTest();
   test('VISIONOS request shape and visitorData', () async {
     final h = _Harness(clients: defaultPlayerClients);
     final s = await h.orch.resolve('vid1');
