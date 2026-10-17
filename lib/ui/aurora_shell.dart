@@ -270,11 +270,25 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
 
   double _volumeBeforeMute = 0.7;
 
+  // En una Jam, AppController.togglePlayback no hace nada: el anfitrión
+  // pausa por la Jam y el invitado recibe un aviso en vez de silencio.
+  void _togglePlay(AppController c) {
+    if (!c.jamPlaybackActive) {
+      c.togglePlayback();
+    } else if (_jam?.service.isHost == true) {
+      _jam!.togglePlayback();
+    } else {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('El anfitrión controla la reproducción.')),
+      );
+    }
+  }
+
   void _runShortcut(AppController c, ShortcutId id) {
     final seek = const Duration(seconds: 5);
     switch (id) {
       case ShortcutId.playPause:
-        c.togglePlayback();
+        _togglePlay(c);
       case ShortcutId.next:
         c.next();
       case ShortcutId.previous:
@@ -399,7 +413,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       extraBindings: {
         if (_section != 10)
           const SingleActivator(LogicalKeyboardKey.mediaPlayPause):
-              c.togglePlayback,
+              () => _togglePlay(c),
         if (_section != 10)
           const SingleActivator(LogicalKeyboardKey.mediaTrackNext): c.next,
         if (_section != 10)

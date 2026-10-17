@@ -169,9 +169,18 @@ void FlutterWindow::AddTray() {
   tray_.uID = kTrayId;
   tray_.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
   tray_.uCallbackMessage = kTrayMessage;
-  tray_.hIcon = LoadIcon(GetModuleHandle(nullptr), MAKEINTRESOURCE(IDI_APP_ICON));
+  // Icono pequeno (16 px a 100% dpi): LoadIcon devolveria el de 32 px.
+  tray_.hIcon = static_cast<HICON>(LoadImageW(
+      GetModuleHandle(nullptr), MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON,
+      GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON),
+      LR_DEFAULTCOLOR | LR_SHARED));
   wcscpy_s(tray_.szTip, L"Aurora");
   tray_added_ = Shell_NotifyIconW(NIM_ADD, &tray_) != FALSE;
+  if (!tray_added_) {
+    wchar_t msg[64];
+    swprintf_s(msg, L"Aurora: Shell_NotifyIcon fallo (%lu)\n", GetLastError());
+    OutputDebugStringW(msg);
+  }
 }
 
 void FlutterWindow::UpdateTrayTip() {
@@ -291,7 +300,7 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   } else if (message == WM_SYSCOMMAND && (wparam & 0xFFF0) == SC_CLOSE) {
     real_exit_ = true;
   } else if (message == WM_CLOSE && !close_confirmed_) {
-    if (!real_exit_ && close_to_tray_ && playing_ && tray_added_) {
+    if (!real_exit_ && close_to_tray_ && (tray_added_ || (AddTray(), tray_added_))) {
       HideToTray();
       return 0;
     }
