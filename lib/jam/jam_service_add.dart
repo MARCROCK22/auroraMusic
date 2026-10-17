@@ -70,6 +70,41 @@ extension JamServiceAdd on JamService {
     return done;
   }
 
+  /// Autoplay del anfitrión: añade al final hasta [need] pistas en cola normal.
+  /// Con [repeat] admite pistas que ya sonaron (último recurso para no quedar
+  /// en silencio). Si la cola está llena, descarta las ya sonadas más antiguas.
+  int addAutoplay(List<JamTrack> tracks, {int need = 5, bool repeat = false}) {
+    if (!isHost || need <= 0) return 0;
+    final cur = _currentIndex;
+    final blocked = <String>{
+      for (var i = 0; i < queue.length; i++)
+        if (!repeat || i >= cur) ...queue[i].track.keys,
+    };
+    final fresh = <JamQueueEntry>[];
+    for (final t in tracks) {
+      if (fresh.length >= need) break;
+      if (t.keys.any(blocked.contains)) continue;
+      blocked.addAll(t.keys);
+      fresh.add(
+        JamQueueEntry(
+          id: jamRandomSecret(12),
+          track: t,
+          addedBy: 'host',
+          suggestedFor: 'host',
+        ),
+      );
+    }
+    if (fresh.isEmpty) return 0;
+    final base = [...queue];
+    final over = base.length + fresh.length - jamQueueLimit;
+    if (over > 0) base.removeRange(0, min(over, max(cur, 0)));
+    final room = jamQueueLimit - base.length;
+    if (room <= 0) return 0;
+    queue = [...base, ...fresh.take(room)];
+    _changed();
+    return min(room, fresh.length);
+  }
+
   /// Inserta como anfitrión sin pasar por el límite de ritmo de invitados.
   List<JamQueueEntry> _hostInsert(List<JamTrack> tracks, int at) {
     final seen = <String>{for (final e in queue) ...e.track.keys};

@@ -54,6 +54,7 @@ class JamPlaybackBridge extends ChangeNotifier {
   bool _originalPlaying = false;
   int _generation = 0;
   int? _lastSeekMs;
+  bool _forceResync = false, _lastPlaying = false;
   String? _requestedEntryId, _failedEntryId;
   String? _resolvingVideoId;
   JamPlayback? _pending;
@@ -61,6 +62,9 @@ class JamPlaybackBridge extends ChangeNotifier {
   bool _disposed = false;
   Future<void>? _disabling;
   Future<void>? _enabling;
+
+  /// Entrada que este dispositivo no pudo reproducir (sin audio disponible).
+  String? get failedEntryId => _failedEntryId;
 
   void remember(Track track) {
     final key = JamTrack.fromTrack(track).key;
@@ -101,6 +105,7 @@ class JamPlaybackBridge extends ChangeNotifier {
     await _draining;
     currentEntryId = null;
     _failedEntryId = null;
+    _lastPlaying = false;
     loading = false;
     await app.endJamPlayback();
     final original = _originalTrack;
@@ -216,12 +221,18 @@ class JamPlaybackBridge extends ChangeNotifier {
             service.clockOffsetMs,
             durationMs: app.audio.duration.inMilliseconds,
           );
-          final correction = jamDriftCorrection(
-            currentMs: app.audio.position.inMilliseconds,
-            targetMs: target,
-            nowMs: now,
-            lastSeekMs: _lastSeekMs,
-          );
+          final current = app.audio.position.inMilliseconds;
+          // Tras reconectar o salir de pausa se salta directo a la posición.
+          final force = _forceResync || (state.isPlaying && !_lastPlaying);
+          _forceResync = false;
+          final correction = force
+              ? ((target - current).abs() > 750 ? target : null)
+              : jamDriftCorrection(
+                  currentMs: current,
+                  targetMs: target,
+                  nowMs: now,
+                  lastSeekMs: _lastSeekMs,
+                );
           if (correction != null) {
             await app.audio.seek(Duration(milliseconds: correction));
             _lastSeekMs = now;
@@ -240,6 +251,7 @@ class JamPlaybackBridge extends ChangeNotifier {
           continue;
         }
         if (!latest.isPlaying && app.audio.isPlaying) await app.audio.pause();
+        _lastPlaying = latest.isPlaying;
         loading = false;
         _notify();
       } catch (_) {
@@ -331,6 +343,9 @@ class JamPlaybackBridge extends ChangeNotifier {
         'Se usa una coincidencia de tu proveedor; la versión puede diferir y la sincronía exacta no está garantizada.';
     return exact;
   }
+
+  /// La próxima actualización recoloca la posición sin esperar el enfriamiento.
+  void resync() => _forceResync = true;
 
   Future<void> retry() async {
     _failedEntryId = null;

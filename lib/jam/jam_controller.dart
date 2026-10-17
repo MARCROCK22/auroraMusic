@@ -16,6 +16,8 @@ class JamController extends ChangeNotifier {
     required this.app,
     JamService? service,
     JamTransport? transport,
+    this.suggestionAdapter,
+    this.topUpTimeout = const Duration(seconds: 8),
   }) : service = service ?? JamService(),
        _transport = transport {
     bridge = JamPlaybackBridge(app: app, service: this.service);
@@ -32,6 +34,10 @@ class JamController extends ChangeNotifier {
   final AppController app;
   JamTransport? _transport;
 
+  /// Motor de sugerencias inyectable (pruebas); por defecto YouTube + perfil local.
+  final JamSuggestionAdapter Function()? suggestionAdapter;
+  final Duration topUpTimeout;
+
   /// Transporte en línea (Supabase); no está disponible sin --dart-define.
   JamTransport get remote =>
       _transport ??= SupabaseJamTransport(JamSupabaseConfig.fromEnvironment);
@@ -41,6 +47,15 @@ class JamController extends ChangeNotifier {
   DateTime? _nextRefreshAt;
   String? _lastEntryId;
   bool _suggesting = false, _cancelAdd = false;
+
+  /// Pistas por delante que el anfitrión mantiene siempre en la cola.
+  static const minAhead = 5;
+  // _optOut: este invitado eligió no escuchar; _ended: la cola se agotó.
+  bool _optOut = false, _ended = false, _toppingUp = false;
+  bool _wasConnected = false, _listening = false;
+  int _failStreak = 0;
+  DateTime? _topUpBackoff;
+  final Set<String> _skipped = {};
 
   /// Avance de «añadir en lotes» (playlist larga); la UI lo escucha.
   final ValueNotifier<JamAddProgress> addProgress = ValueNotifier(
@@ -122,11 +137,13 @@ class JamController extends ChangeNotifier {
     await service.host(address: address, name: name);
     _startHostTimer();
     _startSuggestions();
+    unawaited(_beginSession());
   });
   void _startHostTimer() {
     _broadcastTimer?.cancel();
     _broadcastTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (bridge.enabled && !_hostLoading && service.isHost) _publish();
+      if (service.isHost) _autoplay();
     });
   }
 
@@ -135,8 +152,38 @@ class JamController extends ChangeNotifier {
     await service.hostRemote(remote, name: name);
     _startHostTimer();
     _startSuggestions();
+    unawaited(_beginSession());
   });
+
+  /// Al crear la Jam: modo «Escuchando» y la pista actual pasa a ser la
+  /// primera de la cola, con su posición, para que todos la oigan igual.
+  Future<void> _beginSession() async {
+    _optOut = false;
+    _ended = false;
+    _failStreak = 0;
+    _skipped.clear();
+    try {
+      service.setMode(JamMode.synchronized);
+      final track = app.currentTrack;
+      if (track != null && service.isHost) {
+        final position = app.audio.position.inMilliseconds;
+        bridge.remember(track);
+        final result = await service.addMany([
+          JamTrack.fromTrack(track),
+        ], mode: JamAddMode.playNow);
+        final id = result.firstEntryId;
+        final entry = service.queue.where((e) => e.id == id).firstOrNull;
+        if (entry != null) await _play(entry, startMs: position);
+      }
+    } on JamException {
+      // Pista no compartible: la Jam arranca igual con la siguiente.
+    } catch (_) {}
+    _autoplay();
+    _sessionChanged();
+  }
+
   Future<void> join(String code, String name) => _run(() async {
+    _optOut = false;
     await bridge.disable();
     if (jamRemoteCodeFrom(code) != null) {
       await service.joinRemote(remote, code, name: name);
@@ -187,19 +234,7 @@ class JamController extends ChangeNotifier {
     );
     _suggesting = true;
     try {
-      final adapter = JamSuggestionAdapter(
-        related: (track) {
-          final source = app.source;
-          final id = track.id.startsWith('yt:') ? track.id.substring(3) : null;
-          return source is InnerTubeSource && id != null
-              ? source.related(id)
-              : Future.value(const []);
-        },
-        seeds: () => app.recentTracks,
-        local: () => app.queue,
-        rank: app.rankForJam,
-      );
-      final items = await adapter.build(current: app.currentTrack);
+      final items = await _adapter().build(current: app.currentTrack);
       if (items.isNotEmpty && service.connected) {
         service.publishSuggestions(items);
       }
@@ -218,12 +253,19 @@ class JamController extends ChangeNotifier {
     _refreshLater?.cancel();
     _nextRefreshAt = null;
     _cancelAdd = true;
+    _skipped.clear();
+    _ended = false;
     await service.close();
     await bridge.disable();
   });
   Future<void> setMode(JamMode mode) => _run(() async {
     service.setMode(mode);
-    if (mode == JamMode.synchronized) await bridge.enable();
+    if (mode == JamMode.queueOnly) {
+      await bridge.disable();
+    } else {
+      _ended = false;
+      _sessionChanged(); // retoma en la posición actual
+    }
   });
   Future<void> setListening(bool listen) => _run(() async {
     if (listen) {
@@ -232,31 +274,65 @@ class JamController extends ChangeNotifier {
           'El anfitrión debe habilitar reproducción sincronizada.',
         );
       }
+      _optOut = false;
       await bridge.enable();
+      bridge.resync();
       if (service.playback != null) await bridge.apply(service.playback!);
     } else {
+      _optOut = true;
       await bridge.disable();
     }
+    try {
+      service.announceListening(listen);
+    } on JamException {
+      // Sin conexión: se informa al reconectar.
+    }
   });
+
+  /// «Reproducir ahora»: opcional, el anfitrión también puede dejar que suene solo.
   Future<void> play(JamQueueEntry entry) => _run(() async {
     if (!service.isHost) {
       throw const JamException('El anfitrión controla la reproducción.');
     }
-    await bridge.enable();
+    _failStreak = 0;
+    await _play(entry);
+  });
+
+  Future<void> _play(JamQueueEntry entry, {int startMs = 0}) async {
+    if (!service.isHost || _disposed) return;
     _hostLoading = true;
+    _ended = false;
     try {
+      await bridge.enable();
       final state = JamPlayback(
         sequence: (service.playback?.sequence ?? 0) + 1,
         entryId: entry.id,
         isPlaying: true,
+        positionMs: startMs,
         serverTimeMs: service.clock().millisecondsSinceEpoch,
       );
       await bridge.apply(state);
-      _publish(entryId: entry.id);
+      if (bridge.failedEntryId == entry.id) {
+        // Sin audio para esta pista en el anfitrión: se pasa a la siguiente.
+        _skipped.add(entry.id);
+        final upcoming = _failStreak++ < minAhead
+            ? _nextEntry(after: entry.id)
+            : null;
+        _hostLoading = false;
+        if (upcoming != null) {
+          await _play(upcoming);
+        } else {
+          _ended = true;
+        }
+        return;
+      }
+      _failStreak = 0;
+      _publish(entryId: entry.id, playing: true);
     } finally {
       _hostLoading = false;
     }
-  });
+  }
+
   Future<void> togglePlayback() => _run(() async {
     if (!service.isHost) {
       if (!canPause) throw JamException('Lo controla $hostName.');
@@ -291,22 +367,29 @@ class JamController extends ChangeNotifier {
     if (upcoming == null && service.rules.autoplay) {
       service.promoteSuggested();
       upcoming = _nextEntry();
+      if (upcoming == null) {
+        _topUpBackoff = null;
+        await _topUp();
+        upcoming = _nextEntry();
+      }
     }
     if (upcoming != null) {
-      await play(upcoming);
+      _failStreak = 0;
+      await _play(upcoming);
     } else {
+      _ended = true;
       await app.audio.pause();
       _publish();
     }
   }
 
-  JamQueueEntry? _nextEntry() {
-    final current = service.queue.indexWhere(
-      (entry) => entry.id == bridge.currentEntryId,
-    );
+  JamQueueEntry? _nextEntry({String? after}) {
+    after ??= service.playback?.entryId ?? bridge.currentEntryId;
+    final current = service.queue.indexWhere((entry) => entry.id == after);
     for (var i = current + 1; i < service.queue.length; i++) {
       final e = service.queue[i];
       if (e.playable &&
+          !_skipped.contains(e.id) &&
           (service.rules.autoplay || e.status != JamEntryStatus.suggested)) {
         return e;
       }
@@ -319,8 +402,108 @@ class JamController extends ChangeNotifier {
     if (!service.isHost || !service.connected || !service.rules.autoplay) {
       return;
     }
-    if (service.upcomingQueued >= 3) return;
-    if (service.promoteSuggested() == 0) unawaited(refreshSuggestions());
+    if (service.upcomingQueued >= minAhead) return;
+    if (service.promoteSuggested(target: minAhead) == 0) {
+      unawaited(refreshSuggestions());
+    }
+    unawaited(_topUp());
+  }
+
+  JamSuggestionAdapter _adapter() =>
+      suggestionAdapter?.call() ?? _defaultAdapter();
+
+  JamSuggestionAdapter _defaultAdapter() => JamSuggestionAdapter(
+    related: (track) {
+      final source = app.source;
+      final id = track.id.startsWith('yt:') ? track.id.substring(3) : null;
+      return source is InnerTubeSource && id != null
+          ? source.related(id)
+          : Future.value(const []);
+    },
+    seeds: () => app.recentTracks,
+    local: () => app.queue,
+    rank: app.rankForJam,
+  );
+
+  List<JamTrack> _wire(Iterable<Track> tracks) {
+    final online = <JamTrack>[], local = <JamTrack>[];
+    for (final t in tracks) {
+      try {
+        final wire = JamTrack.fromTrack(t);
+        bridge.remember(t);
+        (wire.localOnly ? local : online).add(wire);
+      } on JamException {
+        continue;
+      }
+    }
+    return [...online, ...local]; // lo local solo suena en este equipo
+  }
+
+  /// Mantiene ≥ [minAhead] pistas por delante: grupo, motor de sugerencias,
+  /// biblioteca, favoritos no sonados y, al final, repetir lo ya sonado.
+  /// Jamás deja la cola vacía aunque el motor falle o tarde.
+  Future<void> _topUp() async {
+    if (_toppingUp ||
+        _disposed ||
+        !service.isHost ||
+        !service.connected ||
+        !service.rules.autoplay ||
+        service.upcomingQueued >= minAhead) {
+      return;
+    }
+    final wait = _topUpBackoff?.difference(DateTime.now());
+    if (wait != null && wait > Duration.zero) return;
+    _toppingUp = true;
+    int short() => minAhead - service.upcomingQueued;
+    try {
+      service.promoteSuggested(target: minAhead);
+      if (short() > 0) {
+        try {
+          final items = await _adapter()
+              .build(current: app.currentTrack)
+              .timeout(topUpTimeout);
+          service.addAutoplay([for (final i in items) i.track], need: short());
+        } catch (_) {
+          // Motor lento, sin red o con error: sigue el respaldo local.
+        }
+      }
+      final recent = <String>{};
+      for (final t in app.recentTracks.take(20)) {
+        try {
+          recent.addAll(JamTrack.fromTrack(t).keys);
+        } on JamException {
+          continue;
+        }
+      }
+      bool fresh(JamTrack t) => !t.keys.any(recent.contains);
+      final library = _wire([...app.queue, ...app.tracks]);
+      if (short() > 0) {
+        service.addAutoplay(library.where(fresh).toList(), need: short());
+      }
+      if (short() > 0) {
+        final favorites = _wire(
+          app.tracks.where((t) => app.favoriteIds.contains(t.id)),
+        );
+        service.addAutoplay(
+          [...favorites.where(fresh), ...favorites.where((t) => !fresh(t))],
+          need: short(),
+          repeat: true,
+        );
+      }
+      if (short() > 0) {
+        service.addAutoplay(
+          [...library, for (final e in service.queue) e.track],
+          need: short(),
+          repeat: true,
+        );
+      }
+    } finally {
+      _toppingUp = false;
+    }
+    // Sin nada que añadir (biblioteca vacía): se reintenta en unos segundos.
+    _topUpBackoff = service.upcomingQueued < minAhead
+        ? DateTime.now().add(const Duration(seconds: 10))
+        : null;
   }
 
   /// Añade pistas a la Jam. Devuelve false (y deja [error]) si no hay permiso.
@@ -360,7 +543,10 @@ class JamController extends ChangeNotifier {
           final entry = service.queue.firstWhere(
             (e) => e.id == result.firstEntryId,
           );
-          await play(entry);
+          if (service.isHost) {
+            _failStreak = 0;
+            await _play(entry);
+          }
         }
       } on JamException catch (failure) {
         error = _friendly(failure);
@@ -483,10 +669,10 @@ class JamController extends ChangeNotifier {
     }
   }
 
-  void _publish({String? entryId}) {
+  void _publish({String? entryId, bool? playing}) {
     service.publishPlayback(
       entryId: entryId ?? bridge.currentEntryId,
-      playing: app.audio.isPlaying && !app.audio.isBuffering,
+      playing: playing ?? (app.audio.isPlaying && !app.audio.isBuffering),
       positionMs: app.audio.position.inMilliseconds,
     );
   }
@@ -506,22 +692,73 @@ class JamController extends ChangeNotifier {
         !(_broadcastTimer?.isActive ?? false)) {
       _startHostTimer(); // tras recibir el mando por traspaso
     }
-    if (!service.connected && bridge.enabled) {
-      unawaited(bridge.disable());
-    } else if (!service.isHost && bridge.enabled) {
+    final conn = service.connection;
+    if (conn == JamConnection.closed || conn == JamConnection.idle) {
+      if (bridge.enabled) unawaited(bridge.disable());
+    } else if (!service.isHost && service.connected) {
+      // Reconectar: se vuelve a la posición del anfitrión sin enfriamiento.
+      if (!_wasConnected) bridge.resync();
       if (service.mode == JamMode.queueOnly) {
-        unawaited(bridge.disable());
-      } else if (service.playback != null) {
-        unawaited(bridge.apply(service.playback!));
+        if (bridge.enabled) unawaited(bridge.disable());
+      } else if (!_optOut) {
+        unawaited(_listen());
       }
     } else if (service.isHost &&
         bridge.enabled &&
         !_hostLoading &&
         service.playback?.entryId == null &&
         bridge.currentEntryId != null) {
+      _ended = true;
       unawaited(app.audio.pause());
     }
+    _wasConnected = service.connected;
+    _autostart();
     _notify();
+  }
+
+  /// Invitado en modo «Escuchando»: suena solo, sin pulsar nada.
+  Future<void> _listen() async {
+    if (_listening) return;
+    _listening = true;
+    try {
+      final first = !bridge.enabled;
+      await bridge.enable();
+      if (first) {
+        try {
+          service.announceListening(true);
+        } on JamException {
+          // Se informa en el siguiente cambio.
+        }
+      }
+      final state = service.playback;
+      if (state != null && service.mode == JamMode.synchronized && !_optOut) {
+        await bridge.apply(state);
+      }
+    } catch (_) {
+    } finally {
+      _listening = false;
+    }
+  }
+
+  /// Anfitrión «Escuchando» sin nada sonando: empieza solo la pista actual o
+  /// la siguiente de la cola (cola vacía → arranca al añadir; sin Reproducir).
+  void _autostart() {
+    if (!service.isHost ||
+        service.mode != JamMode.synchronized ||
+        _hostLoading ||
+        _disposed) {
+      return;
+    }
+    if (!(_ended || bridge.currentEntryId == null)) return;
+    final state = service.playback;
+    final current = service.queue
+        .where((e) => e.id == state?.entryId && !_skipped.contains(e.id))
+        .firstOrNull;
+    final resume = current != null && !_ended;
+    final target = resume ? current : _nextEntry(after: state?.entryId);
+    if (target == null) return;
+    _hostLoading = true; // evita arranques dobles hasta que _play lo tome
+    unawaited(_play(target, startMs: resume ? state!.positionMs : 0));
   }
 
   void _notify() {
