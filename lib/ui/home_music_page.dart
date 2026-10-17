@@ -8,6 +8,7 @@ import 'studio/studio_components.dart';
 import 'studio/studio_symbols.dart';
 import 'dj_panel.dart';
 import 'horizontal_music_row.dart';
+import 'track_actions.dart';
 import 'playlist_shelf.dart';
 import 'spotify_match_dialog.dart';
 
@@ -97,6 +98,7 @@ class HomeMusicPage extends StatelessWidget {
                   itemCount: c.recentTracks.length,
                   itemHeight: 238 + text.scale(72),
                   itemBuilder: (context, index) => _RecentSleeve(
+                    controller: c,
                     track: c.recentTracks[index],
                     actionLabel: 'Reanudar',
                     onPlay: () =>
@@ -114,6 +116,7 @@ class HomeMusicPage extends StatelessWidget {
                   itemCount: recommendations.length,
                   itemHeight: 228 + text.scale(136),
                   itemBuilder: (context, index) => _TrackCard(
+                    controller: c,
                     track: recommendations[index].track,
                     reason: recommendations[index].reason,
                     actionLabel: 'Reproducir',
@@ -143,6 +146,7 @@ class HomeMusicPage extends StatelessWidget {
                   itemCount: c.discoveredRecommendations.length,
                   itemHeight: 220 + text.scale(72),
                   itemBuilder: (context, index) => _TrackCard(
+                    controller: c,
                     track: c.discoveredRecommendations[index],
                     actionLabel: 'Reproducir',
                     onPlay: () => _play(
@@ -212,6 +216,7 @@ class HomeMusicPage extends StatelessWidget {
                   itemCount: c.tracks.length,
                   itemHeight: 220 + text.scale(72),
                   itemBuilder: (context, index) => _TrackCard(
+                    controller: c,
                     track: c.tracks[index],
                     actionLabel: 'Escuchar',
                     onPlay: () => _play(context, c.tracks[index], c.tracks),
@@ -333,82 +338,88 @@ class _GroupCard extends StatelessWidget {
 
 class _TrackCard extends StatelessWidget {
   const _TrackCard({
+    required this.controller,
     required this.track,
     required this.actionLabel,
     required this.onPlay,
     this.reason,
   });
+  final AppController controller;
   final Track track;
   final String actionLabel;
   final VoidCallback onPlay;
   final String? reason;
 
   @override
-  Widget build(BuildContext context) => Material(
-    color: Theme.of(context).colorScheme.surfaceContainerLow,
-    borderRadius: StudioPalette.sleeve,
-    child: InkWell(
+  Widget build(BuildContext context) => TrackActionsRegion(
+    controller: controller,
+    track: track,
+    builder: (context, _) => Material(
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
       borderRadius: StudioPalette.sleeve,
-      onTap: onPlay,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Stack(
-              children: [
-                Artwork(
-                  track: track,
-                  artworkContext: ArtworkContext.card,
-                  radius: 2,
-                ),
-                Positioned(
-                  right: 8,
-                  bottom: 8,
-                  child: IconButton.filled(
-                    tooltip: track.isPendingSpotifyMatch
-                        ? 'Elegir audio para ${track.title}'
-                        : '$actionLabel ${track.title}',
-                    onPressed: onPlay,
-                    icon: Icon(
-                      track.isPendingSpotifyMatch
-                          ? Icons.link
-                          : StudioSymbols.playArrow,
+      child: InkWell(
+        borderRadius: StudioPalette.sleeve,
+        onTap: onPlay,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Stack(
+                children: [
+                  Artwork(
+                    track: track,
+                    artworkContext: ArtworkContext.card,
+                    radius: 2,
+                  ),
+                  Positioned(
+                    right: 8,
+                    bottom: 8,
+                    child: IconButton.filled(
+                      tooltip: track.isPendingSpotifyMatch
+                          ? 'Elegir audio para ${track.title}'
+                          : '$actionLabel ${track.title}',
+                      onPressed: onPlay,
+                      icon: Icon(
+                        track.isPendingSpotifyMatch
+                            ? Icons.link
+                            : StudioSymbols.playArrow,
+                      ),
                     ),
                   ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                track.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontFamily: 'Newsreader',
+                  fontSize: 24,
+                  height: 1.1,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                track.artist,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              if (reason != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  reason!,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              track.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontFamily: 'Newsreader',
-                fontSize: 24,
-                height: 1.1,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              track.artist,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-            if (reason != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                reason!,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
             ],
-          ],
+          ),
         ),
       ),
     ),
@@ -417,69 +428,75 @@ class _TrackCard extends StatelessWidget {
 
 class _RecentSleeve extends StatelessWidget {
   const _RecentSleeve({
+    required this.controller,
     required this.track,
     required this.actionLabel,
     required this.onPlay,
   });
+  final AppController controller;
   final Track track;
   final String actionLabel;
   final VoidCallback onPlay;
   @override
-  Widget build(BuildContext context) => Material(
-    color: Theme.of(context).colorScheme.surfaceContainerLow,
-    borderRadius: StudioPalette.sleeve,
-    child: InkWell(
+  Widget build(BuildContext context) => TrackActionsRegion(
+    controller: controller,
+    track: track,
+    builder: (context, _) => Material(
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
       borderRadius: StudioPalette.sleeve,
-      onTap: onPlay,
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Stack(
-                children: [
-                  Center(
-                    child: Artwork(
-                      track: track,
-                      artworkContext: ArtworkContext.cardDetail,
-                      radius: 2,
+      child: InkWell(
+        borderRadius: StudioPalette.sleeve,
+        onTap: onPlay,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Stack(
+                  children: [
+                    Center(
+                      child: Artwork(
+                        track: track,
+                        artworkContext: ArtworkContext.cardDetail,
+                        radius: 2,
+                      ),
                     ),
-                  ),
-                  Positioned(
-                    right: 0,
-                    bottom: 0,
-                    child: IconButton.filled(
-                      tooltip: '$actionLabel ${track.title}',
-                      onPressed: onPlay,
-                      icon: const Icon(StudioSymbols.playArrow),
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: IconButton.filled(
+                        tooltip: '$actionLabel ${track.title}',
+                        onPressed: onPlay,
+                        icon: const Icon(StudioSymbols.playArrow),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              track.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontFamily: 'Newsreader',
-                fontSize: 24,
-                height: 1.1,
+              const SizedBox(height: 16),
+              Text(
+                track.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontFamily: 'Newsreader',
+                  fontSize: 24,
+                  height: 1.1,
+                ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              track.artist,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              const SizedBox(height: 6),
+              Text(
+                track.artist,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     ),

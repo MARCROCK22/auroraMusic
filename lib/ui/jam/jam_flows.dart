@@ -34,9 +34,7 @@ Future<void> startJamFlow(
     );
     return;
   }
-  for (final track in seed) {
-    jam.add(track);
-  }
+  if (seed.isNotEmpty) jam.addTracks(seed);
   await showJamInviteSheet(context, jam);
 }
 
@@ -195,22 +193,4 @@ Future<void> showJamPanel(BuildContext context, JamController jam) {
       child: child,
     ),
   );
-}
-
-/// «Añadir a la Jam» desde cualquier sitio (p. ej. menú ⋯ de una canción).
-Future<void> addToJamFlow(
-  BuildContext context,
-  JamController jam,
-  List<Track> tracks,
-) async {
-  if (!jam.service.connected) {
-    await startJamFlow(context, jam, seed: tracks);
-    return;
-  }
-  for (final track in tracks) {
-    jam.add(track);
-  }
-  if (context.mounted) {
-    _say(context, jam.error ?? 'Añadida a la Jam.');
-  }
 }

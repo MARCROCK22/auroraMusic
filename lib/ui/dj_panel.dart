@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../app_controller.dart';
 import 'artwork.dart';
+import 'track_actions.dart';
 import 'dj_filters_panel.dart';
 
 class DjPanel extends StatelessWidget {
@@ -71,30 +72,47 @@ class DjPanel extends StatelessWidget {
           )
         else if (showRecommendations)
           ...recommendations.map(
-            (recommendation) => ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-              leading: Artwork(
-                track: recommendation.track,
-                artworkContext: ArtworkContext.thumbnail,
-                radius: 8,
-              ),
-              title: Text(
-                recommendation.track.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              subtitle: Text(
-                '${recommendation.track.artist} · ${recommendation.reason}',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              onTap: () =>
-                  c.playTrack(recommendation.track, context: contextTracks),
-              trailing: IconButton(
-                tooltip: 'Reproducir ${recommendation.track.title}',
-                onPressed: () =>
+            (recommendation) => TrackActionsRegion(
+              controller: c,
+              track: recommendation.track,
+              builder: (context, hot) => ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                leading: Artwork(
+                  track: recommendation.track,
+                  artworkContext: ArtworkContext.thumbnail,
+                  radius: 8,
+                ),
+                title: Text(
+                  recommendation.track.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  '${recommendation.track.artist} · ${recommendation.reason}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () =>
                     c.playTrack(recommendation.track, context: contextTracks),
-                icon: const Icon(Icons.play_arrow_rounded),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: 'Reproducir ${recommendation.track.title}',
+                      onPressed: () => c.playTrack(
+                        recommendation.track,
+                        context: contextTracks,
+                      ),
+                      icon: const Icon(Icons.play_arrow_rounded),
+                    ),
+                    TrackMenuButton(
+                      controller: c,
+                      track: recommendation.track,
+                      quickAdd: true,
+                      quickAddVisible: hot,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -185,30 +203,47 @@ class DjPanel extends StatelessWidget {
             'Búsqueda solicitada por ti',
           ),
           ...c.discoveredRecommendations.map(
-            (track) => ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-              leading: Artwork(
-                track: track,
-                artworkContext: ArtworkContext.thumbnail,
-                radius: 8,
-              ),
-              title: Text(
-                track.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              subtitle: Text(
-                '${track.artist} · Resultado de YouTube',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              onTap: () =>
-                  c.playTrack(track, context: c.discoveredRecommendations),
-              trailing: IconButton(
-                tooltip: 'Reproducir ${track.title}',
-                onPressed: () =>
+            (track) => TrackActionsRegion(
+              controller: c,
+              track: track,
+              builder: (context, hot) => ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                leading: Artwork(
+                  track: track,
+                  artworkContext: ArtworkContext.thumbnail,
+                  radius: 8,
+                ),
+                title: Text(
+                  track.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  '${track.artist} · Resultado de YouTube',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () =>
                     c.playTrack(track, context: c.discoveredRecommendations),
-                icon: const Icon(Icons.play_arrow_rounded),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: 'Reproducir ${track.title}',
+                      onPressed: () => c.playTrack(
+                        track,
+                        context: c.discoveredRecommendations,
+                      ),
+                      icon: const Icon(Icons.play_arrow_rounded),
+                    ),
+                    TrackMenuButton(
+                      controller: c,
+                      track: track,
+                      quickAdd: true,
+                      quickAddVisible: hot,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

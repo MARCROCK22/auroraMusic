@@ -41,6 +41,7 @@ import 'offline_settings_panel.dart';
 import '../youtube_music/youtube_music_page.dart';
 import 'video_downloads_page.dart';
 import 'artists_page.dart';
+import 'track_actions.dart';
 import '../audio/routed_music_audio.dart';
 import '../audio_web/web_music_audio.dart';
 import '../updater/update_controller.dart';
@@ -351,6 +352,9 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         c.setSleepTimer(
           c.sleepRemaining == null ? const Duration(minutes: 30) : null,
         );
+      case ShortcutId.addToQueue:
+      case ShortcutId.addToJam:
+        break; // las atiende la fila enfocada (TrackActionsRegion)
     }
   }
 
@@ -409,123 +413,128 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       (_, _) => _syncVisualization(),
     );
     final web = _webAudio;
-    final shell = ShortcutHost(
-      service: ref.watch(shortcutServiceProvider),
-      onAction: (id) => _runShortcut(c, id),
-      enabled: (id) => _section != 10 || id != ShortcutId.playPause,
-      extraBindings: {
-        if (_section != 10)
-          const SingleActivator(LogicalKeyboardKey.mediaPlayPause): () =>
-              _togglePlay(c),
-        if (_section != 10)
-          const SingleActivator(LogicalKeyboardKey.mediaTrackNext): c.next,
-        if (_section != 10)
-          const SingleActivator(LogicalKeyboardKey.mediaTrackPrevious):
-              c.previous,
-      },
-      child: Focus(
-        autofocus: true,
-        child: LayoutBuilder(
-          builder: (context, size) {
-            final wide = size.maxWidth >= 900;
-            final desktop = size.maxWidth >= 1200;
-            final rail = size.maxWidth >= 600;
-            return Scaffold(
-              body: SafeArea(
-                child: Column(
-                  children: [
-                    if (rail || WindowControls.supported)
-                      StudioTitleBar(
-                        onNavigate: _navigate,
-                        sessionText: _jam?.service.connected == true
-                            ? 'JAM · ${_jam!.peopleCount} ${_jam!.peopleCount == 1 ? 'PERSONA' : 'PERSONAS'} · ${_jam!.roleLabel.toUpperCase()}'
-                            : 'INICIAR UNA JAM',
-                        activeSession: _jam?.service.connected == true,
-                        onSession: _jam?.service.connected == true
-                            ? _openJamPanel
-                            : _startJam,
-                      ),
-                    Expanded(
-                      child: Row(
-                        children: [
-                          if (rail) _sidebar(c, wide),
-                          Expanded(
-                            child: Column(
-                              children: [
-                                if (!wide || ![0, 3, 6].contains(_section))
-                                  _header(c, rail),
-                                if (!c.ready || c.busy)
-                                  const LinearProgressIndicator(minHeight: 2),
-                                if (c.error != null) _errorBanner(c),
-                                UpdateBanner(
-                                  controller: _updates,
-                                  isPlaying: () => c.audio.isPlaying,
-                                ),
-                                Expanded(child: _content(c)),
-                              ],
-                            ),
-                          ),
-                          if (desktop &&
-                              !c.jamPlaybackActive &&
-                              _section != 3 &&
-                              _section != 4 &&
-                              _section != 5 &&
-                              _section != 6 &&
-                              _section != 7 &&
-                              _section != 10 &&
-                              _section != 11)
-                            StudioSessionAside(
-                              controller: c,
-                              jam: _jam,
-                              onStartJam: _startJam,
-                              onJam: () => _navigate(9),
-                              onQueue: () => _navigate(
-                                _jam?.service.connected == true ? 9 : 5,
+    final shell = TrackActionsScope(
+      jam: _jam,
+      ensureJam: _ensureJam,
+      addToPlaylist: (track) => _addToPlaylist(c, track),
+      child: ShortcutHost(
+        service: ref.watch(shortcutServiceProvider),
+        onAction: (id) => _runShortcut(c, id),
+        enabled: (id) => _section != 10 || id != ShortcutId.playPause,
+        extraBindings: {
+          if (_section != 10)
+            const SingleActivator(LogicalKeyboardKey.mediaPlayPause): () =>
+                _togglePlay(c),
+          if (_section != 10)
+            const SingleActivator(LogicalKeyboardKey.mediaTrackNext): c.next,
+          if (_section != 10)
+            const SingleActivator(LogicalKeyboardKey.mediaTrackPrevious):
+                c.previous,
+        },
+        child: Focus(
+          autofocus: true,
+          child: LayoutBuilder(
+            builder: (context, size) {
+              final wide = size.maxWidth >= 900;
+              final desktop = size.maxWidth >= 1200;
+              final rail = size.maxWidth >= 600;
+              return Scaffold(
+                body: SafeArea(
+                  child: Column(
+                    children: [
+                      if (rail || WindowControls.supported)
+                        StudioTitleBar(
+                          onNavigate: _navigate,
+                          sessionText: _jam?.service.connected == true
+                              ? 'JAM · ${_jam!.peopleCount} ${_jam!.peopleCount == 1 ? 'PERSONA' : 'PERSONAS'} · ${_jam!.roleLabel.toUpperCase()}'
+                              : 'INICIAR UNA JAM',
+                          activeSession: _jam?.service.connected == true,
+                          onSession: _jam?.service.connected == true
+                              ? _openJamPanel
+                              : _startJam,
+                        ),
+                      Expanded(
+                        child: Row(
+                          children: [
+                            if (rail) _sidebar(c, wide),
+                            Expanded(
+                              child: Column(
+                                children: [
+                                  if (!wide || ![0, 3, 6].contains(_section))
+                                    _header(c, rail),
+                                  if (!c.ready || c.busy)
+                                    const LinearProgressIndicator(minHeight: 2),
+                                  if (c.error != null) _errorBanner(c),
+                                  UpdateBanner(
+                                    controller: _updates,
+                                    isPlaying: () => c.audio.isPlaying,
+                                  ),
+                                  Expanded(child: _content(c)),
+                                ],
                               ),
                             ),
-                        ],
-                      ),
-                    ),
-                    if (_section == 10 && c.usesOfficialYouTubeMusic)
-                      const SizedBox.shrink()
-                    else
-                      StudioTransport(
-                        jam: _jam,
-                        onJam: _openJamPanel,
-                        onStartJam: _startJam,
-                        controller: c,
-                        onLyrics: () => _showLyrics(c),
-                        onVinyl: () => _navigate(4),
-                        onQueue: () => _navigate(5),
-                        onOpenPlayer: () => _showPlayer(c),
-                      ),
-                  ],
-                ),
-              ),
-              bottomNavigationBar: rail
-                  ? null
-                  : NavigationBar(
-                      selectedIndex: math.max(
-                        0,
-                        _primarySections.indexOf(_section),
-                      ),
-                      onDestinationSelected: (index) =>
-                          _navigate(_primarySections[index]),
-                      labelBehavior:
-                          NavigationDestinationLabelBehavior.onlyShowSelected,
-                      destinations: List.generate(
-                        _primarySections.length,
-                        (i) => NavigationDestination(
-                          icon: Icon(_icons[_primarySections[i]]),
-                          label: _primarySections[i] == 3
-                              ? 'Descargas'
-                              : _sections[_primarySections[i]],
-                          tooltip: _sections[_primarySections[i]],
+                            if (desktop &&
+                                !c.jamPlaybackActive &&
+                                _section != 3 &&
+                                _section != 4 &&
+                                _section != 5 &&
+                                _section != 6 &&
+                                _section != 7 &&
+                                _section != 10 &&
+                                _section != 11)
+                              StudioSessionAside(
+                                controller: c,
+                                jam: _jam,
+                                onStartJam: _startJam,
+                                onJam: () => _navigate(9),
+                                onQueue: () => _navigate(
+                                  _jam?.service.connected == true ? 9 : 5,
+                                ),
+                              ),
+                          ],
                         ),
                       ),
-                    ),
-            );
-          },
+                      if (_section == 10 && c.usesOfficialYouTubeMusic)
+                        const SizedBox.shrink()
+                      else
+                        StudioTransport(
+                          jam: _jam,
+                          onJam: _openJamPanel,
+                          onStartJam: _startJam,
+                          controller: c,
+                          onLyrics: () => _showLyrics(c),
+                          onVinyl: () => _navigate(4),
+                          onQueue: () => _navigate(5),
+                          onOpenPlayer: () => _showPlayer(c),
+                        ),
+                    ],
+                  ),
+                ),
+                bottomNavigationBar: rail
+                    ? null
+                    : NavigationBar(
+                        selectedIndex: math.max(
+                          0,
+                          _primarySections.indexOf(_section),
+                        ),
+                        onDestinationSelected: (index) =>
+                            _navigate(_primarySections[index]),
+                        labelBehavior:
+                            NavigationDestinationLabelBehavior.onlyShowSelected,
+                        destinations: List.generate(
+                          _primarySections.length,
+                          (i) => NavigationDestination(
+                            icon: Icon(_icons[_primarySections[i]]),
+                            label: _primarySections[i] == 3
+                                ? 'Descargas'
+                                : _sections[_primarySections[i]],
+                            tooltip: _sections[_primarySections[i]],
+                          ),
+                        ),
+                      ),
+              );
+            },
+          ),
         ),
       ),
     );
@@ -927,6 +936,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         return DjDiscoveryPage(controller: c, onSearch: () => _navigate(1));
       case 12:
         return ArtistsPage(
+          controller: c,
           tracks: c.tracks,
           onPlay: c.playTrack,
           onSearch: (query) {
@@ -1321,15 +1331,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                     icon: const Icon(Icons.play_arrow),
                     label: const Text('Reproducir todo'),
                   ),
-                  OutlinedButton.icon(
-                    onPressed: () async {
-                      for (final track in tracks) {
-                        await c.addToQueue(track);
-                      }
-                    },
-                    icon: const Icon(Icons.queue_music),
-                    label: const Text('Añadir a la cola'),
-                  ),
+                  TrackBatchButtons(controller: c, tracks: tracks),
                 ],
               ),
             ),
@@ -1407,18 +1409,9 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                       icon: const Icon(Icons.play_arrow),
                       label: const Text('Reproducir'),
                     ),
+                    if (items.isNotEmpty)
+                      TrackBatchButtons(controller: c, tracks: items),
                     if (playlist != null) ...[
-                      OutlinedButton.icon(
-                        onPressed: items.isEmpty
-                            ? null
-                            : () => addToJamFlow(context, _ensureJam(), items),
-                        icon: const Icon(Icons.groups_outlined),
-                        label: Text(
-                          _jam?.service.connected == true
-                              ? 'Añadir a la Jam'
-                              : 'Iniciar una Jam con esto',
-                        ),
-                      ),
                       OutlinedButton(
                         onPressed: () async {
                           final name = await _askText(
@@ -1560,144 +1553,86 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   }) {
     final active = c.currentTrack?.id == t.id;
     final playlistIndex = playlist?.trackIds.indexOf(t.id) ?? -1;
-    return ListTile(
-      key: key,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      selected: active,
-      selectedTileColor: Theme.of(
-        context,
-      ).colorScheme.primary.withValues(alpha: .06),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      leading: Artwork(
-        track: t,
-        artworkContext: ArtworkContext.thumbnail,
-        radius: 8,
-      ),
-      title: Text(
-        t.title,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+    final extras = <TrackMenuExtra>[
+      if (t.isPendingSpotifyMatch && !c.usesOfficialYouTubeMusic)
+        (
+          label: 'Elegir coincidencia de YouTube',
+          run: () => _matchSpotify(c, t),
         ),
-      ),
-      subtitle: Text(
-        t.isPendingSpotifyMatch
-            ? '${t.artist} · ${c.usesOfficialYouTubeMusic ? 'Buscar en YouTube Music' : 'Elige una coincidencia de YouTube'}'
-            : c.requiresOfficialYouTubeMusic(t)
-            ? '${t.artist} · Abrir reproductor oficial'
-            : '${t.artist}${t.isLocal ? ' · Disponible sin conexión' : ''}',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      onTap: t.isPendingSpotifyMatch
-          ? () => _matchSpotify(c, t)
-          : () => c.playTrack(t, context: items),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (MediaQuery.sizeOf(context).width >= 700)
-            Text(
-              _time(t.duration),
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          PopupMenuButton<String>(
-            tooltip: 'Opciones de ${t.title}',
-            onSelected: (value) {
-              switch (value) {
-                case 'match':
-                  _matchSpotify(c, t);
-                case 'favorite':
-                  c.toggleFavorite(t);
-                case 'queue':
-                  c.addToQueue(t);
-                case 'next':
-                  c.playNext(t);
-                case 'download':
-                  c.downloadTrack(t);
-                case 'playlist':
-                  _addToPlaylist(c, t);
-                case 'jam':
-                  addToJamFlow(context, _ensureJam(), [t]);
-                case 'remove':
-                  if (playlist != null) c.removeFromPlaylist(playlist, t);
-                case 'up':
-                  if (playlist != null && playlistIndex > 0) {
-                    c.reorderPlaylist(
-                      playlist,
-                      playlistIndex,
-                      playlistIndex - 1,
-                    );
-                  }
-                case 'down':
-                  if (playlist != null &&
-                      playlistIndex < playlist.trackIds.length - 1) {
-                    c.reorderPlaylist(
-                      playlist,
-                      playlistIndex,
-                      playlistIndex + 2,
-                    );
-                  }
-              }
-            },
-            itemBuilder: (_) => [
-              if (t.isPendingSpotifyMatch && !c.usesOfficialYouTubeMusic)
-                const PopupMenuItem(
-                  value: 'match',
-                  child: Text('Elegir coincidencia de YouTube'),
-                ),
-              PopupMenuItem(
-                value: 'favorite',
-                child: Text(
-                  c.favoriteIds.contains(t.id)
-                      ? 'Quitar de favoritos'
-                      : 'Añadir a favoritos',
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'queue',
-                child: Text('Añadir a la cola'),
-              ),
-              const PopupMenuItem(
-                value: 'next',
-                child: Text('Reproducir a continuación'),
-              ),
-              const PopupMenuItem(
-                value: 'playlist',
-                child: Text('Añadir a una lista'),
-              ),
-              PopupMenuItem(
-                value: 'jam',
-                child: Text(
-                  _jam?.service.connected == true
-                      ? 'Añadir a la Jam'
-                      : 'Iniciar una Jam con esto',
-                ),
-              ),
-              if (c.canDownloadTrack(t))
-                const PopupMenuItem(
-                  value: 'download',
-                  child: Text('Descargar audio'),
-                ),
-              if (playlist != null && playlistIndex > 0)
-                const PopupMenuItem(
-                  value: 'up',
-                  child: Text('Subir en la lista'),
-                ),
-              if (playlist != null &&
-                  playlistIndex < playlist.trackIds.length - 1)
-                const PopupMenuItem(
-                  value: 'down',
-                  child: Text('Bajar en la lista'),
-                ),
-              if (playlist != null)
-                const PopupMenuItem(
-                  value: 'remove',
-                  child: Text('Quitar de esta lista'),
-                ),
-            ],
+      if (c.canDownloadTrack(t))
+        (label: 'Descargar audio', run: () => c.downloadTrack(t)),
+      if (playlist != null && playlistIndex > 0)
+        (
+          label: 'Subir en la lista',
+          run: () =>
+              c.reorderPlaylist(playlist, playlistIndex, playlistIndex - 1),
+        ),
+      if (playlist != null && playlistIndex < playlist.trackIds.length - 1)
+        (
+          label: 'Bajar en la lista',
+          run: () =>
+              c.reorderPlaylist(playlist, playlistIndex, playlistIndex + 2),
+        ),
+      if (playlist != null)
+        (
+          label: 'Quitar de esta lista',
+          run: () => c.removeFromPlaylist(playlist, t),
+        ),
+    ];
+    return TrackActionsRegion(
+      key: key,
+      controller: c,
+      track: t,
+      extras: extras,
+      builder: (context, hot) => ListTile(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        selected: active,
+        selectedTileColor: Theme.of(
+          context,
+        ).colorScheme.primary.withValues(alpha: .06),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        leading: Artwork(
+          track: t,
+          artworkContext: ArtworkContext.thumbnail,
+          radius: 8,
+        ),
+        title: Text(
+          t.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontWeight: active ? FontWeight.w700 : FontWeight.w500,
           ),
-        ],
+        ),
+        subtitle: Text(
+          t.isPendingSpotifyMatch
+              ? '${t.artist} · ${c.usesOfficialYouTubeMusic ? 'Buscar en YouTube Music' : 'Elige una coincidencia de YouTube'}'
+              : c.requiresOfficialYouTubeMusic(t)
+              ? '${t.artist} · Abrir reproductor oficial'
+              : '${t.artist}${t.isLocal ? ' · Disponible sin conexión' : ''}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        onTap: t.isPendingSpotifyMatch
+            ? () => _matchSpotify(c, t)
+            : () => c.playTrack(t, context: items),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (MediaQuery.sizeOf(context).width >= 700)
+              Text(
+                _time(t.duration),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            TrackMenuButton(
+              controller: c,
+              track: t,
+              extras: extras,
+              quickAdd: true,
+              quickAddVisible: hot,
+            ),
+          ],
+        ),
       ),
     );
   }

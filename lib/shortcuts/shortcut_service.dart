@@ -27,7 +27,9 @@ enum ShortcutId {
   vinyl('Modo Vinilo'),
   lyrics('Letras'),
   equalizer('Ecualizador'),
-  sleep('Temporizador de sueño');
+  sleep('Temporizador de sueño'),
+  addToQueue('Añadir a la cola (fila enfocada)'),
+  addToJam('Añadir a la Jam (fila enfocada)');
 
   const ShortcutId(this.label);
   final String label;
@@ -114,6 +116,16 @@ class ShortcutService extends ChangeNotifier {
     ),
     ShortcutId.sleep: SingleActivator(
       LogicalKeyboardKey.keyT,
+      control: true,
+      shift: true,
+    ),
+    ShortcutId.addToQueue: SingleActivator(
+      LogicalKeyboardKey.keyA,
+      control: true,
+      shift: true,
+    ),
+    ShortcutId.addToJam: SingleActivator(
+      LogicalKeyboardKey.keyJ,
       control: true,
       shift: true,
     ),

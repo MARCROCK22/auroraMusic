@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../app_controller.dart';
 import '../core/models.dart';
 import 'artwork.dart';
+import 'track_actions.dart';
 
 class QueuePanel extends StatelessWidget {
   const QueuePanel({super.key, required this.controller});
@@ -220,40 +221,54 @@ class _QueueList extends StatelessWidget {
     );
   }
 
-  Widget _tile(BuildContext context, Track track, int queueIndex) => ListTile(
-    key: ValueKey('$queueIndex:${track.id}'),
-    contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
-    leading: Artwork(
-      track: track,
-      artworkContext: ArtworkContext.thumbnail,
-      radius: 5,
-    ),
-    title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-    subtitle: Text(
-      '${controller.autoAddedIds.contains(track.id) ? 'Sugerida · ' : ''}'
-      '${track.artist} · ${_time(track.duration)}',
-      maxLines: 2,
-      overflow: TextOverflow.ellipsis,
-    ),
-    trailing: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        PopupMenuButton<String>(
-          tooltip: 'Acciones de la pista',
-          onSelected: (action) {
-            if (action == 'remove') controller.removeFromQueue(queueIndex);
-          },
-          itemBuilder: (context) => const [
-            PopupMenuItem(value: 'remove', child: Text('Quitar de la cola')),
-          ],
-          icon: const Icon(Icons.more_vert),
+  Widget _tile(BuildContext context, Track track, int queueIndex) =>
+      TrackActionsRegion(
+        key: ValueKey('$queueIndex:${track.id}'),
+        controller: controller,
+        track: track,
+        extras: [
+          (
+            label: 'Quitar de la cola',
+            run: () => controller.removeFromQueue(queueIndex),
+          ),
+        ],
+        builder: (context, _) => _queueTile(context, track, queueIndex),
+      );
+
+  Widget _queueTile(BuildContext context, Track track, int queueIndex) =>
+      ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+        leading: Artwork(
+          track: track,
+          artworkContext: ArtworkContext.thumbnail,
+          radius: 5,
         ),
-        const SizedBox(width: 4),
-        const Icon(Icons.drag_handle),
-      ],
-    ),
-    onTap: () => controller.playQueueAt(queueIndex),
-  );
+        title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: Text(
+          '${controller.autoAddedIds.contains(track.id) ? 'Sugerida · ' : ''}'
+          '${track.artist} · ${_time(track.duration)}',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TrackMenuButton(
+              controller: controller,
+              track: track,
+              extras: [
+                (
+                  label: 'Quitar de la cola',
+                  run: () => controller.removeFromQueue(queueIndex),
+                ),
+              ],
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.drag_handle),
+          ],
+        ),
+        onTap: () => controller.playQueueAt(queueIndex),
+      );
 }
 
 class _Artwork extends StatelessWidget {

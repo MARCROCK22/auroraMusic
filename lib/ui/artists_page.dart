@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../app_controller.dart';
 import '../core/models.dart';
 import 'artwork.dart';
 import 'studio/studio_components.dart';
+import 'track_actions.dart';
 
 /// Browse the artists represented by the tracks supplied by the caller.
 class ArtistsPage extends StatefulWidget {
@@ -11,8 +13,11 @@ class ArtistsPage extends StatefulWidget {
     required this.tracks,
     required this.onPlay,
     required this.onSearch,
+    this.controller,
   });
 
+  /// Si se pasa, las canciones ofrecen cola/Jam (menú ⋯, clic derecho, atajos).
+  final AppController? controller;
   final List<Track> tracks;
   final ValueChanged<Track> onPlay;
   final ValueChanged<String> onSearch;
@@ -158,8 +163,19 @@ class _ArtistsPageState extends State<ArtistsPage> {
           ),
         ),
         const SizedBox(height: 20),
+        if (widget.controller != null) ...[
+          TrackBatchButtons(
+            controller: widget.controller!,
+            tracks: artist.tracks,
+          ),
+          const SizedBox(height: 8),
+        ],
         for (final track in artist.tracks)
-          _TrackTile(track: track, onPlay: () => widget.onPlay(track)),
+          _TrackTile(
+            track: track,
+            controller: widget.controller,
+            onPlay: () => widget.onPlay(track),
+          ),
       ],
     );
   }
@@ -232,35 +248,66 @@ class _ArtistTile extends StatelessWidget {
 }
 
 class _TrackTile extends StatelessWidget {
-  const _TrackTile({required this.track, required this.onPlay});
+  const _TrackTile({
+    required this.track,
+    required this.onPlay,
+    this.controller,
+  });
 
+  final AppController? controller;
   final Track track;
   final VoidCallback onPlay;
 
   @override
-  Widget build(BuildContext context) => ListTile(
-    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-    leading: Artwork(
-      track: track,
-      artworkContext: ArtworkContext.thumbnail,
-      radius: 4,
-    ),
-    title: Text(track.title, maxLines: 2, overflow: TextOverflow.ellipsis),
-    subtitle: Text(
-      [
-        if (track.album?.trim().isNotEmpty == true) track.album!.trim(),
-        _duration(track.duration),
-      ].join(' · '),
-      maxLines: 2,
-      overflow: TextOverflow.ellipsis,
-    ),
-    trailing: IconButton(
-      tooltip: 'Reproducir ${track.title}',
-      onPressed: onPlay,
-      icon: const Icon(Icons.play_arrow_rounded),
-    ),
-    onTap: onPlay,
-  );
+  Widget build(BuildContext context) {
+    Widget tile(BuildContext context, bool hot) => ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+      leading: Artwork(
+        track: track,
+        artworkContext: ArtworkContext.thumbnail,
+        radius: 4,
+      ),
+      title: Text(track.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+      subtitle: Text(
+        [
+          if (track.album?.trim().isNotEmpty == true) track.album!.trim(),
+          _duration(track.duration),
+        ].join(' · '),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: controller == null
+          ? IconButton(
+              tooltip: 'Reproducir ${track.title}',
+              onPressed: onPlay,
+              icon: const Icon(Icons.play_arrow_rounded),
+            )
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: 'Reproducir ${track.title}',
+                  onPressed: onPlay,
+                  icon: const Icon(Icons.play_arrow_rounded),
+                ),
+                TrackMenuButton(
+                  controller: controller!,
+                  track: track,
+                  quickAdd: true,
+                  quickAddVisible: hot,
+                ),
+              ],
+            ),
+      onTap: onPlay,
+    );
+    return controller == null
+        ? tile(context, true)
+        : TrackActionsRegion(
+            controller: controller!,
+            track: track,
+            builder: tile,
+          );
+  }
 
   String _duration(Duration duration) =>
       '${duration.inMinutes}:${(duration.inSeconds % 60).toString().padLeft(2, '0')}';
