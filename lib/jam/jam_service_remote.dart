@@ -463,6 +463,7 @@ extension JamServiceRemote on JamService {
               id: jamRandomSecret(12),
               track: pick.track,
               addedBy: p.id,
+              suggestedFor: p.id,
               status: rules.approve && !p.isStaff
                   ? JamEntryStatus.pending
                   : JamEntryStatus.suggested,
@@ -589,6 +590,7 @@ extension JamServiceRemote on JamService {
           status: e.status,
           up: e.up,
           down: e.down,
+          suggestedFor: e.suggestedFor == null ? null : swap(e.suggestedFor!),
         ),
     ];
     participantId = 'host';

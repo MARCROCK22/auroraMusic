@@ -435,9 +435,13 @@ class JamRules {
     this.approve = false,
     this.open = true,
     this.suggest = true,
+    this.autoplay = true,
   });
   final int maxGuests, maxPerGuest;
   final bool votes, approve, open, suggest;
+
+  /// Autoplay de la Jam: el anfitrión mantiene la cola con sugerencias.
+  final bool autoplay;
   JamRules copyWith({
     int? maxGuests,
     int? maxPerGuest,
@@ -445,6 +449,7 @@ class JamRules {
     bool? approve,
     bool? open,
     bool? suggest,
+    bool? autoplay,
   }) => JamRules(
     maxGuests: (maxGuests ?? this.maxGuests).clamp(1, 15),
     maxPerGuest: (maxPerGuest ?? this.maxPerGuest).clamp(1, 50),
@@ -452,6 +457,7 @@ class JamRules {
     approve: approve ?? this.approve,
     open: open ?? this.open,
     suggest: suggest ?? this.suggest,
+    autoplay: autoplay ?? this.autoplay,
   );
   Map<String, Object> toJson() => {
     'maxGuests': maxGuests,
@@ -460,6 +466,7 @@ class JamRules {
     'approve': approve,
     'open': open,
     'suggest': suggest,
+    'autoplay': autoplay,
   };
   factory JamRules.fromJson(Object? raw) {
     final data = jamMap(raw);
@@ -470,11 +477,13 @@ class JamRules {
       'approve',
       'open',
       'suggest',
+      'autoplay',
     });
     if (data['votes'] is! bool ||
         data['approve'] is! bool ||
         data['open'] is! bool ||
-        data['suggest'] is! bool) {
+        data['suggest'] is! bool ||
+        (data['autoplay'] != null && data['autoplay'] is! bool)) {
       throw const JamException('Reglas inválidas.');
     }
     final guests = jamInt(data['maxGuests'], max: 15);
@@ -487,6 +496,7 @@ class JamRules {
       approve: data['approve'],
       open: data['open'],
       suggest: data['suggest'],
+      autoplay: data['autoplay'] != false,
     );
   }
 }
@@ -571,8 +581,13 @@ class JamQueueEntry {
     this.status = JamEntryStatus.queued,
     this.up = const [],
     this.down = const [],
+    this.suggestedFor,
   });
   final String id, addedBy;
+
+  /// Participante para quien se sugirió/autoañadió la pista (null si la puso
+  /// alguien a mano). La UI muestra «Sugerida para {nombre}».
+  final String? suggestedFor;
   final JamTrack track;
   final JamEntryStatus status;
 
@@ -584,13 +599,15 @@ class JamQueueEntry {
     JamEntryStatus? status,
     List<String>? up,
     List<String>? down,
+    String? addedBy,
   }) => JamQueueEntry(
     id: id,
     track: track,
-    addedBy: addedBy,
+    addedBy: addedBy ?? this.addedBy,
     status: status ?? this.status,
     up: up ?? this.up,
     down: down ?? this.down,
+    suggestedFor: suggestedFor,
   );
   Map<String, Object> toJson() => {
     'id': id,
@@ -599,10 +616,19 @@ class JamQueueEntry {
     'status': status.name,
     'up': up,
     'down': down,
+    'suggestedFor': ?suggestedFor,
   };
   factory JamQueueEntry.fromJson(Object? raw) {
     final data = jamMap(raw);
-    jamKeys(data, {'id', 'track', 'addedBy', 'status', 'up', 'down'});
+    jamKeys(data, {
+      'id',
+      'track',
+      'addedBy',
+      'status',
+      'up',
+      'down',
+      'suggestedFor',
+    });
     List<String> votes(Object? value) {
       if (value is! List || value.length > 16) {
         throw const JamException('Votos inválidos.');
@@ -624,6 +650,9 @@ class JamQueueEntry {
       status: JamEntryStatus.values.firstWhere((v) => v.name == data['status']),
       up: votes(data['up']),
       down: votes(data['down']),
+      suggestedFor: data['suggestedFor'] == null
+          ? null
+          : jamIdentifier(data['suggestedFor']),
     );
   }
 }
@@ -666,4 +695,35 @@ class JamPlayback {
       positionMs: jamInt(data['positionMs'], max: 86400000),
     );
   }
+}
+
+/// Sugerencia del grupo lista para mostrar: pista, para quién y por qué.
+class GroupSuggestion {
+  const GroupSuggestion({
+    required this.entryId,
+    required this.track,
+    required this.forId,
+    required this.forName,
+    required this.reason,
+  });
+  final String entryId, forId, forName, reason;
+  final JamTrack track;
+}
+
+enum JamAddMode { end, playNext, playNow, shuffle }
+
+/// Avance observable de «añadir en lotes».
+class JamAddProgress {
+  const JamAddProgress({
+    this.done = 0,
+    this.total = 0,
+    this.running = false,
+    this.dropped = 0,
+    this.message,
+  });
+  final int done, total, dropped;
+  final bool running;
+
+  /// Resumen legible: tope aplicado y qué se descartó.
+  final String? message;
 }

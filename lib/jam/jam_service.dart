@@ -10,6 +10,7 @@ import 'transport/jam_hub.dart';
 import 'transport/jam_transport.dart';
 
 part 'jam_service_remote.dart';
+part 'jam_service_add.dart';
 
 /// Host owns every mutation. Participant commands never carry playback/provider credentials.
 class JamService extends ChangeNotifier {
@@ -549,7 +550,23 @@ class JamService extends ChangeNotifier {
           throw const JamException('permissions');
         }
         final track = JamTrack.fromJson(data['track']);
-        if (queue.any((entry) => entry.track.keys.any(track.keys.contains))) {
+        final dup = queue.indexWhere(
+          (entry) => entry.track.keys.any(track.keys.contains),
+        );
+        if (dup >= 0) {
+          // Añadir una sugerida «A continuación» la sube a la cola normal.
+          final old = queue[dup];
+          if (old.status == JamEntryStatus.suggested &&
+              old.id != playback?.entryId) {
+            queue = [...queue]
+              ..[dup] = old.copyWith(
+                status: rules.approve && !participant.isStaff
+                    ? JamEntryStatus.pending
+                    : JamEntryStatus.queued,
+                addedBy: id,
+              );
+            _changed();
+          }
           return;
         }
         if (queue.length >= 200) throw const JamException('full');
