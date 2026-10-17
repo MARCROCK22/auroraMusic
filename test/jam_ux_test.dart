@@ -5,6 +5,7 @@ import 'package:aurora_music/core/models.dart';
 import 'package:aurora_music/jam/jam_controller.dart';
 import 'package:aurora_music/jam/jam_models.dart';
 import 'package:aurora_music/ui/jam/jam_add_sheet.dart';
+import 'package:aurora_music/ui/artwork.dart';
 import 'package:aurora_music/ui/jam/jam_session_panel.dart';
 import 'package:aurora_music/ui/studio/studio_transport.dart';
 import 'support/fakes.dart';
@@ -79,6 +80,7 @@ Widget _transport(AppController app, JamController jam) => _host(
 );
 
 void main() {
+  _coverTests();
   testWidgets(
     'barra: píldora con personas, rol y modo; sin Jam solo el botón',
     (tester) async {
@@ -199,4 +201,70 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
+}
+
+void _coverTests() {
+  JamTrack withCover(String id, String? url) => JamTrack.fromTrack(
+    Track(id: id, title: 'Tema $id', artist: 'Artista', artworkUrl: url),
+  );
+
+  test('portadas: hosts de imagen válidos viajan, el resto se descarta', () {
+    const ok = 'https://lh3.googleusercontent.com/abc_-DEF=w544-h544-l90-rj';
+    expect(jamSafeArtwork(ok), ok);
+    expect(
+      jamSafeArtwork('https://i.ytimg.com/vi/abcdefghijk/hq.jpg?sqp=x'),
+      'https://i.ytimg.com/vi/abcdefghijk/hq.jpg',
+    );
+    expect(jamSafeArtwork('https://yt3.ggpht.com/a/b=s88'), isNotNull);
+    expect(jamSafeArtwork('http://i.ytimg.com/vi/a/b.jpg'), isNull);
+    expect(jamSafeArtwork('https://evil.example/a.jpg'), isNull);
+    expect(
+      jamSafeArtwork('https://lh3.googleusercontent.com.evil.io/a'),
+      isNull,
+    );
+    expect(jamSafeArtwork('https://i.ytimg.com/${'a' * 600}'), isNull);
+    expect(withCover('x', ok).artworkUrl, ok);
+    expect(withCover('y', null).artworkUrl, isNull);
+    // Round trip: lo que sale por el servidor se acepta al volver.
+    expect(JamTrack.fromJson(withCover('x', ok).toJson()).artworkUrl, ok);
+  });
+
+  for (final width in [320.0, 500.0]) {
+    testWidgets('portadas: cola y sugerencia con y sin imagen a ${width}px', (
+      tester,
+    ) async {
+      tester.view.physicalSize = Size(width, 3000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final app = await _app(tester);
+      final jam = _jam(app, host: false);
+      jam.service.queue = [
+        JamQueueEntry(
+          id: 'c1',
+          track: withCover(
+            'c1',
+            'https://lh3.googleusercontent.com/abc=w544-h544',
+          ),
+          addedBy: 'host',
+        ),
+        JamQueueEntry(
+          id: 'c2',
+          track: withCover('c2', null),
+          addedBy: 'guest',
+          status: JamEntryStatus.suggested,
+          suggestedFor: 'guest',
+        ),
+      ];
+      await tester.pumpWidget(
+        MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+          child: _host(JamSessionPanel(controller: jam)),
+        ),
+      );
+      expect(find.byType(Artwork), findsAtLeastNWidgets(2));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
 }

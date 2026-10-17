@@ -194,7 +194,7 @@ begin
           or (jsonb_typeof(t->'spotifyUri') = 'string' and (t->>'spotifyUri') ~ '^spotify:track:[a-zA-Z0-9]{22}$'))
      and (t->'artworkUrl' is null or jsonb_typeof(t->'artworkUrl') = 'null'
           or (jsonb_typeof(t->'artworkUrl') = 'string' and char_length(t->>'artworkUrl') <= 512
-              and (t->>'artworkUrl') ~ '^https://(i\.ytimg\.com|img\.youtube\.com|i\.scdn\.co|image-cdn-ak\.spotifycdn\.com)/[A-Za-z0-9_./-]*$'))
+              and (t->>'artworkUrl') ~ '^https://(i\.ytimg\.com|img\.youtube\.com|i\.scdn\.co|image-cdn-ak\.spotifycdn\.com|lh[3-6]\.googleusercontent\.com|yt3\.googleusercontent\.com|yt3\.ggpht\.com)/[A-Za-z0-9_./=-]*$'))
      and jsonb_typeof(t->'localOnly') = 'boolean';
 end $$;
 

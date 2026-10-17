@@ -268,8 +268,8 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
                   children: [
                     Artwork(
                       track: jamTrackAsTrack(entry.track),
-                      artworkContext: ArtworkContext.thumbnailCompact,
-                      radius: 4,
+                      artworkContext: ArtworkContext.thumbnailDetail,
+                      radius: 6,
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -464,7 +464,7 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
               padding: const EdgeInsets.symmetric(vertical: 6),
               child: Artwork(
                 track: jamTrackAsTrack(e.track),
-                artworkContext: ArtworkContext.thumbnailCompact,
+                artworkContext: ArtworkContext.thumbnail,
                 radius: 4,
               ),
             ),

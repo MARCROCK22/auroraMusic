@@ -226,24 +226,27 @@ String? jamYouTubeId(Track track) {
   return null;
 }
 
+final _artworkHost = RegExp(
+  r'^(i\.ytimg\.com|img\.youtube\.com|i\.scdn\.co|'
+  r'image-cdn-ak\.spotifycdn\.com|lh[3-6]\.googleusercontent\.com|'
+  r'yt3\.googleusercontent\.com|yt3\.ggpht\.com)$',
+);
+
+/// Solo HTTPS y hosts de imagen conocidos (YouTube, googleusercontent, Spotify).
+/// Las portadas de YouTube Music llevan el tamaño tras «=» (`=w544-h544`), que
+/// se conserva; cualquier query o fragmento se descarta.
 String? jamSafeArtwork(String? value) {
   final uri = Uri.tryParse(value ?? '');
   if (uri == null ||
       uri.scheme != 'https' ||
       uri.userInfo.isNotEmpty ||
       uri.hasPort ||
-      uri.hasQuery ||
-      uri.hasFragment ||
-      uri.toString().length > 512 ||
-      !{
-        'i.ytimg.com',
-        'img.youtube.com',
-        'i.scdn.co',
-        'image-cdn-ak.spotifycdn.com',
-      }.contains(uri.host)) {
+      !_artworkHost.hasMatch(uri.host) ||
+      !RegExp(r'^/[A-Za-z0-9_./=-]*$').hasMatch(uri.path)) {
     return null;
   }
-  return uri.toString();
+  final clean = 'https://${uri.host}${uri.path}';
+  return clean.length > 512 ? null : clean;
 }
 
 String jamNormalized(String value) => value

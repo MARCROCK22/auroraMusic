@@ -188,7 +188,7 @@ class _JamAddSheetState extends State<JamAddSheet> {
           ListTile(
             leading: Artwork(
               track: jamTrackAsTrack(s.track),
-              artworkContext: ArtworkContext.thumbnailCompact,
+              artworkContext: ArtworkContext.thumbnail,
               radius: 4,
             ),
             title: Text(
@@ -222,7 +222,7 @@ class _JamAddSheetState extends State<JamAddSheet> {
   Widget _trackTile(Track t) => ListTile(
     leading: Artwork(
       track: t,
-      artworkContext: ArtworkContext.thumbnailCompact,
+      artworkContext: ArtworkContext.thumbnail,
       radius: 4,
     ),
     title: Text(t.title, maxLines: 1, overflow: TextOverflow.ellipsis),
