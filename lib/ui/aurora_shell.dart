@@ -39,6 +39,8 @@ import 'video_downloads_page.dart';
 import 'artists_page.dart';
 import '../audio/routed_music_audio.dart';
 import '../audio_web/web_music_audio.dart';
+import '../updater/update_controller.dart';
+import '../updater/update_ui.dart';
 
 const _sections = [
   'Inicio',
@@ -98,6 +100,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   bool _playerOpen = false;
   bool _foreground = true;
   bool _analysisEnabled = false;
+  late final UpdateController _updates;
 
   @override
   void initState() {
@@ -107,6 +110,8 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     });
     WidgetsBinding.instance.addObserver(this);
     _audio = ref.read(controllerProvider).audio;
+    _updates = UpdateController(ref.read(controllerProvider).preferences)
+      ..start();
     WindowControls.setCloseConfirmation(_confirmWindowClose);
     _desktop = DesktopShell(ref.read(controllerProvider))..start();
     _guardWebClose();
@@ -162,6 +167,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     WindowControls.guardClose(false);
     _jam?.removeListener(_jamChanged);
     if (_analysisEnabled) _audio.setVisualizationEnabled(false);
+    _updates.dispose();
     _search.dispose();
     _searchFocus.dispose();
     super.dispose();
@@ -384,6 +390,10 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                                 if (!c.ready || c.busy)
                                   const LinearProgressIndicator(minHeight: 2),
                                 if (c.error != null) _errorBanner(c),
+                                UpdateBanner(
+                                  controller: _updates,
+                                  isPlaying: () => c.audio.isPlaying,
+                                ),
                                 Expanded(child: _content(c)),
                               ],
                             ),
@@ -1694,6 +1704,11 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             ],
           ],
         ],
+      ),
+      (
+        title: 'Actualizaciones',
+        subtitle: 'Nuevas versiones desde GitHub Releases',
+        children: [UpdateSettings(controller: _updates)],
       ),
       (
         title: 'Música sin conexión',

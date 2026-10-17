@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- getTemporaryDirectory() de Flutter = cacheDir; allí vive aurora_update/. -->
+<paths>
+    <cache-path name="aurora_update" path="aurora_update/" />
+</paths>

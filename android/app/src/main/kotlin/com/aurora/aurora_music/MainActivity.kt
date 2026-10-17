@@ -75,6 +75,7 @@ class MainActivity : FlutterActivity() {
         // Reattaching the cached engine must preserve active source jobs/channels too.
         if (engine.plugins.has(AuroraAudioPlugin::class.java)) return
         engine.plugins.add(AuroraAudioPlugin())
+        engine.plugins.add(AuroraApkInstaller())
         val source = MethodChannel(engine.dartExecutor.binaryMessenger, "aurora/source")
         source.setMethodCallHandler { call, result ->
             if (call.method == "cancel") {

@@ -207,3 +207,11 @@ Los archivos importados y descargados se guardan en el directorio de soporte de 
 ## Validación
 
 Consulta [docs/VALIDATION.md](docs/VALIDATION.md) para pruebas reproducibles, resultados y comprobaciones pendientes. El 2026-10-11 pasaron búsqueda, extracción, reproducción online, descarga MP3 y reproducción local en Windows, sin importar una sesión. El día anterior YouTube devolvió HTTP 429/verificación de cuenta: estos límites pueden reaparecer y no se garantiza disponibilidad de todos los videos o redes. El audio local funciona independientemente.
+
+## Publicar una versión
+
+1. Sube `version:` en `pubspec.yaml` (p. ej. `1.2.0+10`) y haz commit en `main`.
+2. Crea y empuja la etiqueta: `git tag v1.2.0 && git push origin v1.2.0` (`v1.2.0-beta.1` publica una pre-release, solo visible en el «Canal beta»).
+3. `.github/workflows/release.yml` compila Windows (`Aurora-Setup-1.2.0.exe`, Inno Setup con `installer/aurora.iss`) y Android (`Aurora-1.2.0.apk`, ARM64 firmado), genera `checksums.txt` (SHA-256) y crea el release con notas automáticas. Edita las notas en GitHub si quieres; la app las muestra.
+4. Secretos del repositorio requeridos: `ANDROID_KEYSTORE_BASE64`, `ANDROID_STORE_PASSWORD`, `ANDROID_KEY_PASSWORD`, `ANDROID_KEY_ALIAS`. **El APK debe firmarse siempre con la misma keystore**; si cambia, Android rechaza la actualización.
+5. La app consulta `releases/latest` de `kaz-py/auroraMusic` (sin token, con ETag) al iniciar, como máximo cada 6 h, y desde Ajustes → Actualizaciones. Nunca instala un archivo cuyo SHA-256 no coincida con `checksums.txt`.

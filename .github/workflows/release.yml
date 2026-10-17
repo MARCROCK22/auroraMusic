@@ -1,0 +1,177 @@
+name: Publicar versión
+
+# Se dispara al empujar una etiqueta vX.Y.Z (o vX.Y.Z-beta.1 para pre-release).
+# Secretos necesarios (Settings > Secrets): ANDROID_KEYSTORE_BASE64,
+# ANDROID_STORE_PASSWORD, ANDROID_KEY_PASSWORD, ANDROID_KEY_ALIAS.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Comprobar que la etiqueta coincide con pubspec.yaml
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'.TrimStart('v')
+          $pub = (Select-String -Path pubspec.yaml -Pattern '^version:\s*(\S+)').Matches[0].Groups[1].Value
+          if ($pub.Split('+')[0] -ne $tag) { throw "La etiqueta $tag no coincide con pubspec.yaml ($pub)." }
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.38.8
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - uses: NuGet/setup-nuget@v3
+        with:
+          nuget-version: '6.12.1'
+
+      - run: flutter analyze
+
+      - run: flutter test
+
+      - name: Preparar plugins y herramientas de Windows
+        shell: pwsh
+        run: |
+          ./scripts/prepare_windows_plugins.ps1
+          ./scripts/setup_tools.ps1
+
+      - run: flutter build windows --release --no-pub
+
+      - name: Empaquetar
+        shell: pwsh
+        run: ./scripts/package_windows.ps1 -OutputDirectory dist/release
+
+      - name: Crear instalador con Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
+          & $iscc "/DAppVersion=$version" "/DSourceDir=$PWD/dist/release/Aurora-Windows" "/DOutputDir=$PWD/dist/out" installer/aurora.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Falló Inno Setup.' }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/out/Aurora-Setup-*.exe
+          if-no-files-found: error
+          compression-level: 0
+
+  android:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Instalar paquetes del SDK de Android
+        shell: pwsh
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.1.0" "ndk;28.2.13676358" "cmake;3.22.1"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.38.8
+          channel: stable
+          cache: true
+
+      - name: Restaurar el almacén de claves de release
+        shell: pwsh
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: ./scripts/ci_android_signing.ps1 -Action Prepare
+
+      - name: Reconstruir bibliotecas WebP para páginas de 16 KB
+        shell: pwsh
+        run: |
+          $sdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { $env:ANDROID_SDK_ROOT }
+          ./scripts/rebuild_android_webp.ps1 -SdkDirectory $sdk
+
+      - run: flutter pub get
+
+      - name: Compilar APK release ARM64
+        shell: pwsh
+        env:
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          $env:ANDROID_KEYSTORE_PATH = Join-Path $env:RUNNER_TEMP 'aurora-signing/release.jks'
+          flutter build apk --release --target-platform android-arm64
+          if ($LASTEXITCODE -ne 0) { throw 'Falló la compilación firmada.' }
+
+      - name: Eliminar el almacén de claves temporal
+        if: always()
+        shell: pwsh
+        run: ./scripts/ci_android_signing.ps1 -Action Cleanup
+
+      - name: Verificar la firma del APK
+        shell: pwsh
+        run: |
+          $sdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { $env:ANDROID_SDK_ROOT }
+          & (Join-Path $sdk 'build-tools/36.1.0/apksigner.bat') verify --verbose build/app/outputs/flutter-apk/app-release.apk
+          if ($LASTEXITCODE -ne 0) { throw 'APK sin firma válida.' }
+
+      - name: Nombrar el APK
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          New-Item -ItemType Directory -Path dist/out -Force | Out-Null
+          Copy-Item build/app/outputs/flutter-apk/app-release.apk "dist/out/Aurora-$version.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/out/Aurora-*.apk
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Generar checksums.txt (SHA-256)
+        working-directory: assets
+        run: sha256sum Aurora-* > checksums.txt && cat checksums.txt
+
+      - name: Publicar el release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          flags=""
+          case "$TAG" in *-*) flags="--prerelease";; esac
+          gh release create "$TAG" assets/* --repo "$GITHUB_REPOSITORY" --title "Aurora ${TAG#v}" --generate-notes $flags
