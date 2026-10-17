@@ -2,438 +2,844 @@ import 'package:flutter/material.dart';
 import '../../core/models.dart';
 import '../../jam/jam_controller.dart';
 import '../../jam/jam_models.dart';
+import '../../jam/jam_service.dart';
 import '../artwork.dart';
+import '../studio/studio_components.dart';
+import 'jam_add_sheet.dart';
+import 'jam_flows.dart';
+import 'jam_widgets.dart';
 
+Track jamTrackAsTrack(JamTrack t) => Track(
+  id: t.key,
+  title: t.title,
+  artist: t.artist,
+  artworkUrl: t.artworkUrl,
+  duration: Duration(milliseconds: t.durationMs),
+);
+
+/// Panel de la Jam. Se usa embebido en la página, en la hoja móvil y en el
+/// panel lateral de escritorio.
 class JamSessionPanel extends StatefulWidget {
-  const JamSessionPanel({super.key, required this.controller});
+  const JamSessionPanel({super.key, required this.controller, this.scroll});
   final JamController controller;
+  final ScrollController? scroll;
   @override
   State<JamSessionPanel> createState() => _JamSessionPanelState();
 }
 
 class _JamSessionPanelState extends State<JamSessionPanel> {
-  final _query = TextEditingController();
   double? _seekPreview;
-  @override
-  void dispose() {
-    _query.dispose();
-    super.dispose();
+  JamController get c => widget.controller;
+  JamService get s => c.service;
+
+  Future<void> _do(Future<void> Function() action) async {
+    try {
+      await action();
+    } on JamException catch (failure) {
+      _say(failure.message);
+    } catch (_) {
+      _say('No se pudo completar la acción. Inténtalo de nuevo.');
+    }
+  }
+
+  void _say(String text) {
+    if (mounted) {
+      ScaffoldMessenger.maybeOf(
+        context,
+      )?.showSnackBar(SnackBar(content: Text(text)));
+    }
   }
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-    animation: widget.controller,
-    builder: (context, _) => Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    animation: c,
+    builder: (context, _) => ListView(
+      controller: widget.scroll,
+      shrinkWrap: widget.scroll == null && !_bounded(context),
+      physics: widget.scroll == null && !_bounded(context)
+          ? const NeverScrollableScrollPhysics()
+          : null,
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       children: [
-        _modeAndPlayer(widget.controller),
-        const SizedBox(height: 24),
-        _people(widget.controller),
-        const SizedBox(height: 24),
-        _queue(widget.controller),
-        const SizedBox(height: 24),
-        _addMusic(widget.controller),
+        _header(context),
+        const SizedBox(height: 16),
+        _nowPlaying(context),
+        const SizedBox(height: 20),
+        _queue(context),
+        const SizedBox(height: 20),
+        _people(context),
+        if (s.isHost) ...[const SizedBox(height: 20), _hostSettings(context)],
+        const SizedBox(height: 20),
+        _leave(context),
       ],
     ),
   );
-  Widget _modeAndPlayer(JamController c) {
-    final s = c.service;
-    final playback = s.playback;
-    final entry = s.queue
-        .where((entry) => entry.id == playback?.entryId)
-        .firstOrNull;
-    final duration = widget.controller.app.audio.duration.inMilliseconds;
-    final position =
-        (_seekPreview ??
-                widget.controller.app.audio.position.inMilliseconds.toDouble())
-            .clamp(0.0, duration > 0 ? duration.toDouble() : 1.0);
+
+  bool _bounded(BuildContext context) => context
+      .findAncestorWidgetOfExactType<SingleChildScrollView>() == null;
+
+  Widget _title(String text, {Widget? trailing}) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(
+              fontFamily: 'Newsreader',
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        ?trailing,
+      ],
+    ),
+  );
+
+  Widget _header(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final invite = s.invite;
+    return StudioPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.groups_outlined),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  s.connected ? 'Jam activa' : 'Sin conexión con la Jam',
+                  style: const TextStyle(
+                    fontFamily: 'Newsreader',
+                    fontSize: 22,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              StudioStamp('${c.peopleCount} EN LA JAM', filled: true),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              Chip(
+                avatar: const Icon(Icons.badge_outlined, size: 16),
+                label: Text(c.roleLabel),
+                visualDensity: VisualDensity.compact,
+              ),
+              Chip(
+                avatar: Icon(
+                  c.listeningTogether
+                      ? Icons.headphones_outlined
+                      : Icons.queue_music,
+                  size: 16,
+                ),
+                label: Text(c.modeLabel),
+                visualDensity: VisualDensity.compact,
+              ),
+              if (invite != null && invite.isRemote)
+                Chip(
+                  label: Text(
+                    invite.code,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      letterSpacing: 2,
+                    ),
+                  ),
+                  visualDensity: VisualDensity.compact,
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            children: [
+              FilledButton.icon(
+                onPressed: s.connected
+                    ? () => showJamInviteSheet(context, c)
+                    : null,
+                icon: const Icon(Icons.qr_code_2),
+                label: const Text('Invitar'),
+              ),
+              OutlinedButton.icon(
+                onPressed: c.canAdd ? () => showJamAddSheet(context, c) : null,
+                icon: const Icon(Icons.add),
+                label: const Text('Añadir música'),
+              ),
+              if (!s.connected)
+                OutlinedButton.icon(
+                  onPressed: c.busy ? null : c.reconnect,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Reconectar'),
+                ),
+            ],
+          ),
+          if (s.isHost) ...[
+            const SizedBox(height: 12),
+            SegmentedButton<JamMode>(
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(
+                  value: JamMode.synchronized,
+                  icon: Icon(Icons.headphones_outlined),
+                  label: Text('Escuchando'),
+                ),
+                ButtonSegment(
+                  value: JamMode.queueOnly,
+                  icon: Icon(Icons.queue_music),
+                  label: Text('Solo añadir'),
+                ),
+              ],
+              selected: {s.mode},
+              onSelectionChanged: c.busy
+                  ? null
+                  : (value) => c.setMode(value.first),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                c.listeningTogether
+                    ? 'Todos oyen lo mismo a la vez, cada uno con sus fuentes.'
+                    : 'Cada persona escucha lo suyo; la cola se comparte.',
+                style: TextStyle(fontSize: 12, color: colors.onSurfaceVariant),
+              ),
+            ),
+          ],
+          if (!s.isHost && c.listeningTogether)
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Escuchar en este dispositivo'),
+              subtitle: const Text(
+                'Aurora resolverá cada canción con tus propias fuentes de audio.',
+              ),
+              value: c.bridge.enabled,
+              onChanged: c.busy || !s.connected ? null : c.setListening,
+            ),
+          if (c.bridge.warning != null) ...[
+            const SizedBox(height: 8),
+            jamNotice(
+              context,
+              c.bridge.warning!,
+              Icons.headphones_outlined,
+              action: TextButton(
+                onPressed: c.busy ? null : c.bridge.retry,
+                child: const Text('Reintentar audio'),
+              ),
+            ),
+          ],
+          if (c.error != null) ...[
+            const SizedBox(height: 8),
+            jamNotice(context, c.error!, Icons.info_outline),
+          ],
+        ],
+      ),
+    );
+  }
+
+  JamQueueEntry? get _playing =>
+      s.queue.where((e) => e.id == s.playback?.entryId).firstOrNull;
+
+  Widget _nowPlaying(BuildContext context) {
+    final entry = _playing;
+    final audio = c.app.audio;
+    final duration = audio.duration.inMilliseconds;
+    final position = (_seekPreview ?? audio.position.inMilliseconds.toDouble())
+        .clamp(0.0, duration > 0 ? duration.toDouble() : 1.0);
+    final lock = 'Lo controla ${c.hostName}';
+    final playing = s.playback?.isPlaying ?? audio.isPlaying;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Modo de la sesión',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: 8),
-        if (s.isHost)
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: JamMode.values
-                .map(
-                  (mode) => ChoiceChip(
-                    selected: s.mode == mode,
-                    label: Text(
-                      mode == JamMode.queueOnly
-                          ? 'Cola compartida'
-                          : 'Reproducción sincronizada',
-                    ),
-                    onSelected: c.busy ? null : (_) => c.setMode(mode),
-                  ),
-                )
-                .toList(),
-          )
-        else
-          Text(
-            s.mode == JamMode.queueOnly
-                ? 'Cola compartida · el anfitrión decide qué suena'
-                : 'Reproducción sincronizada · controles del anfitrión',
-          ),
-        if (!s.isHost && s.mode == JamMode.synchronized)
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Reproducir en este dispositivo'),
-            value: c.bridge.enabled,
-            onChanged: c.busy || !s.connected ? null : c.setListening,
-            subtitle: const Text(
-              'Aurora resolverá cada canción con tus propias fuentes de audio.',
-            ),
-          ),
-        if (s.mode == JamMode.synchronized) ...[
-          const SizedBox(height: 8),
-          const Text(
-            'Las versiones y los tiempos de carga pueden diferir. La sincronía es aproximada, con correcciones pequeñas y espaciadas.',
-          ),
-          if (s.roundTripMs != null) Text('Demora de red: ${s.roundTripMs} ms'),
-        ],
-        if (c.bridge.warning != null) ...[
-          const SizedBox(height: 12),
+        _title('Sonando ahora'),
+        if (entry == null)
           jamNotice(
             context,
-            c.bridge.warning!,
-            Icons.headphones_outlined,
-            action: TextButton(
-              onPressed: c.busy ? null : c.bridge.retry,
-              child: const Text('Reintentar audio'),
-            ),
-          ),
-        ],
-        if (c.bridge.loading)
-          const Padding(
-            padding: EdgeInsets.only(top: 12),
-            child: LinearProgressIndicator(),
-          ),
-        if (entry != null) ...[
-          const SizedBox(height: 16),
-          Text(
-            entry.track.title,
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          Text(entry.track.artist),
-          if (s.isHost) ...[
-            Wrap(
-              spacing: 8,
+            s.isHost
+                ? 'Nada suena todavía. Añade canciones y pulsa reproducir en una de la cola.'
+                : 'Esperando a que ${c.hostName} ponga algo. Mientras, añade tus canciones.',
+            Icons.graphic_eq,
+          )
+        else
+          StudioPanel(
+            recessed: true,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                IconButton(
-                  tooltip: widget.controller.app.audio.isPlaying
-                      ? 'Pausar Jam'
-                      : 'Reproducir Jam',
-                  onPressed: c.busy ? null : c.togglePlayback,
-                  icon: Icon(
-                    widget.controller.app.audio.isPlaying
-                        ? Icons.pause_circle
-                        : Icons.play_circle,
+                Row(
+                  children: [
+                    Artwork(
+                      track: jamTrackAsTrack(entry.track),
+                      artworkContext: ArtworkContext.thumbnailCompact,
+                      radius: 4,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            entry.track.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          Text(
+                            entry.track.artist,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          _addedBy(entry),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                Row(
+                  children: [
+                    IconButton(
+                      tooltip: c.canPause
+                          ? (playing ? 'Pausar la Jam' : 'Reanudar la Jam')
+                          : lock,
+                      onPressed: c.busy || !c.canPause
+                          ? null
+                          : () => _do(() async {
+                              if (s.isHost) {
+                                await c.togglePlayback();
+                              } else {
+                                s.requestPlayPause(!playing);
+                              }
+                            }),
+                      icon: Icon(
+                        playing ? Icons.pause_circle : Icons.play_circle,
+                        size: 36,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: c.canSkip
+                          ? 'Siguiente'
+                          : s.rules.votes
+                          ? 'Votar para saltar'
+                          : lock,
+                      onPressed: c.busy || (!c.canSkip && !s.rules.votes)
+                          ? null
+                          : () => _do(() async {
+                              if (c.canSkip) {
+                                await c.next();
+                              } else {
+                                s.voteSkip();
+                              }
+                            }),
+                      icon: Icon(
+                        c.canSkip ? Icons.skip_next : Icons.how_to_vote_outlined,
+                      ),
+                    ),
+                    const Spacer(),
+                    if (duration > 0)
+                      Text(
+                        '${_duration(position.toInt())} / ${_duration(duration)}',
+                        style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+                      ),
+                  ],
+                ),
+                if (s.isHost && duration > 0)
+                  Slider(
+                    value: position,
+                    max: duration.toDouble(),
+                    onChanged: c.busy
+                        ? null
+                        : (v) => setState(() => _seekPreview = v),
+                    onChangeEnd: (v) async {
+                      await c.seek(Duration(milliseconds: v.toInt()));
+                      if (mounted) setState(() => _seekPreview = null);
+                    },
                   ),
-                ),
-                IconButton(
-                  tooltip: 'Siguiente en la Jam',
-                  onPressed: c.busy ? null : c.next,
-                  icon: const Icon(Icons.skip_next),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Text(
-                    '${_duration(position.toInt())} / ${_duration(duration)}',
-                  ),
-                ),
+                if (c.bridge.loading) const LinearProgressIndicator(),
               ],
             ),
-            if (duration > 0)
-              Slider(
-                value: position,
-                max: duration.toDouble(),
-                label: _duration(position.toInt()),
-                onChanged: c.busy
-                    ? null
-                    : (value) => setState(() => _seekPreview = value),
-                onChangeEnd: (value) async {
-                  await c.seek(Duration(milliseconds: value.toInt()));
-                  if (mounted) setState(() => _seekPreview = null);
-                },
-              ),
-          ] else
-            Text(
-              playback?.isPlaying == true
-                  ? 'El anfitrión está reproduciendo'
-                  : 'El anfitrión pausó la reproducción',
-            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _addedBy(JamQueueEntry e) {
+    final suggested = e.suggestedFor != null;
+    final who = s.participantName(suggested ? e.suggestedFor! : e.addedBy);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        JamAvatar(name: who, size: 20),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            suggested ? 'Sugerida para $who' : 'Añadida por $who',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 11),
+          ),
+        ),
+        if (suggested) ...[
+          const SizedBox(width: 4),
+          const Icon(Icons.auto_awesome, size: 12),
         ],
       ],
     );
   }
 
-  Widget _people(JamController c) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(
-        'Participantes · ${c.service.participants.where((p) => p.connected).length}',
-        style: Theme.of(context).textTheme.titleLarge,
-      ),
-      const SizedBox(height: 8),
-      ...c.service.participants.map(
-        (person) => ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: Icon(
-            person.connected ? Icons.person_outline : Icons.person_off_outlined,
+  Widget _queue(BuildContext context) {
+    final playingId = s.playback?.entryId;
+    final shown = [
+      for (final e in s.queue)
+        if (e.id != playingId) e,
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _title(
+          'Cola · ${shown.length}',
+          trailing: TextButton.icon(
+            onPressed: c.canAdd ? () => showJamAddSheet(context, c) : null,
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('Añadir'),
           ),
-          title: Text(person.name),
-          subtitle: Text(
-            person.id == 'host'
-                ? 'Anfitrión'
-                : person.connected
-                ? 'Conectado'
-                : 'Desconectado',
+        ),
+        if (shown.isEmpty)
+          jamNotice(
+            context,
+            s.rules.autoplay
+                ? 'La cola está vacía. Con el autoplay, Aurora añadirá canciones que le gusten al grupo; también puedes añadir las tuyas.'
+                : 'La cola está vacía. Pulsa «Añadir» para buscar canciones, usar una playlist o ver lo que recomienda el grupo.',
+            Icons.queue_music,
           ),
-          trailing: c.service.isHost && person.id != 'host'
-              ? IconButton(
-                  tooltip: 'Permisos de ${person.name}',
-                  onPressed: () => _permissions(c, person),
-                  icon: const Icon(Icons.tune),
-                )
-              : null,
+        if (c.canReorder)
+          ReorderableListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            buildDefaultDragHandles: false,
+            itemCount: shown.length,
+            onReorder: (from, to) {
+              if (to > from) to--;
+              c.reorder(shown[from], s.queue.indexOf(shown[to]));
+            },
+            itemBuilder: (context, i) => _entry(context, shown[i], i, shown),
+          )
+        else
+          for (final (i, e) in shown.indexed) _entry(context, e, i, shown),
+      ],
+    );
+  }
+
+  Widget _entry(
+    BuildContext context,
+    JamQueueEntry e,
+    int i,
+    List<JamQueueEntry> shown,
+  ) {
+    final me = s.participantId;
+    final pending = e.status == JamEntryStatus.pending;
+    final mine = e.up.contains(me);
+    return Padding(
+      key: ValueKey(e.id),
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Material(
+        color: Theme.of(context).colorScheme.surfaceContainerLowest,
+        child: Row(
+          children: [
+            if (c.canReorder)
+              ReorderableDragStartListener(
+                index: i,
+                child: const Tooltip(
+                  message: 'Arrastra para reordenar',
+                  child: Padding(
+                    padding: EdgeInsets.all(10),
+                    child: Icon(Icons.drag_indicator, size: 20),
+                  ),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Artwork(
+                track: jamTrackAsTrack(e.track),
+                artworkContext: ArtworkContext.thumbnailCompact,
+                radius: 4,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    e.track.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFamily: 'Newsreader',
+                      fontSize: 15,
+                    ),
+                  ),
+                  Text(
+                    e.track.artist,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  _addedBy(e),
+                  if (pending)
+                    const StudioStamp('ESPERA APROBACIÓN DEL HOST'),
+                ],
+              ),
+            ),
+            if (pending && c.isStaff) ...[
+              IconButton(
+                tooltip: 'Aprobar',
+                onPressed: () => s.approve(e.id, accept: true),
+                icon: const Icon(Icons.check_circle_outline),
+              ),
+              IconButton(
+                tooltip: 'Rechazar',
+                onPressed: () => s.approve(e.id, accept: false),
+                icon: const Icon(Icons.cancel_outlined),
+              ),
+            ] else ...[
+              if (s.rules.votes && !pending)
+                TextButton.icon(
+                  onPressed: s.connected
+                      ? () => _do(() async => s.vote(e.id, mine ? 0 : 1))
+                      : null,
+                  icon: Icon(
+                    mine ? Icons.thumb_up : Icons.thumb_up_outlined,
+                    size: 16,
+                  ),
+                  label: Text('${e.up.length}'),
+                ),
+              PopupMenuButton<String>(
+                tooltip: 'Acciones de ${e.track.title}',
+                enabled: s.connected,
+                onSelected: (action) {
+                  switch (action) {
+                    case 'play':
+                      c.play(e);
+                    case 'up':
+                      c.reorder(e, s.queue.indexOf(shown[i - 1]));
+                    case 'down':
+                      c.reorder(e, s.queue.indexOf(shown[i + 1]));
+                    case 'remove':
+                      c.remove(e);
+                  }
+                },
+                itemBuilder: (_) => [
+                  if (s.isHost && !pending)
+                    const PopupMenuItem(
+                      value: 'play',
+                      child: Text('Reproducir ahora'),
+                    ),
+                  if (c.canReorder && i > 0)
+                    const PopupMenuItem(value: 'up', child: Text('Subir')),
+                  if (c.canReorder && i + 1 < shown.length)
+                    const PopupMenuItem(value: 'down', child: Text('Bajar')),
+                  if (c.canRemove || e.addedBy == me)
+                    const PopupMenuItem(
+                      value: 'remove',
+                      child: Text('Quitar de la cola'),
+                    ),
+                  if (!s.isHost && !c.canReorder && !c.canRemove)
+                    PopupMenuItem(
+                      enabled: false,
+                      child: Text('Lo controla ${c.hostName}'),
+                    ),
+                ],
+              ),
+            ],
+          ],
         ),
       ),
+    );
+  }
+
+  Widget _people(BuildContext context) {
+    final people = [...s.participants]
+      ..sort((a, b) {
+        final byRole = a.role.index.compareTo(b.role.index);
+        return byRole != 0 ? byRole : a.name.compareTo(b.name);
+      });
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _title('Participantes · ${c.peopleCount}'),
+        for (final p in people)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            minVerticalPadding: 4,
+            leading: JamAvatar(name: p.name, size: 36),
+            title: Text(
+              p.id == s.participantId ? '${p.name} (tú)' : p.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Text(
+              [
+                jamRoleLabel(p.role),
+                if (!p.connected) 'Desconectado',
+                if (p.muted) 'Silenciado',
+              ].join(' · '),
+            ),
+            trailing: s.isHost && p.id != 'host' && p.id != s.participantId
+                ? _personMenu(p)
+                : null,
+          ),
+      ],
+    );
+  }
+
+  Widget _personMenu(JamParticipant p) => PopupMenuButton<String>(
+    tooltip: 'Acciones para ${p.name}',
+    onSelected: (action) => _do(() async {
+      switch (action) {
+        case 'mute':
+          await s.setMuted(p.id, !p.muted);
+        case 'cohost':
+          await s.setCoHost(p.id, p.role != JamRole.coHost);
+        case 'perms':
+          await _permissions(p);
+        case 'kick':
+          await s.kick(p.id);
+        case 'ban':
+          if (await _confirm(
+            'Bloquear a ${p.name}',
+            'No podrá volver a entrar a esta Jam.',
+            'Bloquear',
+          )) {
+            await s.kick(p.id, ban: true);
+          }
+      }
+    }),
+    itemBuilder: (_) => [
+      PopupMenuItem(
+        value: 'mute',
+        child: Text(p.muted ? 'Quitar silencio' : 'Silenciar'),
+      ),
+      PopupMenuItem(
+        value: 'cohost',
+        child: Text(
+          p.role == JamRole.coHost ? 'Quitar co-host' : 'Hacer co-host',
+        ),
+      ),
+      if (p.role == JamRole.guest)
+        const PopupMenuItem(value: 'perms', child: Text('Permisos…')),
+      const PopupMenuItem(value: 'kick', child: Text('Quitar de la Jam')),
+      const PopupMenuItem(value: 'ban', child: Text('Bloquear')),
     ],
   );
-  Future<void> _permissions(JamController c, JamParticipant person) async {
+
+  Future<bool> _confirm(String title, String body, String action) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(title),
+          content: Text(body),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(action),
+            ),
+          ],
+        ),
+      ) ??
+      false;
+
+  Future<void> _permissions(JamParticipant person) async {
     var permissions = person.permissions;
     await showDialog<void>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text('Permisos de ${person.name}'),
-          content: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 360),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Todos pueden agregar canciones. Tú decides los demás controles.',
-                ),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Omitir canciones'),
-                  value: permissions.skip,
-                  onChanged: (value) => setDialogState(
-                    () => permissions = JamPermissions(
-                      skip: value!,
-                      reorder: permissions.reorder,
-                      remove: permissions.remove,
-                    ),
+        builder: (context, setDialogState) {
+          Widget tile(
+            String label,
+            bool value,
+            JamPermissions Function(bool) change,
+          ) => CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(label),
+            value: value,
+            onChanged: (v) => setDialogState(() => permissions = change(v!)),
+          );
+          return AlertDialog(
+            title: Text('Permisos de ${person.name}'),
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 360),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  tile(
+                    'Añadir canciones',
+                    permissions.add,
+                    (v) => permissions.copyWith(add: v),
                   ),
-                ),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Reordenar la cola'),
-                  value: permissions.reorder,
-                  onChanged: (value) => setDialogState(
-                    () => permissions = JamPermissions(
-                      skip: permissions.skip,
-                      reorder: value!,
-                      remove: permissions.remove,
-                    ),
+                  tile(
+                    'Pausar y reanudar',
+                    permissions.pause,
+                    (v) => permissions.copyWith(pause: v),
                   ),
-                ),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Quitar canciones'),
-                  value: permissions.remove,
-                  onChanged: (value) => setDialogState(
-                    () => permissions = JamPermissions(
-                      skip: permissions.skip,
-                      reorder: permissions.reorder,
-                      remove: value!,
-                    ),
+                  tile(
+                    'Saltar canciones',
+                    permissions.skip,
+                    (v) => permissions.copyWith(skip: v),
                   ),
-                ),
-              ],
+                  tile(
+                    'Reordenar la cola',
+                    permissions.reorder,
+                    (v) => permissions.copyWith(reorder: v),
+                  ),
+                  tile(
+                    'Quitar canciones',
+                    permissions.remove,
+                    (v) => permissions.copyWith(remove: v),
+                  ),
+                ],
+              ),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () {
-                c.setPermissions(person.id, permissions);
-                Navigator.pop(context);
-              },
-              child: const Text('Guardar permisos'),
-            ),
-          ],
-        ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  c.setPermissions(person.id, permissions);
+                  Navigator.pop(context);
+                },
+                child: const Text('Guardar'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
-  Widget _queue(JamController c) {
-    final s = c.service;
-    final permissions = s.me?.permissions ?? const JamPermissions();
+  /// «Permitir que otros cambien lo que suena»: pausa y saltos de los invitados.
+  bool get _guestsControl {
+    final guests = s.participants.where((p) => p.role == JamRole.guest);
+    return guests.isNotEmpty &&
+        guests.every((p) => p.permissions.pause && p.permissions.skip);
+  }
+
+  Widget _hostSettings(BuildContext context) {
+    JamRules r = s.rules;
+    Widget sw(String title, String sub, bool value, Future<void> Function(bool) set) =>
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text(title),
+          subtitle: Text(sub, style: const TextStyle(fontSize: 12)),
+          value: value,
+          onChanged: (v) => _do(() => set(v)),
+        );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Cola compartida · ${s.queue.length}',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-            ),
-            if (!s.isHost && permissions.skip)
-              TextButton.icon(
-                onPressed: s.connected ? c.next : null,
-                icon: const Icon(Icons.skip_next),
-                label: const Text('Omitir'),
-              ),
-          ],
+        _title('Ajustes de la Jam'),
+        sw(
+          'Permitir que otros cambien lo que suena',
+          'Los invitados podrán pausar y saltar. Si no, solo añaden canciones.',
+          _guestsControl,
+          (v) async {
+            for (final p in s.participants.where((p) => p.role == JamRole.guest)) {
+              c.setPermissions(p.id, p.permissions.copyWith(pause: v, skip: v));
+            }
+          },
         ),
-        const SizedBox(height: 8),
-        if (s.queue.isEmpty)
-          jamNotice(
-            context,
-            'Agrega una canción desde tu biblioteca o búscala aquí. Todos verán la misma cola.',
-            Icons.queue_music,
+        sw(
+          'Aprobar sugerencias',
+          'Lo que añadan los invitados espera tu visto bueno.',
+          r.approve,
+          (v) => s.setRules(r.copyWith(approve: v)),
+        ),
+        sw(
+          'Votos',
+          'Pueden votar canciones y proponer saltar la que suena.',
+          r.votes,
+          (v) => s.setRules(r.copyWith(votes: v)),
+        ),
+        sw(
+          'Autoplay de la Jam',
+          'Si la cola baja de 3 canciones, Aurora añade música que le guste al grupo.',
+          r.autoplay,
+          (v) => s.setRules(r.copyWith(autoplay: v)),
+        ),
+        sw(
+          'Aceptar nuevas personas',
+          'Apágalo para cerrar el acceso sin terminar la Jam.',
+          r.open,
+          (v) => s.setRules(r.copyWith(open: v)),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text('Límite de personas: ${r.maxGuests + 1}'),
+          subtitle: Slider(
+            min: 1,
+            max: 15,
+            divisions: 14,
+            label: '${r.maxGuests + 1}',
+            semanticFormatterCallback: (v) => '${v.round() + 1} personas',
+            value: r.maxGuests.toDouble(),
+            onChanged: (v) => s.setRules(r.copyWith(maxGuests: v.round())),
           ),
-        ...s.queue.asMap().entries.map((item) {
-          final entry = item.value;
-          final track = Track(
-            id: entry.track.key,
-            title: entry.track.title,
-            artist: entry.track.artist,
-            artworkUrl: entry.track.artworkUrl,
-          );
-          return ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Artwork(
-              track: track,
-              artworkContext: ArtworkContext.thumbnailCompact,
-              radius: 8,
-            ),
-            title: Text(
-              entry.track.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            subtitle: Text(
-              '${entry.track.artist}\nAgregada por ${s.participantName(entry.addedBy)}${entry.track.localOnly ? ' · archivo local' : ''}',
-            ),
-            trailing: PopupMenuButton<String>(
-              tooltip: 'Acciones de ${entry.track.title}',
-              enabled: s.connected,
-              onSelected: (action) {
-                switch (action) {
-                  case 'play':
-                    c.play(entry);
-                  case 'up':
-                    c.reorder(entry, item.key - 1);
-                  case 'down':
-                    c.reorder(entry, item.key + 1);
-                  case 'remove':
-                    c.remove(entry);
+        ),
+        if (s.isRemote)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: () => _do(() async {
+                if (await _confirm(
+                  'Cambiar el código',
+                  'El código y el QR anteriores dejarán de funcionar.',
+                  'Cambiar código',
+                )) {
+                  await s.rotateCode();
                 }
-              },
-              itemBuilder: (_) => [
-                if (s.isHost)
-                  const PopupMenuItem(
-                    value: 'play',
-                    child: Text('Reproducir en la Jam'),
-                  ),
-                if (permissions.reorder && item.key > 0)
-                  const PopupMenuItem(
-                    value: 'up',
-                    child: Text('Subir en la cola'),
-                  ),
-                if (permissions.reorder && item.key + 1 < s.queue.length)
-                  const PopupMenuItem(
-                    value: 'down',
-                    child: Text('Bajar en la cola'),
-                  ),
-                if (permissions.remove)
-                  const PopupMenuItem(
-                    value: 'remove',
-                    child: Text('Quitar de la cola'),
-                  ),
-                if (!s.isHost && !permissions.reorder && !permissions.remove)
-                  const PopupMenuItem(
-                    enabled: false,
-                    child: Text('Controles del anfitrión'),
-                  ),
-              ],
+              }),
+              icon: const Icon(Icons.autorenew),
+              label: const Text('Cambiar código'),
             ),
-          );
-        }),
+          ),
       ],
     );
   }
 
-  Widget _addMusic(JamController c) {
-    final tracks = c.results.isEmpty && _query.text.trim().isEmpty
-        ? widget.controller.app.tracks
-        : c.results;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Agregar música', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _query,
-          textInputAction: TextInputAction.search,
-          onSubmitted: c.search,
-          decoration: InputDecoration(
-            labelText: 'Buscar con tus fuentes de audio',
-            suffixIcon: IconButton(
-              tooltip: 'Buscar canciones',
-              onPressed: c.searching ? null : () => c.search(_query.text),
-              icon: const Icon(Icons.search),
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        if (c.searching) const LinearProgressIndicator(),
-        if (tracks.isEmpty && !c.searching)
-          Text(
-            _query.text.trim().isEmpty
-                ? 'Tu biblioteca está vacía. Busca una canción para agregarla.'
-                : 'No encontramos canciones para esta búsqueda.',
-          ),
-        ...tracks
-            .take(20)
-            .map(
-              (track) => ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Artwork(
-                  track: track,
-                  artworkContext: ArtworkContext.thumbnailCompact,
-                  radius: 8,
-                ),
-                title: Text(
-                  track.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(track.artist),
-                trailing: IconButton(
-                  tooltip: 'Agregar ${track.title} a la Jam',
-                  onPressed: c.service.connected ? () => c.add(track) : null,
-                  icon: const Icon(Icons.add_circle_outline),
-                ),
-              ),
-            ),
-      ],
-    );
-  }
+  Widget _leave(BuildContext context) => Align(
+    alignment: Alignment.centerLeft,
+    child: TextButton.icon(
+      style: TextButton.styleFrom(
+        foregroundColor: Theme.of(context).colorScheme.error,
+      ),
+      onPressed: c.busy
+          ? null
+          : () async {
+              final host = s.isHost;
+              if (!host ||
+                  await _confirm(
+                    'Terminar la Jam',
+                    'Se cerrará para todos. Si prefieres que siga, otra persona recibirá el mando.',
+                    'Terminar',
+                  )) {
+                await c.leave();
+                if (context.mounted) Navigator.maybeOf(context)?.maybePop();
+              }
+            },
+      icon: const Icon(Icons.logout),
+      label: Text(s.isHost ? 'Terminar la Jam' : 'Salir de la Jam'),
+    ),
+  );
 
   String _duration(int milliseconds) {
     final seconds = milliseconds ~/ 1000;
