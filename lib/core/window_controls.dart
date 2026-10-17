@@ -16,6 +16,9 @@ abstract final class WindowControls {
   /// Argumentos de una segunda instancia (p. ej. aurora://jam/CODIGO).
   static void Function(String arguments)? onArguments;
 
+  /// Argumentos con los que arrancó el proceso (p. ej. aurora://jam/CODIGO).
+  static List<String> launchArguments = const [];
+
   static bool _installed = false;
 
   static void _install() {

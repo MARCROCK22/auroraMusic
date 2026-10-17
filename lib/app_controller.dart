@@ -20,7 +20,9 @@ import 'core/source_backend.dart';
 import 'import/spotify_import.dart';
 import 'library/library_database.dart';
 import 'dj/ai_dj.dart';
+import 'dj/dj_modes.dart';
 import 'dj/recommendations.dart';
+import 'dj/suggestions_api.dart';
 import 'sources/youtube_request_policy.dart';
 import 'sources/web_music_source.dart';
 
@@ -320,6 +322,42 @@ class AppController extends ChangeNotifier {
       ),
       ...recentTracks.map((track) => track.id),
     ].join('|');
+  }
+
+  DjMode _djMode = DjMode.discover;
+  DjMode get djMode => _djMode;
+
+  Future<void> setDjMode(DjMode mode) async {
+    if (mode == _djMode) return;
+    _djMode = mode;
+    ++_personalDjGeneration;
+    _notify();
+    await preferences.setString('djMode', mode.name);
+    if (_personalDjActive && _playIntent) unawaited(_refillPersonalDjQueue());
+  }
+
+  /// Reordena candidatos de la Jam con SOLO el perfil de este dispositivo
+  /// (un único participante); el perfil nunca sale del equipo.
+  Future<List<Track>> rankForJam(List<Track> candidates, Track? current) async {
+    final api = SuggestionsApi(
+      fetchCandidates: (_) async => [
+        for (var i = 0; i < candidates.length; i++)
+          DjCandidate(candidates[i], '', prior: 0.5 / (1 + i / 5)),
+      ],
+    );
+    final picks = await api.getSuggestions(
+      SessionContext(
+        participants: [ParticipantTaste('self', _tasteProfile())],
+        mode: _djMode,
+        current: current,
+        recentKeys: recentTracks
+            .take(20)
+            .expand(recommendationTrackKeys)
+            .toSet(),
+        limit: candidates.length,
+      ),
+    );
+    return [for (final s in picks) s.track];
   }
 
   Future<void> setDjFilters(DjFilters filters) async {
@@ -695,6 +733,14 @@ class AppController extends ChangeNotifier {
       skippedArtists: skippedArtists,
       queueTail: queue.skip(max(0, queueIndex)).toList(),
       filters: djFilters,
+      adjust: (t) => djModeBonus(
+        _djMode,
+        t,
+        now: DateTime.now(),
+        knownArtists: {
+          for (final r in recentTracks.take(30)) djPrimaryArtist(r),
+        },
+      ),
     );
     for (final pick in picks) {
       queue.add(pick.track);
@@ -741,6 +787,9 @@ class AppController extends ChangeNotifier {
         await database.saveDownload(job);
       }
       recentTracks = _lookup(await database.readHistory());
+      _djMode =
+          DjMode.values.asNameMap()[preferences.getString('djMode')] ??
+          DjMode.discover;
       final savedFilters = preferences.getString('djFilters');
       if (savedFilters != null) {
         try {

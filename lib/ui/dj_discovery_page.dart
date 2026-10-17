@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../app_controller.dart';
 import '../core/models.dart';
 import '../dj/discovery_controller.dart';
+import '../dj/dj_modes.dart';
 import 'artwork.dart';
 import 'dj_filters_panel.dart';
 
@@ -130,6 +131,20 @@ class _DjDiscoveryPageState extends State<DjDiscoveryPage> {
             ],
           ),
           const SizedBox(height: 16),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final mode in DjMode.values)
+                ChoiceChip(
+                  label: Text(mode.label),
+                  selected: c.djMode == mode,
+                  onSelected: (_) => c.setDjMode(mode),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
           DjFiltersPanel(controller: c),
         ],
       );

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app_controller.dart';
+import '../updater/hard_exit.dart';
 import 'window_controls.dart';
 
 /// Preferencia «Al cerrar con X»: true = minimizar a la bandeja, false = salir.
@@ -24,6 +25,10 @@ class DesktopShell {
     if (!supported) return;
     WindowControls.onTrayAction = _tray;
     WindowControls.onRealExit = () => controller.pausePlayback();
+    // El actualizador cierra la app de verdad antes de lanzar el instalador.
+    hardExitHandler = () async {
+      if (!await WindowControls.requestHardExit()) exit(0);
+    };
     controller.addListener(_push);
     pushCloseBehavior();
     _push();

@@ -70,8 +70,26 @@ class MainActivity : FlutterActivity() {
         initialized = true
     }
 
+    private var linkChannel: MethodChannel? = null
+    // aurora://jam/CODIGO: Dart pide el enlace de arranque y recibe los nuevos.
+    private fun takeLink(): String? {
+        val link = intent?.dataString?.takeIf { it.startsWith("aurora://") }
+        if (link != null) intent?.data = null
+        return link
+    }
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        takeLink()?.let { linkChannel?.invokeMethod("link", it) }
+    }
+
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
+        linkChannel = MethodChannel(engine.dartExecutor.binaryMessenger, "aurora/link").also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                if (call.method == "initial") result.success(takeLink()) else result.notImplemented()
+            }
+        }
         // Reattaching the cached engine must preserve active source jobs/channels too.
         if (engine.plugins.has(AuroraAudioPlugin::class.java)) return
         engine.plugins.add(AuroraAudioPlugin())

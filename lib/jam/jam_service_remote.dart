@@ -206,8 +206,9 @@ extension JamServiceRemote on JamService {
 
   /// Reconexión con backoff exponencial y jitter; nunca un bucle agresivo.
   void _scheduleRetry() {
-    if (!isRemote || isHost || _stopRetry || _disposed || _terminalError)
+    if (!isRemote || isHost || _stopRetry || _disposed || _terminalError) {
       return;
+    }
     if (invite == null) return;
     _retryTimer?.cancel();
     final base = min(60, 1 << min(_attempt, 6));

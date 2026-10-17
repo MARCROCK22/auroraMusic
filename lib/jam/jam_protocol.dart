@@ -15,7 +15,7 @@ Future<void> registerAuroraProtocol({String? exe}) async {
 
   await reg([root, '/ve', '/d', 'URL:Aurora Music']);
   await reg([root, '/v', 'URL Protocol', '/d', '']);
-  await reg(['$root\shell\open\command', '/ve', '/d', '"$path" "%1"']);
+  await reg(['$root\\shell\\open\\command', '/ve', '/d', '"$path" "%1"']);
 }
 
 /// Punto de integración (frente 2, instancia única): al recibir el argumento

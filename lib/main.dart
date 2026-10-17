@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'core/window_controls.dart';
 import 'jam/jam_protocol.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
@@ -18,7 +19,8 @@ import 'sources/yt_dlp_source.dart';
 import 'sources/innertube_source.dart';
 import 'ui/aurora_shell.dart';
 
-void main() {
+void main(List<String> args) {
+  WindowControls.launchArguments = args;
   WidgetsFlutterBinding.ensureInitialized();
   unawaited(registerAuroraProtocol()); // aurora://jam/CODIGO (HKCU)
   runApp(const AuroraBootstrap());

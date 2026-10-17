@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -12,6 +13,7 @@ import '../core/models.dart';
 import '../core/source_backend.dart';
 import '../core/desktop_shell.dart';
 import '../core/window_controls.dart';
+import '../jam/jam_protocol.dart';
 import 'desktop_settings_tiles.dart';
 import '../jam/jam_controller.dart';
 import 'studio/studio_navigation.dart';
@@ -116,6 +118,39 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     _desktop = DesktopShell(ref.read(controllerProvider))..start();
     _guardWebClose();
     _audio.setVisualizationEnabled(false);
+    _listenForJamLinks();
+  }
+
+  // aurora://jam/CODIGO: argumentos de Windows (arranque o 2.ª instancia) o
+  // intent de Android (canal aurora/link).
+  void _listenForJamLinks() {
+    void open(String raw) {
+      final link = RegExp(r'aurora://[^\s"]+').firstMatch(raw)?.group(0);
+      if (link != null && jamCodeFromLaunchArgument(link) != null) {
+        unawaited(_joinJamLink(link));
+      }
+    }
+
+    if (WindowControls.supported) {
+      WindowControls.onArguments = open;
+      WindowControls.launchArguments.forEach(open);
+    } else if (Platform.isAndroid) {
+      const channel = MethodChannel('aurora/link');
+      channel.setMethodCallHandler((call) async {
+        if (call.method == 'link') open(call.arguments as String);
+      });
+      channel.invokeMethod<String>('initial').then((v) {
+        if (v != null) open(v);
+      }, onError: (_) {});
+    }
+  }
+
+  Future<void> _joinJamLink(String link) async {
+    await _navigate(9);
+    for (var i = 0; i < 30 && _jam == null && mounted; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    await _jam?.joinFromLink(link, 'Invitado');
   }
 
   /// The hidden official player, when it initialized.
@@ -163,6 +198,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _desktop.dispose();
+    WindowControls.onArguments = null;
     WindowControls.setCloseConfirmation(null);
     WindowControls.guardClose(false);
     _jam?.removeListener(_jamChanged);

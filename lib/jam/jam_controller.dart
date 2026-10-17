@@ -139,6 +139,7 @@ class JamController extends ChangeNotifier {
         },
         seeds: () => app.recentTracks,
         local: () => app.queue,
+        rank: app.rankForJam,
       );
       final items = await adapter.build(current: app.currentTrack);
       if (items.isNotEmpty && service.connected) {
