@@ -111,3 +111,10 @@ cancelación de cargas antiguas y conservación de la cola personal. La lectura 
 incluye una imagen generada por Flutter; las pruebas de interfaz cubren activación
 bajo demanda, error de invitación, ancho móvil y texto ampliado. No contacta con
 Spotify ni proveedores de audio externos.
+
+## Autoplay y añadir en lote (v2)
+
+- `JamRules.autoplay` (true por defecto, lo cambia el anfitrión). Con menos de 3 pistas en cola normal por delante, el anfitrión sube a la cola (`JamService.promoteSuggested`) las sugerencias «A continuación», ya intercaladas por participante, sin duplicados ni artista seguido. Las pendientes de aprobación no se promueven. Cada entrada lleva `suggestedFor`.
+- Cada dispositivo publica sus sugerencias (máx. 5, 1 por minuto) al entrar, al cambiar la pista y por temporizador; sin red caen a lo local. El perfil nunca sale del equipo.
+- `JamService.addMany` / `JamController.addTracks` / `addPlaylist`: el anfitrión inserta directo (tope 200 en la cola); los invitados envían lotes de 5 cada 15,5 s (el servidor admite 20 `add`/min y 200 por sala) con tope `maxPerGuest`. Se informa qué se descartó. «Siguiente/Ahora» solo para el anfitrión.
+- No hace falta volver a ejecutar `jam_supabase.sql`: el anfitrión es la fuente de verdad y ninguna RPC cambia.
