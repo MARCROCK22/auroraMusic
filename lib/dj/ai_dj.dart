@@ -332,6 +332,7 @@ List<TrackRecommendation> rankDjCandidates({
   List<Track> queueTail = const [],
   DjFilters filters = const DjFilters(),
   double lambda = djMmrLambda,
+  double Function(Track track)? adjust, // sesgo de modo (dj_modes.dart)
 }) {
   if (limit <= 0) return const [];
   final currentVector = current == null ? null : embedDjTrack(current);
@@ -356,6 +357,7 @@ List<TrackRecommendation> rankDjCandidates({
         (currentVector == null
             ? 0
             : djContinuityWeight * djCosine(currentVector, vector)) -
+        -(adjust?.call(track) ?? 0) -
         (keys.any(recentKeys.contains) ? djRecentPenalty : 0) -
         (skippedArtists.contains(djPrimaryArtist(track))
             ? djSkippedArtistPenalty
