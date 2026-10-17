@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import '../../app_controller.dart';
 import '../../core/models.dart';
+import '../../jam/jam_controller.dart';
 import '../artwork.dart';
+import '../jam/jam_session_panel.dart' show jamTrackAsTrack;
+import '../jam/jam_widgets.dart';
 import 'studio_components.dart';
 import 'studio_symbols.dart';
 
@@ -13,9 +16,16 @@ class StudioTransport extends StatefulWidget {
     required this.onVinyl,
     required this.onQueue,
     required this.onOpenPlayer,
+    this.jam,
+    this.onJam,
+    this.onStartJam,
   });
   final AppController controller;
   final VoidCallback onLyrics, onVinyl, onQueue, onOpenPlayer;
+
+  /// Con una Jam activa la barra refleja rol, modo y permisos de la sesión.
+  final JamController? jam;
+  final VoidCallback? onJam, onStartJam;
   @override
   State<StudioTransport> createState() => _StudioTransportState();
 }
@@ -25,10 +35,22 @@ class _StudioTransportState extends State<StudioTransport> {
   String? _scrubTrack;
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: widget.controller,
+    listenable: Listenable.merge([widget.controller, ?widget.jam]),
     builder: (context, _) {
       final c = widget.controller;
-      final track = c.currentTrack;
+      final j = widget.jam;
+      final jamOn = j != null && j.active;
+      // Con audio de Jam, la pista y los permisos salen de la sesión.
+      final jamAudio = _jamAudio;
+      final jamEntry = jamAudio
+          ? j!.service.queue
+                .where((e) => e.id == j.bridge.currentEntryId)
+                .firstOrNull
+          : null;
+      final track = jamAudio
+          ? (jamEntry == null ? null : jamTrackAsTrack(jamEntry.track))
+          : c.currentTrack;
+      final lock = jamOn ? 'Lo controla ${j.hostName}' : '';
       final colors = Theme.of(context).colorScheme;
       final large = MediaQuery.textScalerOf(context).scale(1) > 1.5;
       return LayoutBuilder(
@@ -75,8 +97,10 @@ class _StudioTransportState extends State<StudioTransport> {
                     ),
                     if (track != null)
                       Text(
-                        c.adPlaying
+                        c.adPlaying && !jamAudio
                             ? 'Anuncio · tu canción sigue después'
+                            : jamAudio
+                            ? '${track.artist} · Jam'
                             : track.artist,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -111,7 +135,7 @@ class _StudioTransportState extends State<StudioTransport> {
               if (wide)
                 IconButton(
                   tooltip: 'Aleatorio',
-                  onPressed: track == null
+                  onPressed: track == null || jamAudio
                       ? null
                       : () => c.setShuffle(!c.shuffle),
                   icon: Icon(
@@ -123,20 +147,16 @@ class _StudioTransportState extends State<StudioTransport> {
                   ),
                 ),
               IconButton(
-                tooltip: 'Anterior',
-                onPressed: track == null ? null : c.previous,
+                tooltip: jamAudio ? lock : 'Anterior',
+                onPressed: track == null || jamAudio ? null : c.previous,
                 icon: const Icon(StudioSymbols.skipPrevious, size: 18),
               ),
               _play(c),
-              IconButton(
-                tooltip: 'Siguiente',
-                onPressed: track == null ? null : c.next,
-                icon: const Icon(StudioSymbols.skipNext, size: 18),
-              ),
+              _next(c, 18, track != null),
               if (wide)
                 IconButton(
                   tooltip: 'Repetir',
-                  onPressed: track == null ? null : c.cycleRepeat,
+                  onPressed: track == null || jamAudio ? null : c.cycleRepeat,
                   icon: Icon(
                     StudioSymbols.repeat,
                     size: 18,
@@ -147,7 +167,14 @@ class _StudioTransportState extends State<StudioTransport> {
                 ),
             ],
           );
-          final progress = _progress(c);
+          final progress = _progress(c, track != null);
+          final jamControl = jamOn
+              ? JamPill(jam: j, onTap: widget.onJam ?? () {}, compact: !wide)
+              : IconButton(
+                  tooltip: 'Iniciar una Jam',
+                  onPressed: widget.onStartJam,
+                  icon: const Icon(StudioSymbols.groups, size: 18),
+                );
           return Container(
             padding: EdgeInsets.symmetric(
               horizontal: wide ? 24 : 12,
@@ -183,9 +210,10 @@ class _StudioTransportState extends State<StudioTransport> {
                         ),
                         const SizedBox(width: 20),
                         SizedBox(
-                          width: 340,
+                          width: jamOn ? 500 : 380,
                           child: Row(
                             children: [
+                              jamControl,
                               TextButton.icon(
                                 onPressed: widget.onLyrics,
                                 icon: const Icon(
@@ -255,18 +283,20 @@ class _StudioTransportState extends State<StudioTransport> {
                             ),
                           ),
                           _play(c),
-                          IconButton(
-                            tooltip: 'Siguiente',
-                            onPressed: track == null ? null : c.next,
-                            icon: const Icon(StudioSymbols.skipNext),
-                          ),
+                          _next(c, 24, track != null),
                           IconButton(
                             tooltip: 'Letras',
                             onPressed: widget.onLyrics,
                             icon: const Icon(StudioSymbols.lyrics),
                           ),
+                          if (!jamOn) jamControl,
                         ],
                       ),
+                      if (jamOn)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: jamControl,
+                        ),
                       progress,
                     ],
                   ),
@@ -275,9 +305,16 @@ class _StudioTransportState extends State<StudioTransport> {
       );
     },
   );
+  bool get _jamAudio =>
+      widget.jam != null &&
+      widget.jam!.active &&
+      widget.controller.jamPlaybackActive;
+
   Widget _play(AppController c) {
     final colors = Theme.of(context).colorScheme;
-    final enabled = c.currentTrack != null && !c.jamPlaybackActive;
+    final j = widget.jam;
+    final jamAudio = _jamAudio;
+    final enabled = jamAudio ? j!.canPause : c.currentTrack != null;
     return Container(
       decoration: BoxDecoration(
         color: enabled ? colors.primaryContainer : colors.surfaceContainerHigh,
@@ -285,9 +322,17 @@ class _StudioTransportState extends State<StudioTransport> {
         boxShadow: const [BoxShadow(color: Colors.black, offset: Offset(2, 3))],
       ),
       child: IconButton(
-        tooltip: c.audio.isPlaying ? 'Pausar' : 'Reproducir',
-        onPressed: enabled ? c.togglePlayback : null,
-        icon: c.busy
+        tooltip: jamAudio && !enabled
+            ? 'Lo controla ${j!.hostName}'
+            : c.audio.isPlaying
+            ? 'Pausar'
+            : 'Reproducir',
+        onPressed: !enabled
+            ? null
+            : jamAudio
+            ? j!.togglePlayback
+            : c.togglePlayback,
+        icon: c.busy && !jamAudio
             ? const SizedBox.square(
                 dimension: 18,
                 child: CircularProgressIndicator(strokeWidth: 2),
@@ -303,10 +348,41 @@ class _StudioTransportState extends State<StudioTransport> {
     );
   }
 
-  Widget _progress(AppController c) {
+  Widget _next(AppController c, double size, bool hasTrack) {
+    final j = widget.jam;
+    if (!_jamAudio) {
+      return IconButton(
+        tooltip: 'Siguiente',
+        onPressed: hasTrack ? c.next : null,
+        icon: Icon(StudioSymbols.skipNext, size: size),
+      );
+    }
+    final votes = j!.service.rules.votes;
+    return IconButton(
+      tooltip: j.canSkip
+          ? 'Siguiente'
+          : votes
+          ? 'Votar para saltar'
+          : 'Lo controla ${j.hostName}',
+      onPressed: !hasTrack || (!j.canSkip && !votes)
+          ? null
+          : j.canSkip
+          ? j.next
+          : j.service.voteSkip,
+      icon: Icon(
+        j.canSkip ? StudioSymbols.skipNext : Icons.how_to_vote_outlined,
+        size: size,
+      ),
+    );
+  }
+
+  Widget _progress(AppController c, bool hasTrack) {
+    final j = widget.jam;
+    final key = _jamAudio ? 'jam' : c.currentTrack?.id;
+    final seekable = hasTrack && (!_jamAudio || j!.isHost);
     final duration = c.audio.duration.inMilliseconds;
     final position =
-        (_scrubTrack == c.currentTrack?.id ? _scrub : null) ??
+        (_scrubTrack == key ? _scrub : null) ??
         c.audio.position.inMilliseconds.toDouble();
     return Row(
       children: [
@@ -326,19 +402,20 @@ class _StudioTransportState extends State<StudioTransport> {
                   'Posición de reproducción ${Duration(milliseconds: value.round()).inSeconds} segundos',
               value: position.clamp(0, duration > 0 ? duration.toDouble() : 1),
               max: duration > 0 ? duration.toDouble() : 1,
-              onChangeStart: duration <= 0 || c.currentTrack == null
+              onChangeStart: duration <= 0 || !seekable
                   ? null
                   : (value) {
-                      _scrubTrack = c.currentTrack!.id;
+                      _scrubTrack = key;
                     },
-              onChanged: duration <= 0 || c.currentTrack == null
+              onChanged: duration <= 0 || !seekable
                   ? null
                   : (value) => setState(() => _scrub = value),
-              onChangeEnd: duration <= 0 || c.currentTrack == null
+              onChangeEnd: duration <= 0 || !seekable
                   ? null
                   : (value) {
-                      if (_scrubTrack == c.currentTrack?.id) {
-                        c.seek(Duration(milliseconds: value.toInt()));
+                      if (_scrubTrack == key) {
+                        final to = Duration(milliseconds: value.toInt());
+                        _jamAudio ? j!.seek(to) : c.seek(to);
                       }
                       setState(() {
                         _scrub = null;

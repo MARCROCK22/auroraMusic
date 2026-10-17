@@ -27,7 +27,9 @@ import 'shortcuts_settings_panel.dart';
 import 'artwork.dart';
 import 'dj_discovery_page.dart';
 import 'home_music_page.dart';
+import 'jam/jam_flows.dart';
 import 'jam/jam_page.dart';
+import 'jam/jam_widgets.dart';
 import 'playlist_shelf.dart';
 import 'spotify_browser_panel.dart';
 export 'artwork.dart';
@@ -92,6 +94,16 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   Uri? _musicUri;
   final _musicKey = GlobalKey<YouTubeMusicPageState>();
   JamController? _jam;
+
+  /// Un único controlador de Jam para chip, barra inferior, panel y página.
+  JamController _ensureJam() {
+    _jam ??= JamController(app: ref.read(controllerProvider))..addListener(_jamChanged);
+    return _jam!;
+  }
+
+  void _openJamPanel() => showJamPanel(context, _ensureJam());
+  Future<void> _startJam({List<Track> seed = const []}) =>
+      startJamFlow(context, _ensureJam(), seed: seed);
   bool _spotifySearch = false;
   MusicPlaylist? _playlist;
   bool _likesSelected = false;
@@ -147,10 +159,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
 
   Future<void> _joinJamLink(String link) async {
     await _navigate(9);
-    for (var i = 0; i < 30 && _jam == null && mounted; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    }
-    await _jam?.joinFromLink(link, 'Invitado');
+    await _ensureJam().joinFromLink(link, 'Invitado');
   }
 
   /// The hidden official player, when it initialized.
@@ -202,6 +211,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     WindowControls.setCloseConfirmation(null);
     WindowControls.guardClose(false);
     _jam?.removeListener(_jamChanged);
+    _jam?.dispose();
     if (_analysisEnabled) _audio.setVisualizationEnabled(false);
     _updates.dispose();
     _search.dispose();
@@ -410,9 +420,12 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                       StudioTitleBar(
                         onNavigate: _navigate,
                         sessionText: _jam?.service.connected == true
-                            ? 'SESIÓN ESTUDIO · ${_jam!.service.invite?.endpoint ?? 'LOCAL'}'
-                            : 'SESIÓN ESTUDIO · SIN JAM',
+                            ? 'JAM · ${_jam!.peopleCount} ${_jam!.peopleCount == 1 ? 'PERSONA' : 'PERSONAS'} · ${_jam!.roleLabel.toUpperCase()}'
+                            : 'INICIAR UNA JAM',
                         activeSession: _jam?.service.connected == true,
+                        onSession: _jam?.service.connected == true
+                            ? _openJamPanel
+                            : _startJam,
                       ),
                     Expanded(
                       child: Row(
@@ -456,10 +469,11 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                     ),
                     if (_section == 10 && c.usesOfficialYouTubeMusic)
                       const SizedBox.shrink()
-                    else if (c.jamPlaybackActive)
-                      _jamPlaybackBar()
                     else
                       StudioTransport(
+                        jam: _jam,
+                        onJam: _openJamPanel,
+                        onStartJam: _startJam,
                         controller: c,
                         onLyrics: () => _showLyrics(c),
                         onVinyl: () => _navigate(4),
@@ -866,6 +880,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             child: JamPage(
               key: const ValueKey('persistent-jam-page'),
               controller: c,
+              jam: _ensureJam(),
               onControllerReady: _jamCreated,
             ),
           ),
@@ -943,27 +958,6 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
     ],
-  );
-
-  Widget _jamPlaybackBar() => Material(
-    color: Theme.of(context).colorScheme.surfaceContainerLow,
-    child: Padding(
-      padding: const EdgeInsets.all(12),
-      child: Wrap(
-        alignment: WrapAlignment.center,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        spacing: 12,
-        runSpacing: 8,
-        children: [
-          const Icon(Icons.groups_outlined),
-          const Text('Reproducción controlada desde Jam'),
-          TextButton(
-            onPressed: () => _navigate(9),
-            child: const Text('Abrir Jam'),
-          ),
-        ],
-      ),
-    ),
   );
 
   Widget _searchPage(AppController c) => Column(
@@ -1395,6 +1389,17 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                       label: const Text('Reproducir'),
                     ),
                     if (playlist != null) ...[
+                      OutlinedButton.icon(
+                        onPressed: items.isEmpty
+                            ? null
+                            : () => addToJamFlow(context, _ensureJam(), items),
+                        icon: const Icon(Icons.groups_outlined),
+                        label: Text(
+                          _jam?.service.connected == true
+                              ? 'Añadir a la Jam'
+                              : 'Iniciar una Jam con esto',
+                        ),
+                      ),
                       OutlinedButton(
                         onPressed: () async {
                           final name = await _askText(
@@ -1593,6 +1598,8 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                   c.downloadTrack(t);
                 case 'playlist':
                   _addToPlaylist(c, t);
+                case 'jam':
+                  addToJamFlow(context, _ensureJam(), [t]);
                 case 'remove':
                   if (playlist != null) c.removeFromPlaylist(playlist, t);
                 case 'up':
@@ -1639,6 +1646,14 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
               const PopupMenuItem(
                 value: 'playlist',
                 child: Text('Añadir a una lista'),
+              ),
+              PopupMenuItem(
+                value: 'jam',
+                child: Text(
+                  _jam?.service.connected == true
+                      ? 'Añadir a la Jam'
+                      : 'Iniciar una Jam con esto',
+                ),
               ),
               if (c.canDownloadTrack(t))
                 const PopupMenuItem(

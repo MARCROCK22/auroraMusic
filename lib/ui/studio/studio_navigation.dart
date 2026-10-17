@@ -12,10 +12,14 @@ class StudioTitleBar extends StatelessWidget {
     required this.onNavigate,
     required this.sessionText,
     this.activeSession = false,
+    this.onSession,
   });
   final ValueChanged<int> onNavigate;
   final String sessionText;
   final bool activeSession;
+
+  /// Toque en el chip de sesión; por omisión abre la página Jam.
+  final VoidCallback? onSession;
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
@@ -98,7 +102,7 @@ class StudioTitleBar extends StatelessWidget {
             ),
             if (constraints.maxWidth > 700 && !largeText)
               InkWell(
-                onTap: () => onNavigate(9),
+                onTap: onSession ?? () => onNavigate(9),
                 child: Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
