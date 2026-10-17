@@ -34,6 +34,7 @@ class StudioTitleBar extends StatelessWidget {
           children: [
             GestureDetector(
               onPanStart: (_) => WindowControls.invoke('drag'),
+              onDoubleTap: () => WindowControls.invoke('maximize'),
               child: Row(
                 children: [
                   Image.asset(
@@ -86,7 +87,15 @@ class StudioTitleBar extends StatelessWidget {
                   ),
               ],
             ],
-            const Spacer(),
+            // Zona vacía de la barra: arrastra la ventana y doble clic maximiza.
+            Expanded(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onPanStart: (_) => WindowControls.invoke('drag'),
+                onDoubleTap: () => WindowControls.invoke('maximize'),
+                child: const SizedBox.expand(),
+              ),
+            ),
             if (constraints.maxWidth > 700 && !largeText)
               InkWell(
                 onTap: () => onNavigate(9),

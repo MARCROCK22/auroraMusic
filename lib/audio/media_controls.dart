@@ -73,12 +73,19 @@ class MediaControls {
               artist: track.artist,
               album: track.album,
               duration: track.duration,
-              artUri: track.artworkUrl == null
-                  ? null
-                  : Uri.tryParse(track.artworkUrl!),
+              artUri: _artUri(track.artworkUrl),
             ),
     );
     _publish();
+  }
+
+  // SMTC en Windows solo lee rutas locales como file:///; una ruta cruda falla.
+  static Uri? _artUri(String? art) {
+    if (art == null || art.isEmpty) return null;
+    if (Platform.isWindows && RegExp(r'^[A-Za-z]:[\\/]').hasMatch(art)) {
+      return Uri.file(art);
+    }
+    return Uri.tryParse(art);
   }
 
   void _publish() {

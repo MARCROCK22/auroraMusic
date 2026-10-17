@@ -5,7 +5,10 @@
 #include <flutter/flutter_view_controller.h>
 #include <flutter/method_channel.h>
 
+#include <shellapi.h>
+
 #include <memory>
+#include <string>
 
 #include "win32_window.h"
 
@@ -33,6 +36,29 @@ class FlutterWindow : public Win32Window {
   bool close_guard_enabled_ = false;
   bool close_request_pending_ = false;
   bool close_confirmed_ = false;
+  // Cierre real (Alt+F4, menu del sistema, «Salir» de la bandeja): ignora la
+  // preferencia de bandeja. Solo el boton X de Aurora puede ocultar a la bandeja.
+  bool real_exit_ = false;
+  bool close_to_tray_ = true;
+  bool playing_ = false;
+  bool start_minimized_ = false;
+  std::wstring track_title_, track_artist_;
+  NOTIFYICONDATAW tray_ = {};
+  bool tray_added_ = false;
+  UINT taskbar_created_msg_ = 0;
+  RECT normal_rect_ = {};
+  bool saved_maximized_ = false;
+  bool has_saved_geometry_ = false;
+
+  void AddTray();
+  void UpdateTrayTip();
+  void RemoveTray();
+  void ShowTrayMenu();
+  void RestoreFromTray();
+  void HideToTray();
+  void RequestClose();
+  void SendTrayAction(const char* action);
+  void ShowInitial();
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_
