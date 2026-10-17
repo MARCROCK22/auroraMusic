@@ -309,10 +309,19 @@ List<DjQuery> djDiscoveryQueries(
   return options.where((o) => !used.contains(o.query)).take(max).toList();
 }
 
+/// De dónde sale un candidato; la mezcla de fuentes reparte cuota por cubo.
+enum RecBucket { similar, adjacent, discovery, classics, radio }
+
 class DjCandidate {
-  const DjCandidate(this.track, this.reason, {this.prior = 0});
+  const DjCandidate(
+    this.track,
+    this.reason, {
+    this.prior = 0,
+    this.bucket = RecBucket.similar,
+  });
   final Track track;
   final String reason;
+  final RecBucket bucket;
 
   /// Source rank prior in [0, 1]; earlier in its list is better.
   final double prior;
