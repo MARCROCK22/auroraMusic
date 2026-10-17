@@ -175,7 +175,8 @@ class _JamPageState extends State<JamPage> {
       style: FilledButton.styleFrom(minimumSize: const Size(220, 52)),
       onPressed: busy
           ? null
-          : () => startJamFlow(context, jam, name: _participantName(host: true)),
+          : () =>
+                startJamFlow(context, jam, name: _participantName(host: true)),
       icon: const Icon(Icons.group_add_outlined),
       label: const Text('Iniciar una Jam'),
     ),

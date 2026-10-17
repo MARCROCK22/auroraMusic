@@ -39,7 +39,8 @@ class JamAvatar extends StatelessWidget {
   ];
   @override
   Widget build(BuildContext context) {
-    final tone = _tones[name.codeUnits.fold(0, (a, b) => a + b) % _tones.length];
+    final tone =
+        _tones[name.codeUnits.fold(0, (a, b) => a + b) % _tones.length];
     final initial = name.trim().isEmpty ? '?' : name.trim()[0].toUpperCase();
     return Semantics(
       label: name,
@@ -108,7 +109,10 @@ class JamAvatarStack extends StatelessWidget {
                 ),
                 child: Text(
                   '+$extra',
-                  style: TextStyle(fontSize: size * .38, color: StudioPalette.ink),
+                  style: TextStyle(
+                    fontSize: size * .38,
+                    color: StudioPalette.ink,
+                  ),
                 ),
               ),
             ),
@@ -140,10 +144,11 @@ class JamPill extends StatelessWidget {
         'Jam · ${jam.peopleCount} ${jam.peopleCount == 1 ? 'persona' : 'personas'}';
     return Semantics(
       button: true,
-      label: '$label, ${jam.roleLabel}, ${jam.modeLabel}. Abrir panel de la Jam',
+      label:
+          '$label, ${jam.roleLabel}, ${jam.modeLabel}. Abrir panel de la Jam',
       excludeSemantics: true,
       child: Tooltip(
-        message: 'Abrir la Jam',
+        message: 'Abrir la Jam · ${jam.roleLabel} · ${jam.modeLabel}',
         child: Material(
           color: colors.surfaceContainerHigh,
           shape: StadiumBorder(
@@ -159,7 +164,11 @@ class JamPill extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    JamAvatarStack(names: names, size: 22, max: compact ? 2 : 3),
+                    JamAvatarStack(
+                      names: names,
+                      size: 22,
+                      max: compact ? 2 : 3,
+                    ),
                     const SizedBox(width: 8),
                     Flexible(
                       child: Column(
@@ -167,7 +176,9 @@ class JamPill extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            compact ? 'Jam · ${jam.peopleCount}' : label,
+                            compact
+                                ? 'Jam · ${jam.peopleCount} · ${jam.roleLabel}'
+                                : label,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(

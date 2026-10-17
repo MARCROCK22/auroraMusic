@@ -48,7 +48,9 @@ class _JamAddSheetState extends State<JamAddSheet> {
 
   void _addOne(Track t) {
     final ok = jam.addTracks([t]);
-    _say(ok ? '«${t.title}» añadida a la Jam.' : jam.error ?? 'No se pudo añadir.');
+    _say(
+      ok ? '«${t.title}» añadida a la Jam.' : jam.error ?? 'No se pudo añadir.',
+    );
   }
 
   @override
@@ -81,7 +83,8 @@ class _JamAddSheetState extends State<JamAddSheet> {
               padding: const EdgeInsets.all(16),
               child: jamNotice(
                 context,
-                jam.error ?? 'Ahora mismo no puedes añadir canciones a esta Jam.',
+                jam.error ??
+                    'Ahora mismo no puedes añadir canciones a esta Jam.',
                 Icons.lock_outline,
               ),
             ),
@@ -111,7 +114,9 @@ class _JamAddSheetState extends State<JamAddSheet> {
     ),
   );
 
-  Widget _progress(BuildContext context) => ValueListenableBuilder<JamAddProgress>(
+  Widget _progress(
+    BuildContext context,
+  ) => ValueListenableBuilder<JamAddProgress>(
     valueListenable: jam.addProgress,
     builder: (context, p, _) {
       if (!p.running && p.message == null) return const SizedBox.shrink();
@@ -186,7 +191,11 @@ class _JamAddSheetState extends State<JamAddSheet> {
               artworkContext: ArtworkContext.thumbnailCompact,
               radius: 4,
             ),
-            title: Text(s.track.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+            title: Text(
+              s.track.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
             subtitle: Row(
               children: [
                 JamAvatar(name: s.forName, size: 18),

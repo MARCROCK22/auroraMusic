@@ -50,12 +50,12 @@ class _StudioTransportState extends State<StudioTransport> {
       final track = jamAudio
           ? (jamEntry == null ? null : jamTrackAsTrack(jamEntry.track))
           : c.currentTrack;
-      final lock = jamOn ? 'Lo controla ${j.hostName}' : '';
       final colors = Theme.of(context).colorScheme;
       final large = MediaQuery.textScalerOf(context).scale(1) > 1.5;
       return LayoutBuilder(
         builder: (context, constraints) {
-          final wide = constraints.maxWidth >= 1100 && !large;
+          // Con Jam activa la píldora necesita sitio: el modo ancho empieza más tarde.
+          final wide = constraints.maxWidth >= (jamOn ? 1350 : 1100) && !large;
           final info = Row(
             children: [
               if (track != null)
@@ -147,7 +147,7 @@ class _StudioTransportState extends State<StudioTransport> {
                   ),
                 ),
               IconButton(
-                tooltip: jamAudio ? lock : 'Anterior',
+                tooltip: jamAudio ? 'No disponible en una Jam' : 'Anterior',
                 onPressed: track == null || jamAudio ? null : c.previous,
                 icon: const Icon(StudioSymbols.skipPrevious, size: 18),
               ),
@@ -169,7 +169,11 @@ class _StudioTransportState extends State<StudioTransport> {
           );
           final progress = _progress(c, track != null);
           final jamControl = jamOn
-              ? JamPill(jam: j, onTap: widget.onJam ?? () {}, compact: !wide)
+              ? JamPill(
+                  jam: j,
+                  onTap: widget.onJam ?? () {},
+                  compact: wide && constraints.maxWidth < 1500,
+                )
               : IconButton(
                   tooltip: 'Iniciar una Jam',
                   onPressed: widget.onStartJam,
@@ -210,7 +214,9 @@ class _StudioTransportState extends State<StudioTransport> {
                         ),
                         const SizedBox(width: 20),
                         SizedBox(
-                          width: jamOn ? 500 : 380,
+                          width: jamOn
+                              ? (constraints.maxWidth < 1500 ? 570 : 610)
+                              : 440,
                           child: Row(
                             children: [
                               jamControl,

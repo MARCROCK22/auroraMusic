@@ -97,7 +97,8 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
 
   /// Un único controlador de Jam para chip, barra inferior, panel y página.
   JamController _ensureJam() {
-    _jam ??= JamController(app: ref.read(controllerProvider))..addListener(_jamChanged);
+    _jam ??= JamController(app: ref.read(controllerProvider))
+      ..addListener(_jamChanged);
     return _jam!;
   }
 

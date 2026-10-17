@@ -330,14 +330,19 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
                               }
                             }),
                       icon: Icon(
-                        c.canSkip ? Icons.skip_next : Icons.how_to_vote_outlined,
+                        c.canSkip
+                            ? Icons.skip_next
+                            : Icons.how_to_vote_outlined,
                       ),
                     ),
                     const Spacer(),
                     if (duration > 0)
                       Text(
                         '${_duration(position.toInt())} / ${_duration(duration)}',
-                        style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                        ),
                       ),
                   ],
                 ),
@@ -484,8 +489,7 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
                     style: const TextStyle(fontSize: 11),
                   ),
                   _addedBy(e),
-                  if (pending)
-                    const StudioStamp('ESPERA APROBACIÓN DEL HOST'),
+                  if (pending) const StudioStamp('ESPERA APROBACIÓN DEL HOST'),
                 ],
               ),
             ),
@@ -730,14 +734,18 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
 
   Widget _hostSettings(BuildContext context) {
     JamRules r = s.rules;
-    Widget sw(String title, String sub, bool value, Future<void> Function(bool) set) =>
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: Text(title),
-          subtitle: Text(sub, style: const TextStyle(fontSize: 12)),
-          value: value,
-          onChanged: (v) => _do(() => set(v)),
-        );
+    Widget sw(
+      String title,
+      String sub,
+      bool value,
+      Future<void> Function(bool) set,
+    ) => SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(title),
+      subtitle: Text(sub, style: const TextStyle(fontSize: 12)),
+      value: value,
+      onChanged: (v) => _do(() => set(v)),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -747,7 +755,9 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
           'Los invitados podrán pausar y saltar. Si no, solo añaden canciones.',
           _guestsControl,
           (v) async {
-            for (final p in s.participants.where((p) => p.role == JamRole.guest)) {
+            for (final p in s.participants.where(
+              (p) => p.role == JamRole.guest,
+            )) {
               c.setPermissions(p.id, p.permissions.copyWith(pause: v, skip: v));
             }
           },

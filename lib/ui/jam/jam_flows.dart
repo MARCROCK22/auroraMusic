@@ -6,8 +6,9 @@ import '../studio/studio_components.dart';
 import 'jam_qr_code.dart';
 import 'jam_session_panel.dart';
 
-void _say(BuildContext context, String text) =>
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(text)));
+void _say(BuildContext context, String text) => ScaffoldMessenger.maybeOf(
+  context,
+)?.showSnackBar(SnackBar(content: Text(text)));
 
 /// Inicia una Jam con un toque: en línea si hay servidor, si no en la red local.
 /// Al terminar abre «Invitar»; [seed] añade esas canciones a la cola.
@@ -27,7 +28,10 @@ Future<void> startJamFlow(
   }
   if (!context.mounted) return;
   if (!jam.service.connected) {
-    _say(context, jam.error ?? 'No se pudo iniciar la Jam. Inténtalo de nuevo.');
+    _say(
+      context,
+      jam.error ?? 'No se pudo iniciar la Jam. Inténtalo de nuevo.',
+    );
     return;
   }
   for (final track in seed) {
@@ -64,7 +68,10 @@ class _InviteSheet extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Invitar a la Jam', style: Theme.of(context).textTheme.headlineSmall),
+            Text(
+              'Invitar a la Jam',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
             const SizedBox(height: 4),
             Text(
               'Escanea el código QR o comparte el código. Todos pueden añadir canciones.',
@@ -91,7 +98,10 @@ class _InviteSheet extends StatelessWidget {
                 const SizedBox(height: 4),
                 SelectableText(
                   invite.encode(),
-                  style: TextStyle(fontSize: 12, color: colors.onSurfaceVariant),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: colors.onSurfaceVariant,
+                  ),
                 ),
               ] else
                 Text(
@@ -118,7 +128,9 @@ class _InviteSheet extends StatelessWidget {
                       'Invitación copiada. Compártela solo con quien quieras.',
                     ),
                     icon: const Icon(Icons.ios_share),
-                    label: Text(remote ? 'Compartir enlace' : 'Copiar invitación'),
+                    label: Text(
+                      remote ? 'Compartir enlace' : 'Copiar invitación',
+                    ),
                   ),
                 ],
               ),
@@ -127,7 +139,10 @@ class _InviteSheet extends StatelessWidget {
                 Text(
                   'Red local: los dispositivos deben estar en el mismo Wi-Fi.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12, color: colors.onSurfaceVariant),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: colors.onSurfaceVariant,
+                  ),
                 ),
               ],
             ],
@@ -151,7 +166,8 @@ Future<void> showJamPanel(BuildContext context, JamController jam) {
         expand: false,
         initialChildSize: .85,
         maxChildSize: .95,
-        builder: (_, scroll) => JamSessionPanel(controller: jam, scroll: scroll),
+        builder: (_, scroll) =>
+            JamSessionPanel(controller: jam, scroll: scroll),
       ),
     );
   }
@@ -172,8 +188,10 @@ Future<void> showJamPanel(BuildContext context, JamController jam) {
       ),
     ),
     transitionBuilder: (_, animation, _, child) => SlideTransition(
-      position: Tween(begin: const Offset(1, 0), end: Offset.zero)
-          .animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
+      position: Tween(
+        begin: const Offset(1, 0),
+        end: Offset.zero,
+      ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
       child: child,
     ),
   );
