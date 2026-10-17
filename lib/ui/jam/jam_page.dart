@@ -206,6 +206,28 @@ class _JamPageState extends State<JamPage> {
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 12),
+                  if (c != null) ...[
+                    FilledButton.icon(
+                      onPressed: busy || !c.remoteAvailable
+                          ? null
+                          : () async {
+                              await jam.hostOnline(
+                                _participantName(host: true),
+                              );
+                              if (mounted && jam.service.isHost) {
+                                setState(() => _creating = false);
+                              }
+                            },
+                      icon: const Icon(Icons.public),
+                      label: const Text('Iniciar Jam en línea'),
+                    ),
+                    if (!c.remoteAvailable && c.remoteProblem != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8, bottom: 8),
+                        child: Text(c.remoteProblem!),
+                      ),
+                    const SizedBox(height: 12),
+                  ],
                   if (c?.addresses.isNotEmpty == true) ...[
                     DropdownButtonFormField<String>(
                       initialValue: _address,

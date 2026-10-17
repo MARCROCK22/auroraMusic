@@ -212,6 +212,69 @@ class InnerTubeSource extends SourceBackend {
   }
 
   /// Parses `musicResponsiveListItemRenderer` rows of a search response.
+  /// Radio/autoplay de una pista (endpoint `next`, sin clave ni tokens PO).
+  Future<List<Track>> related(String videoId, {int limit = 10}) async {
+    if (!_videoId.hasMatch(videoId) || limit <= 0) return [];
+    final data = await _post('next', {
+      'context': _context(),
+      'videoId': videoId,
+      'playlistId': 'RDAMVM$videoId',
+      'isAudioOnly': true,
+    });
+    return parseRelated(
+      data,
+    ).where((t) => t.id != 'yt:$videoId').take(limit).toList();
+  }
+
+  static List<Track> parseRelated(Map<String, dynamic> data) {
+    final seen = <String>{};
+    final tracks = <Track>[];
+    void walk(Object? node) {
+      if (node is Map) {
+        final row = node['playlistPanelVideoRenderer'];
+        if (row is Map) {
+          final id = row['videoId'];
+          final title = (row['title']?['runs'] as List?)?.firstOrNull;
+          final artist = (row['longBylineText']?['runs'] as List?)?.firstOrNull;
+          final length =
+              ((row['lengthText']?['runs'] as List?)?.firstOrNull
+                      as Map?)?['text']
+                  as String?;
+          final thumbs = row['thumbnail']?['thumbnails'] as List?;
+          final art = (thumbs?.lastOrNull as Map?)?['url'] as String?;
+          final titleText = (title as Map?)?['text'];
+          if (id is String &&
+              _videoId.hasMatch(id) &&
+              titleText is String &&
+              titleText.trim().isNotEmpty &&
+              seen.add(id)) {
+            final uri = Uri.tryParse(art ?? '');
+            tracks.add(
+              Track(
+                id: 'yt:$id',
+                title: titleText,
+                artist:
+                    ((artist as Map?)?['text'] as String?) ?? 'YouTube Music',
+                duration: length == null
+                    ? Duration.zero
+                    : _clockOf(length) ?? Duration.zero,
+                artworkUrl: uri != null && uri.scheme == 'https' ? art : null,
+                pageUrl: 'https://music.youtube.com/watch?v=$id',
+              ),
+            );
+          }
+          return;
+        }
+        node.values.forEach(walk);
+      } else if (node is List) {
+        node.forEach(walk);
+      }
+    }
+
+    walk(data);
+    return tracks;
+  }
+
   static List<Track> parseSearch(Map<String, dynamic> data) =>
       parseBrowseTracks(data);
 
