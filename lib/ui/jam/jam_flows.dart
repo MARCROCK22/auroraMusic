@@ -15,13 +15,14 @@ Future<void> startJamFlow(
   BuildContext context,
   JamController jam, {
   List<Track> seed = const [],
+  String name = 'Anfitrión',
 }) async {
   if (!jam.service.connected) {
     if (jam.remoteAvailable) {
-      await jam.hostOnline('Anfitrión');
+      await jam.hostOnline(name);
     } else {
       await jam.loadAddresses();
-      if (jam.addresses.isNotEmpty) await jam.host(jam.addresses.first, 'Anfitrión');
+      if (jam.addresses.isNotEmpty) await jam.host(jam.addresses.first, name);
     }
   }
   if (!context.mounted) return;

@@ -1,18 +1,25 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../../app_controller.dart';
 import '../../jam/jam_controller.dart';
 import '../../jam/jam_models.dart';
 import '../../jam/jam_qr.dart';
-import 'jam_qr_code.dart';
+import 'jam_flows.dart';
 import 'jam_scanner_dialog.dart';
 import 'jam_session_panel.dart';
 
 class JamPage extends StatefulWidget {
-  const JamPage({super.key, required this.controller, this.onControllerReady});
+  const JamPage({
+    super.key,
+    required this.controller,
+    this.jam,
+    this.onControllerReady,
+  });
   final AppController controller;
+
+  /// Controlador compartido con el resto de la app (barra, chip, panel).
+  final JamController? jam;
   final ValueChanged<JamController>? onControllerReady;
   @override
   State<JamPage> createState() => _JamPageState();
@@ -22,16 +29,23 @@ class _JamPageState extends State<JamPage> {
   JamController? _jam;
   final _name = TextEditingController();
   final _code = TextEditingController();
-  String? _address;
   String? _inputError;
-  bool _creating = false, _joining = false, _readingImage = false;
+  bool _readingImage = false;
   JamController get jam {
     if (_jam != null) return _jam!;
-    final created = JamController(app: widget.controller)
-      ..addListener(_changed);
+    final created = widget.jam ?? JamController(app: widget.controller);
+    created.addListener(_changed);
     _jam = created;
     widget.onControllerReady?.call(created);
     return created;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.jam != null) {
+      jam; // registra el oyente del controlador compartido
+    }
   }
 
   void _changed() {
@@ -41,7 +55,7 @@ class _JamPageState extends State<JamPage> {
   @override
   void dispose() {
     _jam?.removeListener(_changed);
-    _jam?.dispose();
+    if (widget.jam == null) _jam?.dispose();
     _name.dispose();
     _code.dispose();
     super.dispose();
@@ -50,28 +64,10 @@ class _JamPageState extends State<JamPage> {
   String _participantName({bool host = false}) => _name.text.trim().isEmpty
       ? (host ? 'Anfitrión' : 'Invitado')
       : _name.text.trim();
-  Future<void> _prepareHost() async {
-    setState(() {
-      _creating = true;
-      _joining = false;
-      _inputError = null;
-    });
-    await jam.loadAddresses();
-    if (mounted && jam.addresses.isNotEmpty) {
-      setState(() => _address = jam.addresses.first);
-    }
-  }
-
   Future<void> _join(String value) async {
     _inputError = null;
     await jam.join(value, _participantName());
-    if (mounted && jam.service.connected) {
-      _code.clear();
-      setState(() {
-        _joining = false;
-        _creating = false;
-      });
-    }
+    if (mounted && jam.service.connected) _code.clear();
   }
 
   Future<void> _scan() async {
@@ -130,282 +126,113 @@ class _JamPageState extends State<JamPage> {
             session?.invite != null;
     final busy = c?.busy == true || _readingImage;
     final colors = Theme.of(context).colorScheme;
-    return SingleChildScrollView(
+    final message = _inputError ?? c?.error ?? session?.error;
+    final header = <Widget>[
+      Text('Jam', style: Theme.of(context).textTheme.headlineLarge),
+      const SizedBox(height: 8),
+      Text(
+        active
+            ? 'Una cola para quienes están contigo.'
+            : 'Escuchen juntos: todos añaden canciones y Aurora mezcla lo que le gusta a cada quien.',
+        style: Theme.of(
+          context,
+        ).textTheme.bodyLarge?.copyWith(color: colors.onSurfaceVariant),
+      ),
+      const SizedBox(height: 16),
+      if (busy) const LinearProgressIndicator(),
+      if (message != null && !active) ...[
+        _notice(message, Icons.info_outline),
+        const SizedBox(height: 16),
+      ],
+    ];
+    return Padding(
       padding: const EdgeInsets.all(24),
       child: Align(
         alignment: Alignment.topLeft,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1080),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Jam', style: Theme.of(context).textTheme.headlineLarge),
-              const SizedBox(height: 8),
-              Text(
-                active
-                    ? 'Una cola para quienes están contigo.'
-                    : 'Comparte una cola y escucha en compañía, dentro de tu red local.',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyLarge?.copyWith(color: colors.onSurfaceVariant),
-              ),
-              const SizedBox(height: 24),
-              if (busy) const LinearProgressIndicator(),
-              if (_inputError ?? c?.error ?? session?.error
-                  case final String message) ...[
-                _notice(message, Icons.info_outline),
-                const SizedBox(height: 16),
-              ],
-              if (!active) ...[
-                TextField(
-                  controller: _name,
-                  maxLength: 32,
-                  decoration: const InputDecoration(
-                    labelText: 'Tu nombre en la Jam (opcional)',
-                    hintText: 'Se mostrará junto a las canciones que agregues',
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: active
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    FilledButton.icon(
-                      onPressed: busy ? null : _prepareHost,
-                      icon: const Icon(Icons.group_add_outlined),
-                      label: const Text('Crear Jam'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: busy
-                          ? null
-                          : () {
-                              jam;
-                              setState(() {
-                                _joining = true;
-                                _creating = false;
-                              });
-                            },
-                      icon: const Icon(Icons.login),
-                      label: const Text('Unirme a una Jam'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: busy ? null : _scan,
-                      icon: const Icon(Icons.qr_code_scanner),
-                      label: Text(
-                        Platform.isAndroid
-                            ? 'Escanear QR'
-                            : 'Importar imagen QR',
-                      ),
-                    ),
+                    ...header,
+                    Expanded(child: JamSessionPanel(controller: c!)),
                   ],
+                )
+              : SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [...header, ..._idle(c, busy)],
+                  ),
                 ),
-                if (_creating) ...[
-                  const SizedBox(height: 24),
-                  Text(
-                    'Crear una sesión local',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 12),
-                  if (c != null) ...[
-                    FilledButton.icon(
-                      onPressed: busy || !c.remoteAvailable
-                          ? null
-                          : () async {
-                              await jam.hostOnline(
-                                _participantName(host: true),
-                              );
-                              if (mounted && jam.service.isHost) {
-                                setState(() => _creating = false);
-                              }
-                            },
-                      icon: const Icon(Icons.public),
-                      label: const Text('Iniciar Jam en línea'),
-                    ),
-                    if (!c.remoteAvailable && c.remoteProblem != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8, bottom: 8),
-                        child: Text(c.remoteProblem!),
-                      ),
-                    const SizedBox(height: 12),
-                  ],
-                  if (c?.addresses.isNotEmpty == true) ...[
-                    DropdownButtonFormField<String>(
-                      initialValue: _address,
-                      items: c!.addresses
-                          .map(
-                            (address) => DropdownMenuItem(
-                              value: address,
-                              child: Text(address),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (address) =>
-                          setState(() => _address = address),
-                      decoration: const InputDecoration(
-                        labelText: 'Dirección de red del anfitrión',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    FilledButton(
-                      onPressed: busy || _address == null
-                          ? null
-                          : () async {
-                              await jam.host(
-                                _address!,
-                                _participantName(host: true),
-                              );
-                              if (mounted && jam.service.isHost) {
-                                setState(() => _creating = false);
-                              }
-                            },
-                      child: const Text('Iniciar sesión local'),
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  const Text(
-                    'El puerto se abre únicamente en la dirección privada elegida. Windows puede pedir autorización de firewall para redes privadas.',
-                  ),
-                ],
-                if (_joining) ...[
-                  const SizedBox(height: 24),
-                  TextField(
-                    controller: _code,
-                    obscureText: true,
-                    enableSuggestions: false,
-                    autocorrect: false,
-                    decoration: const InputDecoration(
-                      labelText: 'Invitación de Jam',
-                      hintText: 'Pega la invitación copiada por el anfitrión',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 8,
-                    children: [
-                      FilledButton(
-                        onPressed: busy ? null : () => _join(_code.text),
-                        child: const Text('Conectar'),
-                      ),
-                      TextButton.icon(
-                        onPressed: busy ? null : _readImage,
-                        icon: const Icon(Icons.image_outlined),
-                        label: const Text('Leer QR de una imagen'),
-                      ),
-                    ],
-                  ),
-                ],
-                const SizedBox(height: 32),
-                _notice(
-                  'Ambos dispositivos deben estar en la misma red. Cada uno usa sus propias fuentes de audio; los archivos locales no se envían.',
-                  Icons.wifi,
-                ),
-              ] else ...[
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    Chip(
-                      avatar: Icon(
-                        session!.connected ? Icons.wifi : Icons.wifi_off,
-                        size: 18,
-                      ),
-                      label: Text(
-                        session.isHost
-                            ? 'Anfitrión'
-                            : session.connected
-                            ? 'Conectado'
-                            : 'Sin conexión',
-                      ),
-                    ),
-                    if (session.invite != null) Text(session.invite!.endpoint),
-                    if (!session.connected)
-                      OutlinedButton.icon(
-                        onPressed: busy ? null : c!.reconnect,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('Reconectar'),
-                      ),
-                    TextButton.icon(
-                      onPressed: busy ? null : c!.leave,
-                      icon: const Icon(Icons.logout),
-                      label: Text(
-                        session.isHost ? 'Cerrar Jam' : 'Salir de la Jam',
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                if (session.isHost && session.invite != null) _invitation(c!),
-                const SizedBox(height: 16),
-                JamSessionPanel(controller: c!),
-              ],
-            ],
-          ),
         ),
       ),
     );
   }
 
+  List<Widget> _idle(JamController? c, bool busy) => [
+    FilledButton.icon(
+      style: FilledButton.styleFrom(minimumSize: const Size(220, 52)),
+      onPressed: busy
+          ? null
+          : () => startJamFlow(context, jam, name: _participantName(host: true)),
+      icon: const Icon(Icons.group_add_outlined),
+      label: const Text('Iniciar una Jam'),
+    ),
+    const SizedBox(height: 4),
+    Text(
+      jam.remoteAvailable
+          ? 'Se crea al instante y te mostramos el QR y el código para invitar.'
+          : 'Sin conexión al servicio en línea: la Jam funcionará en tu red local.',
+      style: const TextStyle(fontSize: 12),
+    ),
+    const SizedBox(height: 32),
+    Text('Unirme a una Jam', style: Theme.of(context).textTheme.titleLarge),
+    const SizedBox(height: 12),
+    TextField(
+      controller: _name,
+      maxLength: 32,
+      decoration: const InputDecoration(
+        labelText: 'Tu nombre (opcional)',
+        hintText: 'Se verá junto a las canciones que añadas',
+      ),
+    ),
+    TextField(
+      controller: _code,
+      autocorrect: false,
+      enableSuggestions: false,
+      textInputAction: TextInputAction.go,
+      onSubmitted: busy ? null : _join,
+      decoration: const InputDecoration(
+        labelText: 'Código o enlace de la Jam',
+        hintText: 'Por ejemplo K7M2QX',
+      ),
+    ),
+    const SizedBox(height: 12),
+    Wrap(
+      spacing: 12,
+      runSpacing: 8,
+      children: [
+        FilledButton(
+          onPressed: busy ? null : () => _join(_code.text),
+          child: const Text('Unirme'),
+        ),
+        OutlinedButton.icon(
+          onPressed: busy ? null : _scan,
+          icon: const Icon(Icons.qr_code_scanner),
+          label: Text(
+            Platform.isAndroid ? 'Escanear QR' : 'Importar imagen QR',
+          ),
+        ),
+      ],
+    ),
+    const SizedBox(height: 24),
+    _notice(
+      'Cada dispositivo usa sus propias fuentes de audio; los archivos locales no se envían.',
+      Icons.info_outline,
+    ),
+  ];
+
   Widget _notice(String message, IconData icon, {Widget? action}) =>
       jamNotice(context, message, icon, action: action);
-  Widget _invitation(JamController c) => LayoutBuilder(
-    builder: (context, constraints) {
-      final invite = c.service.invite!;
-      final description = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Invita a quienes están cerca',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Abre Aurora en el otro dispositivo y escanea este código desde Jam.',
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Acceso válido hasta ${_time(invite.expiresAt)}. Al cerrar la sesión, este QR deja de funcionar.',
-          ),
-          const SizedBox(height: 12),
-          TextButton.icon(
-            onPressed: () async {
-              await Clipboard.setData(ClipboardData(text: invite.encode()));
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'Invitación copiada. Compártela solo con tus participantes.',
-                    ),
-                  ),
-                );
-              }
-            },
-            icon: const Icon(Icons.copy),
-            label: const Text('Copiar invitación'),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Usa una red de confianza: la conexión LAN y el QR de acceso no están cifrados.',
-          ),
-        ],
-      );
-      final qr = JamQrCode(data: invite.encode());
-      return constraints.maxWidth < 640
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [qr, const SizedBox(height: 16), description],
-            )
-          : Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                qr,
-                const SizedBox(width: 24),
-                Expanded(child: description),
-              ],
-            );
-    },
-  );
-  String _time(DateTime value) =>
-      '${value.toLocal().hour.toString().padLeft(2, '0')}:${value.toLocal().minute.toString().padLeft(2, '0')}';
 }

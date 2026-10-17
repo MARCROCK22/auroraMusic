@@ -55,10 +55,6 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
     animation: c,
     builder: (context, _) => ListView(
       controller: widget.scroll,
-      shrinkWrap: widget.scroll == null && !_bounded(context),
-      physics: widget.scroll == null && !_bounded(context)
-          ? const NeverScrollableScrollPhysics()
-          : null,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       children: [
         _header(context),
@@ -74,9 +70,6 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
       ],
     ),
   );
-
-  bool _bounded(BuildContext context) => context
-      .findAncestorWidgetOfExactType<SingleChildScrollView>() == null;
 
   Widget _title(String text, {Widget? trailing}) => Padding(
     padding: const EdgeInsets.only(bottom: 8),
