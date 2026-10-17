@@ -1894,6 +1894,15 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             value: c.reducedMotion,
             onChanged: c.setReducedMotion,
           ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Autoplay: rellenar la cola automáticamente'),
+            subtitle: const Text(
+              'Al acabarse la cola, Aurora añade canciones afines a tus gustos.',
+            ),
+            value: c.autoRefill,
+            onChanged: c.setAutoRefill,
+          ),
         ],
       ),
       if (WindowControls.supported)

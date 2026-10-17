@@ -230,6 +230,7 @@ class _QueueList extends StatelessWidget {
     ),
     title: Text(track.title, maxLines: 1, overflow: TextOverflow.ellipsis),
     subtitle: Text(
+      '${controller.autoAddedIds.contains(track.id) ? 'Sugerida · ' : ''}'
       '${track.artist} · ${_time(track.duration)}',
       maxLines: 2,
       overflow: TextOverflow.ellipsis,

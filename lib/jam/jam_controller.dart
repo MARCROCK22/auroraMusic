@@ -409,10 +409,14 @@ class JamController extends ChangeNotifier {
     unawaited(_topUp());
   }
 
-  JamSuggestionAdapter _adapter() =>
-      suggestionAdapter?.call() ?? _defaultAdapter();
+  JamSuggestionAdapter _adapter({int count = jamSuggestionsPerPerson}) =>
+      suggestionAdapter?.call() ?? _defaultAdapter(count);
 
-  JamSuggestionAdapter _defaultAdapter() => JamSuggestionAdapter(
+  JamSuggestionAdapter _defaultAdapter(int count) => JamSuggestionAdapter(
+    api: app.suggestionsApi,
+    taste: () => app.selfTaste,
+    mode: app.djMode,
+    count: count,
     related: (track) {
       final source = app.source;
       final id = track.id.startsWith('yt:') ? track.id.substring(3) : null;
@@ -459,9 +463,9 @@ class JamController extends ChangeNotifier {
       service.promoteSuggested(target: minAhead);
       if (short() > 0) {
         try {
-          final items = await _adapter()
-              .build(current: app.currentTrack)
-              .timeout(topUpTimeout);
+          final items = await _adapter(
+            count: 20,
+          ).build(current: app.currentTrack).timeout(topUpTimeout);
           service.addAutoplay([for (final i in items) i.track], need: short());
         } catch (_) {
           // Motor lento, sin red o con error: sigue el respaldo local.

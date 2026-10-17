@@ -22,7 +22,12 @@ import 'library/library_database.dart';
 import 'dj/ai_dj.dart';
 import 'dj/dj_modes.dart';
 import 'dj/recommendations.dart';
+import 'dj/reco_memory.dart';
 import 'dj/suggestions_api.dart';
+import 'metadata/spotify/spotify_metadata_provider.dart';
+import 'metadata/spotify_recs.dart';
+import 'metadata/youtube_match.dart';
+import 'sources/innertube_source.dart';
 import 'sources/youtube_request_policy.dart';
 import 'sources/web_music_source.dart';
 
@@ -195,6 +200,150 @@ class AppController extends ChangeNotifier {
   List<Track> queue = [];
   int queueIndex = -1;
   bool shuffle = false;
+
+  /// Autoplay: con la cola agotada se añaden sugerencias del motor local.
+  bool autoRefill = true;
+
+  /// Pistas que el autoplay añadió (marca «Sugerida» en la cola).
+  final Set<String> autoAddedIds = {};
+  Future<void>? _refillFuture;
+  SuggestionsApi? _suggestionsApi;
+
+  /// Motor de recomendaciones compartido con la Jam; se crea una sola vez.
+  SuggestionsApi get suggestionsApi => _suggestionsApi ??= SuggestionsApi(
+    sources: source is InnerTubeSource
+        ? spotifyRecSources(
+            catalog: ProviderSpotifyCatalog(SpotifyMetadataProvider()),
+            matcher: YoutubeMatcher(
+              search: (q, k) => source.searchPage(q, k).then((p) => p.tracks),
+            ),
+          )
+        : const [],
+  );
+
+  /// Perfil de gustos de ESTE dispositivo (nunca sale del equipo).
+  ParticipantTaste get selfTaste => ParticipantTaste('self', _tasteProfile());
+
+  bool get _canAutoRefill =>
+      autoRefill &&
+      !_disposed &&
+      !_jamPlaybackActive &&
+      !_personalDjActive &&
+      !_youtubeMusicActive &&
+      !shuffle &&
+      repeat == RepeatMode.off &&
+      queue.isNotEmpty &&
+      queueIndex >= 0;
+
+  void setAutoRefill(bool value) {
+    autoRefill = value;
+    unawaited(preferences.setBool('autoRefill', value));
+    _notify();
+  }
+
+  /// Mantiene hasta [target] pistas por delante añadiendo al final de la cola
+  /// (nunca reordena ni quita lo que armó el usuario). Motor → biblioteca →
+  /// favoritos no sonados → favoritos; sin repetir artista seguido.
+  Future<void> _refillQueue({int target = 5}) {
+    if (!_canAutoRefill || queue.length - queueIndex - 1 >= target) {
+      return _refillFuture ?? Future.value();
+    }
+    return _refillFuture ??= _doRefill(
+      target,
+    ).whenComplete(() => _refillFuture = null);
+  }
+
+  Future<void> _doRefill(int target) async {
+    final current = currentTrack;
+    final recent = recentTracks
+        .take(20)
+        .expand(recommendationTrackKeys)
+        .toSet();
+    final picked = <Track>[];
+    bool native(Track t) =>
+        !(usesOfficialYouTubeMusic || usesYouTubeWebAudio) ||
+        isNativePlayable(t);
+    int need() => target - (queue.length - queueIndex - 1) - picked.length;
+    void take(Iterable<Track> pool, {bool allowRecent = false}) {
+      final seen = {
+        for (final t in [...queue, ...picked]) ...recommendationTrackKeys(t),
+      };
+      for (final relaxed in [false, true]) {
+        for (final t in pool) {
+          if (need() <= 0) return;
+          final keys = recommendationTrackKeys(t);
+          if (t.isPendingSpotifyMatch ||
+              !native(t) ||
+              keys.any(seen.contains) ||
+              (!allowRecent && keys.any(recent.contains))) {
+            continue;
+          }
+          final previous = picked.isNotEmpty
+              ? picked.last
+              : (queue.isNotEmpty ? queue.last : null);
+          if (!relaxed &&
+              previous != null &&
+              djPrimaryArtist(previous) == djPrimaryArtist(t)) {
+            continue;
+          }
+          picked.add(t);
+          seen.addAll(keys);
+        }
+      }
+    }
+
+    try {
+      final radio = <DjCandidate>[];
+      final src = source;
+      final id = current?.id.startsWith('yt:') == true
+          ? current!.id.substring(3)
+          : null;
+      if (src is InnerTubeSource && id != null) {
+        try {
+          final related = await src
+              .related(id)
+              .timeout(const Duration(seconds: 6));
+          for (var i = 0; i < related.length; i++) {
+            radio.add(
+              DjCandidate(
+                related[i],
+                'Radio de YouTube',
+                prior: 0.5 / (1 + i / 5),
+                bucket: RecBucket.radio,
+              ),
+            );
+          }
+        } catch (_) {}
+      }
+      final picks = await suggestionsApi.getSuggestions(
+        SessionContext(
+          participants: [selfTaste],
+          mode: _djMode,
+          current: current,
+          library: tracks,
+          recentKeys: recent,
+          queueTail: queue.skip(max(0, queue.length - 3)).toList(),
+          extraCandidates: radio,
+          limit: 12,
+        ),
+      );
+      take([for (final s in picks) s.track]);
+    } catch (_) {
+      // Sin red o motor caído: se sigue con lo local.
+    }
+    take(tracks);
+    final favorites = [
+      for (final t in tracks)
+        if (favoriteIds.contains(t.id)) t,
+    ];
+    take(favorites, allowRecent: true);
+    if (picked.isEmpty || !_canAutoRefill) return;
+    queue.addAll(picked);
+    autoAddedIds.addAll(picked.map((t) => t.id));
+    await _saveQueue();
+    _notify();
+  }
+
   RepeatMode repeat = RepeatMode.off;
   bool eqEnabled = false;
   bool experimentalProgressivePlayback = false;
@@ -848,6 +997,7 @@ class AppController extends ChangeNotifier {
         orElse: () => RepeatMode.off,
       );
       shuffle = preferences.getBool('shuffle') ?? false;
+      autoRefill = preferences.getBool('autoRefill') ?? true;
       final directory = preferences.getString('toolDirectory');
       if (directory != null && Platform.isWindows) {
         try {
@@ -1313,6 +1463,7 @@ class AppController extends ChangeNotifier {
     if (_routeToYouTubeMusic(selected)) return;
     final seen = <String>{};
     queue = [];
+    autoAddedIds.clear();
     for (final candidate in context?.isNotEmpty == true ? context! : [track]) {
       final item = remembered[candidate.id] ?? candidate;
       if ((usesOfficialYouTubeMusic || usesYouTubeWebAudio) &&
@@ -1495,6 +1646,12 @@ class AppController extends ChangeNotifier {
         readyTrack,
         ...recentTracks.where((item) => item.id != track.id),
       ].take(100).toList();
+      // La memoria anti-repetición del motor cuenta lo que SUENA.
+      unawaited(
+        RecsMemory.shared
+            .record([readyTrack], DateTime.now())
+            .then((_) {}, onError: (Object _) {}),
+      );
       await _saveQueue();
       unawaited(_updateAccent(track));
     } catch (exception) {
@@ -1505,6 +1662,12 @@ class AppController extends ChangeNotifier {
         busy = _recovering && fromRecovery;
         _adoptWebTrackMetadata();
         _notify();
+        // Última de la cola: se deja lista la continuación antes de que termine.
+        if (_loadedTrackId == track.id &&
+            audio.isPlaying &&
+            queueIndex == queue.length - 1) {
+          unawaited(_refillQueue());
+        }
         if (_personalDjActive &&
             _loadedTrackId == track.id &&
             audio.isPlaying) {
@@ -1803,6 +1966,12 @@ class AppController extends ChangeNotifier {
               )
               .firstOrNull;
       var target = nextIndex();
+      if (target == null && _canAutoRefill) {
+        final generation = _playGeneration;
+        await _refillQueue();
+        if (generation != _playGeneration || _disposed || !_playIntent) return;
+        target = nextIndex();
+      }
       if (target == null && _personalDjActive) {
         // Autoplay: the DJ continues when the queue runs out.
         final generation = _playGeneration;
