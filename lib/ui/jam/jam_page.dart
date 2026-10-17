@@ -180,11 +180,9 @@ class _JamPageState extends State<JamPage> {
       label: const Text('Iniciar una Jam'),
     ),
     const SizedBox(height: 4),
-    Text(
-      jam.remoteAvailable
-          ? 'Se crea al instante y te mostramos el QR y el código para invitar.'
-          : 'Sin conexión al servicio en línea: la Jam funcionará en tu red local.',
-      style: const TextStyle(fontSize: 12),
+    const Text(
+      'Se crea al instante y te mostramos el QR y el código para invitar.',
+      style: TextStyle(fontSize: 12),
     ),
     const SizedBox(height: 32),
     Text('Unirme a una Jam', style: Theme.of(context).textTheme.titleLarge),

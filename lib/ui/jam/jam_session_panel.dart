@@ -111,14 +111,15 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
                   ),
                 ),
               ),
-              StudioStamp('${c.peopleCount} EN LA JAM', filled: true),
             ],
           ),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
             runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
+              StudioStamp('${c.peopleCount} EN LA JAM', filled: true),
               Chip(
                 avatar: const Icon(Icons.badge_outlined, size: 16),
                 label: Text(c.roleLabel),

@@ -116,14 +116,11 @@ void main() {
         ),
       );
       expect(created, 0);
-      expect(find.text('Crear Jam'), findsOneWidget);
+      expect(find.text('Iniciar una Jam'), findsOneWidget);
       expect(app.jamPlaybackActive, isFalse);
-      await tester.tap(find.text('Unirme a una Jam'));
-      await tester.pump();
-      expect(created, 1);
-      expect(find.text('Invitación de Jam'), findsOneWidget);
-      await tester.tap(find.text('Conectar'));
+      await tester.tap(find.text('Unirme'));
       await tester.pumpAndSettle();
+      expect(created, 1);
       expect(
         find.text('El QR no contiene una Jam local válida o ya venció.'),
         findsOneWidget,
@@ -198,11 +195,13 @@ void main() {
           ),
         ),
       );
-      await tester.tap(find.text('Unirme a una Jam'));
+      await tester.ensureVisible(find.text('Unirme'));
+      await tester.tap(find.text('Unirme'));
       await tester.pump();
       expect(jam, isNotNull);
-      expect(find.text('Cola compartida · 1'), findsOneWidget);
-      expect(find.textContaining('Agregada por Anfitrión'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('Cola · 1'), 200);
+      expect(find.text('Cola · 1'), findsOneWidget);
+      expect(find.textContaining('Añadida por Anfitrión'), findsWidgets);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       await tester.pump();
