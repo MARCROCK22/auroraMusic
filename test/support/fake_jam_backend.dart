@@ -6,7 +6,7 @@ import 'package:aurora_music/jam/transport/jam_transport.dart';
 /// Servidor falso en memoria: imita lo que valida el SQL real (pertenencia,
 /// silencio, bloqueos, límites de invitados). No prueba Supabase.
 class FakeJamBackend {
-  final rooms = <String, _Room>{};
+  final rooms = <String, FakeRoom>{};
   var _next = 0;
   var _seq = 0;
   int cmdCount = 0;
@@ -26,8 +26,8 @@ class _Member {
   final DateTime joinedAt;
 }
 
-class _Room {
-  _Room(this.code, this.host);
+class FakeRoom {
+  FakeRoom(this.code, this.host);
   String code;
   String host;
   bool open = true;
@@ -41,7 +41,7 @@ class _Room {
 
 class FakeChannel implements JamChannel {
   FakeChannel(this.room, this.uid, this.asHost);
-  final _Room room;
+  final FakeRoom room;
   final String uid;
   final bool asHost;
   final _in = StreamController<JamEnvelope>.broadcast();
@@ -122,14 +122,14 @@ class FakeJamTransport implements JamTransport {
     if (offline) throw JamRemoteException('network');
   }
 
-  _Room _room(String code) {
+  FakeRoom _room(String code) {
     final r = backend.rooms[code];
     if (r == null) throw JamRemoteException('invalid');
     if (r.closed) throw JamRemoteException('expired');
     return r;
   }
 
-  _Member _me(_Room r) {
+  _Member _me(FakeRoom r) {
     final m = r.members[uid];
     if (m == null) throw JamRemoteException('forbidden');
     return m;
@@ -141,7 +141,7 @@ class FakeJamTransport implements JamTransport {
     return uid;
   }
 
-  JamRoomInfo _info(_Room r) => JamRoomInfo(
+  JamRoomInfo _info(FakeRoom r) => JamRoomInfo(
     code: r.code,
     hostUid: r.host,
     expiresAt: DateTime.now().add(const Duration(hours: 12)),
@@ -159,7 +159,7 @@ class FakeJamTransport implements JamTransport {
     }
     final n = backend._seq++;
     final code = 'ABCD${2 + n % 8}${2 + (n ~/ 8) % 8}';
-    final r = _Room(code, uid)..members[uid] = _Member(uid, name, JamRole.host);
+    final r = FakeRoom(code, uid)..members[uid] = _Member(uid, name, JamRole.host);
     backend.rooms[code] = r;
     return _info(r);
   }
@@ -231,7 +231,7 @@ class FakeJamTransport implements JamTransport {
     r.closed = true;
   }
 
-  _Room _hostRoom(String code) {
+  FakeRoom _hostRoom(String code) {
     final r = _room(code);
     if (r.host != uid) throw JamRemoteException('forbidden');
     return r;

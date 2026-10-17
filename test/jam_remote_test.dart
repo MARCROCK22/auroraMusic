@@ -32,12 +32,7 @@ Future<void> until(JamService s, bool Function() ok, {int seconds = 5}) async {
     await done.future.timeout(Duration(seconds: seconds));
   } on TimeoutException {
     throw TestFailure(
-      'until timeout ' +
-          StackTrace.current
-              .toString()
-              .split(String.fromCharCode(10))
-              .take(4)
-              .join(' | '),
+      'until timeout ${StackTrace.current.toString().split(String.fromCharCode(10)).take(4).join(' | ')}',
     );
   } finally {
     s.removeListener(check);
@@ -384,7 +379,7 @@ void main() {
       '%',
       '_%_',
       'a\u0000b',
-      '‮evil',
+      '\u202eevil',
       '😀' * 500,
       '" OR 1=1 --',
       '\n\r\t',
@@ -405,7 +400,7 @@ void main() {
       for (final h in hostile) {
         final clean = jamCleanName(h);
         expect(clean.length, lessThanOrEqualTo(32));
-        expect(RegExp(r'[\x00-\x1f‪-‮]').hasMatch(clean), isFalse);
+        expect(RegExp(r'[\x00-\x1f\u202a-\u202e]').hasMatch(clean), isFalse);
       }
       expect(jamCleanName('\u0000'), 'Invitado');
     });
