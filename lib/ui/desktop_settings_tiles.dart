@@ -32,7 +32,7 @@ class _DesktopSettingsTilesState extends State<DesktopSettingsTiles> {
         title: const Text('Al cerrar con X: minimizar a la bandeja'),
         subtitle: Text(
           _tray
-              ? 'La X oculta Aurora y la música sigue sonando; si está en pausa, sale. Alt+F4 y «Salir» de la bandeja siempre cierran.'
+              ? 'La X siempre oculta Aurora en la bandeja (suene o no la música). Alt+F4 y «Salir» de la bandeja siempre cierran.'
               : 'La X cierra Aurora. Alt+F4 siempre cierra.',
         ),
         value: _tray,
