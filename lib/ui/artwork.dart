@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import '../core/models.dart';
+import 'artwork_cache.dart';
 
 /// Logical artwork dimensions shared by every music surface.
 enum ArtworkContext {
@@ -104,18 +105,21 @@ class Artwork extends StatelessWidget {
                       frameBuilder: (_, image, frame, synchronous) =>
                           synchronous || frame != null ? image : placeholder,
                     )
-                  : Image.network(
-                      url,
+                  : Image(
+                      // Caché en disco + resolución acorde al tamaño pintado.
+                      image: ResizeImage(
+                        CachedArtworkImage(
+                          upgradeArtworkUrl(url, cacheWidth.toDouble()),
+                        ),
+                        width: cacheWidth,
+                      ),
                       fit: BoxFit.cover,
                       filterQuality: FilterQuality.high,
                       alignment: Alignment.center,
-                      cacheWidth: cacheWidth,
                       excludeFromSemantics: true,
                       errorBuilder: (_, _, _) => placeholder,
                       frameBuilder: (_, image, frame, synchronous) =>
                           synchronous || frame != null ? image : placeholder,
-                      loadingBuilder: (_, image, progress) =>
-                          progress == null ? image : placeholder,
                     ),
             ),
           ),
