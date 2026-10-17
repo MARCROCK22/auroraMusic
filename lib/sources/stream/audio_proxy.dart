@@ -321,7 +321,7 @@ class AudioProxy {
   }
 
   /// Opens one upstream chunk. Refreshes an expiring URL up front and, on
-  /// 401/403/410, reports once, refreshes (single-flight) and retries once.
+  /// 400/401/403/410 (googlevideo answers 400 to stale or mismatched URLs), reports once, refreshes (single-flight) and retries once.
   Future<HttpClientResponse> _open(_Entry entry, int a, int b, _Ctx ctx) async {
     var stream = entry.stream;
     if (stream.expiredAt(DateTime.now())) stream = await _renew(entry, stream);
@@ -362,7 +362,7 @@ class AudioProxy {
         request.abort();
         _discard(response);
         // Other statuses (3xx, 5xx, 416, ...) end as our 410 downstream.
-        if (attempt == 0 && const {401, 403, 410}.contains(status)) {
+        if (attempt == 0 && const {400, 401, 403, 410}.contains(status)) {
           stream = await _renew(
             entry,
             stream,

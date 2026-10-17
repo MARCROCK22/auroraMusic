@@ -524,7 +524,7 @@ class InnerTubeSource extends SourceBackend {
   void reportPlaybackFailure(String message) {
     final id = _currentVideoId;
     if (id == null) return;
-    final status = RegExp(r'\b(401|403|410)\b').firstMatch(message)?[1];
+    final status = RegExp(r'\b(400|401|403|410)\b').firstMatch(message)?[1];
     _orchestrator?.reportFailure(
       id,
       httpStatus: status == null ? null : int.parse(status),

@@ -20,6 +20,7 @@ class FakeUpstream {
   final forbid = <String>{}; // always 403
   final forbidAfterFirst = <String>{}; // 403 unless range starts at 0
   final failWith500 = <String>{};
+  final badRequest = <String>{}; // always 400, like a stale signed URL
   final hangHeaders = <String>{};
   final hangBody = <String>{}; // half a chunk, then silence
   Completer<void>? gate; // holds requests whose range start > 0
@@ -62,6 +63,11 @@ class FakeUpstream {
     if (hangHeaders.contains(path)) return _hang(r, writeHeaders: false);
     if (forbid.contains(path) || (forbidAfterFirst.contains(path) && a > 0)) {
       r.response.statusCode = 403;
+      await r.response.close();
+      return;
+    }
+    if (badRequest.contains(path)) {
+      r.response.statusCode = 400;
       await r.response.close();
       return;
     }
@@ -336,6 +342,21 @@ void main() {
       up.log.where((l) => l[':path'] == 'new').first['range'],
       'bytes=1024-2047',
     );
+  });
+
+  test('400 on a stale URL is refreshed once like a 403', () async {
+    await startProxy();
+    up.badRequest.add('old');
+    final failures = <int?>[];
+    final u = register(
+      stream(path: 'old'),
+      onFailure: (status, _) => failures.add(status),
+      refresh: () async => stream(path: 'new'),
+    );
+    final r = await fetch(u);
+    expect(r.status, 200);
+    expect(r.body, up.data);
+    expect(failures, [400]);
   });
 
   test('403 twice before headers answers 410, reports once', () async {
