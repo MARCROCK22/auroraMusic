@@ -460,6 +460,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                             StudioSessionAside(
                               controller: c,
                               jam: _jam,
+                              onStartJam: _startJam,
                               onJam: () => _navigate(9),
                               onQueue: () => _navigate(
                                 _jam?.service.connected == true ? 9 : 5,

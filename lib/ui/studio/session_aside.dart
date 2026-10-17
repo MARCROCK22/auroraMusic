@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../../app_controller.dart';
 import '../../core/models.dart';
 import '../../jam/jam_controller.dart';
 import '../artwork.dart';
+import '../jam/jam_flows.dart';
+import '../jam/jam_add_sheet.dart';
 import '../jam/jam_qr_code.dart';
+import '../jam/jam_widgets.dart';
 import 'studio_components.dart';
 import 'studio_symbols.dart';
 
@@ -15,10 +17,12 @@ class StudioSessionAside extends StatelessWidget {
     required this.onJam,
     required this.onQueue,
     this.jam,
+    this.onStartJam,
   });
   final AppController controller;
   final JamController? jam;
   final VoidCallback onJam, onQueue;
+  final VoidCallback? onStartJam;
   @override
   Widget build(BuildContext context) {
     final c = controller;
@@ -72,9 +76,11 @@ class StudioSessionAside extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 16),
-                const Text(
-                  'Cualquier invitado conectado a la misma red local puede escanear desde Aurora y agregar temas a la cola.',
-                  style: TextStyle(fontSize: 12),
+                Text(
+                  connected
+                      ? 'Todos pueden añadir canciones a la cola. Invita con el QR o el código.'
+                      : 'Escuchen juntos: inicia una Jam y comparte el QR. Cada quien añade sus canciones.',
+                  style: const TextStyle(fontSize: 12),
                 ),
                 const SizedBox(height: 16),
                 StudioPanel(
@@ -104,17 +110,14 @@ class StudioSessionAside extends StatelessWidget {
                                     style: TextStyle(fontSize: 11),
                                   ),
                                   TextButton.icon(
-                                    onPressed: () => Clipboard.setData(
-                                      ClipboardData(
-                                        text: session.invite!.encode(),
-                                      ),
-                                    ),
+                                    onPressed: () =>
+                                        showJamInviteSheet(context, jam!),
                                     icon: const Icon(
                                       StudioSymbols.share,
                                       size: 14,
                                     ),
                                     label: const Text(
-                                      'Copiar invitación',
+                                      'Invitar',
                                       style: TextStyle(fontSize: 11),
                                     ),
                                   ),
@@ -132,22 +135,60 @@ class StudioSessionAside extends StatelessWidget {
                               color: colors.primary,
                             ),
                             const SizedBox(height: 12),
-                            Text(
-                              connected
-                                  ? 'Participas en ${session!.invite?.endpoint ?? 'una Jam local'}'
-                                  : 'Crea una Jam para mostrar aquí su código QR.',
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                            const SizedBox(height: 8),
-                            TextButton.icon(
-                              onPressed: onJam,
-                              icon: const Icon(StudioSymbols.groups, size: 16),
-                              label: Text(
-                                connected
-                                    ? 'Abrir Jam'
-                                    : 'Crear o unirse a Jam',
+                            if (connected) ...[
+                              JamAvatarStack(
+                                names: [
+                                  for (final p in session!.participants)
+                                    if (p.connected) p.name,
+                                ],
+                                size: 28,
+                                max: 6,
                               ),
-                            ),
+                              const SizedBox(height: 8),
+                              Text(
+                                '${jam!.roleLabel} · ${jam!.modeLabel}',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                              Wrap(
+                                spacing: 8,
+                                children: [
+                                  TextButton.icon(
+                                    onPressed: () =>
+                                        showJamInviteSheet(context, jam!),
+                                    icon: const Icon(
+                                      StudioSymbols.share,
+                                      size: 16,
+                                    ),
+                                    label: const Text('Invitar'),
+                                  ),
+                                  TextButton.icon(
+                                    onPressed: jam!.canAdd
+                                        ? () => showJamAddSheet(context, jam!)
+                                        : null,
+                                    icon: const Icon(Icons.add, size: 16),
+                                    label: const Text('Añadir música'),
+                                  ),
+                                ],
+                              ),
+                            ] else ...[
+                              Text(
+                                'Aún no hay una Jam activa.',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                              const SizedBox(height: 8),
+                              FilledButton.icon(
+                                onPressed: onStartJam ?? onJam,
+                                icon: const Icon(
+                                  StudioSymbols.groups,
+                                  size: 16,
+                                ),
+                                label: const Text('Iniciar una Jam'),
+                              ),
+                              TextButton(
+                                onPressed: onJam,
+                                child: const Text('Unirme con un código'),
+                              ),
+                            ],
                           ],
                         ),
                 ),
