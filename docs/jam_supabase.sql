@@ -654,7 +654,8 @@ $$;
 revoke all on function public.jam_rt_role(text) from public, anon;
 grant execute on function public.jam_rt_role(text) to authenticated;
 
-alter table realtime.messages enable row level security;
+-- realtime.messages ya trae RLS activado y pertenece a supabase_realtime_admin:
+-- ALTER TABLE ahí da 42501 (must be owner). Solo se crean las políticas.
 
 drop policy if exists jam_rt_read on realtime.messages;
 create policy jam_rt_read on realtime.messages for select to authenticated
