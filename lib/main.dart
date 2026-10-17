@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'jam/jam_protocol.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -19,6 +20,7 @@ import 'ui/aurora_shell.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  unawaited(registerAuroraProtocol()); // aurora://jam/CODIGO (HKCU)
   runApp(const AuroraBootstrap());
 }
 

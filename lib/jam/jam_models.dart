@@ -8,6 +8,34 @@ enum JamMode { queueOnly, synchronized }
 
 enum JamConnection { idle, hosting, connected, disconnected, closed }
 
+enum JamRole { host, coHost, guest }
+
+/// queued: suena en orden; suggested: «A continuación» propuesta (suena tras
+/// las puestas en cola, ordenada por votos); pending: espera aprobación.
+enum JamEntryStatus { queued, suggested, pending }
+
+/// Alfabeto sin ambiguos (sin I, O, 0, 1): 32^6 ≈ 1.07e9 códigos.
+const jamCodeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+final _codePattern = RegExp(r'^[A-HJ-NP-Z2-9]{6}$');
+
+/// Devuelve el código en mayúsculas o null si no es un código válido.
+String? jamNormalizeCode(String value) {
+  final code = value.toUpperCase().replaceAll(RegExp(r'[\s-]'), '');
+  return _codePattern.hasMatch(code) ? code : null;
+}
+
+/// Nombre visible seguro: sin control, sin marcas bidireccionales, máx. 32.
+String jamCleanName(String value, {String fallback = 'Invitado'}) {
+  final clean = value
+      .replaceAll(
+        RegExp(r'[\x00-\x1f\x7f\u200e\u200f\u202a-\u202e\u2066-\u2069]'),
+        '',
+      )
+      .trim();
+  if (clean.isEmpty) return fallback;
+  return clean.length > 32 ? clean.substring(0, 32).trim() : clean;
+}
+
 class JamException implements Exception {
   const JamException(this.message);
   final String message;
@@ -80,25 +108,43 @@ class JamInvite {
     required this.accessToken,
     required this.expiresAt,
   });
+
+  /// Invitación de una sala en línea: solo lleva el código de 6 caracteres.
+  JamInvite.remote({required String code, required this.expiresAt})
+    : address = '',
+      port = 0,
+      sessionId = code,
+      accessToken = '';
   final String address;
   final int port;
   final String sessionId;
   final String accessToken;
   final DateTime expiresAt;
-  String get endpoint => '$address:$port';
-  String encode() => jsonEncode({
-    'v': 1,
-    'address': address,
-    'port': port,
-    'sessionId': sessionId,
-    'accessToken': accessToken,
-    'expiresAt': expiresAt.millisecondsSinceEpoch,
-  });
+  bool get isRemote => port == 0;
+  String get code => sessionId;
+  String get endpoint => isRemote ? sessionId : '$address:$port';
+  String encode() => isRemote
+      ? 'aurora://jam/$sessionId'
+      : jsonEncode({
+          'v': 1,
+          'address': address,
+          'port': port,
+          'sessionId': sessionId,
+          'accessToken': accessToken,
+          'expiresAt': expiresAt.millisecondsSinceEpoch,
+        });
   factory JamInvite.decode(
     String encoded, {
     bool allowLoopback = false,
     DateTime? now,
   }) {
+    final remote = jamRemoteCodeFrom(encoded);
+    if (remote != null) {
+      return JamInvite.remote(
+        code: remote,
+        expiresAt: (now ?? DateTime.now()).add(const Duration(hours: 12)),
+      );
+    }
     try {
       if (encoded.length > 2048) throw const FormatException();
       final data = jamMap(jsonDecode(encoded));
@@ -144,6 +190,18 @@ class JamInvite {
   }
 }
 
+/// Extrae el código de `aurora://jam/ABC123` o de un código suelto.
+String? jamRemoteCodeFrom(String input) {
+  input = input.trim();
+  if (input.length > 64) return null;
+  final uri = Uri.tryParse(input);
+  if (uri != null && uri.scheme == 'aurora') {
+    if (uri.host != 'jam' || uri.pathSegments.length != 1) return null;
+    return jamNormalizeCode(uri.pathSegments.single);
+  }
+  return jamNormalizeCode(input);
+}
+
 String? jamYouTubeId(Track track) {
   final uri = Uri.tryParse(track.pageUrl ?? '');
   if (uri != null &&
@@ -152,6 +210,7 @@ String? jamYouTubeId(Track track) {
       !uri.hasPort) {
     String? id;
     if (uri.host == 'www.youtube.com' ||
+        uri.host == 'music.youtube.com' ||
         uri.host == 'youtube.com' ||
         uri.host == 'm.youtube.com') {
       if (uri.path == '/watch') id = uri.queryParameters['v'];
@@ -317,25 +376,117 @@ class JamPermissions {
     this.skip = false,
     this.reorder = false,
     this.remove = false,
+    this.add = true,
+    this.pause = false,
   });
-  final bool skip, reorder, remove;
+  final bool skip, reorder, remove, add, pause;
+  static const all = JamPermissions(
+    skip: true,
+    reorder: true,
+    remove: true,
+    pause: true,
+  );
+  JamPermissions copyWith({
+    bool? skip,
+    bool? reorder,
+    bool? remove,
+    bool? add,
+    bool? pause,
+  }) => JamPermissions(
+    skip: skip ?? this.skip,
+    reorder: reorder ?? this.reorder,
+    remove: remove ?? this.remove,
+    add: add ?? this.add,
+    pause: pause ?? this.pause,
+  );
   Map<String, bool> toJson() => {
     'skip': skip,
     'reorder': reorder,
     'remove': remove,
+    'add': add,
+    'pause': pause,
   };
   factory JamPermissions.fromJson(Object? raw) {
     final data = jamMap(raw);
-    jamKeys(data, {'skip', 'reorder', 'remove'});
+    jamKeys(data, {'skip', 'reorder', 'remove', 'add', 'pause'});
     if (data['skip'] is! bool ||
         data['reorder'] is! bool ||
-        data['remove'] is! bool) {
+        data['remove'] is! bool ||
+        data['add'] is! bool ||
+        data['pause'] is! bool) {
       throw const JamException('Permisos inválidos.');
     }
     return JamPermissions(
       skip: data['skip'],
       reorder: data['reorder'],
       remove: data['remove'],
+      add: data['add'],
+      pause: data['pause'],
+    );
+  }
+}
+
+/// Reglas de la sala; solo el anfitrión las cambia.
+class JamRules {
+  const JamRules({
+    this.maxGuests = 15,
+    this.maxPerGuest = 10,
+    this.votes = true,
+    this.approve = false,
+    this.open = true,
+    this.suggest = true,
+  });
+  final int maxGuests, maxPerGuest;
+  final bool votes, approve, open, suggest;
+  JamRules copyWith({
+    int? maxGuests,
+    int? maxPerGuest,
+    bool? votes,
+    bool? approve,
+    bool? open,
+    bool? suggest,
+  }) => JamRules(
+    maxGuests: (maxGuests ?? this.maxGuests).clamp(1, 15),
+    maxPerGuest: (maxPerGuest ?? this.maxPerGuest).clamp(1, 50),
+    votes: votes ?? this.votes,
+    approve: approve ?? this.approve,
+    open: open ?? this.open,
+    suggest: suggest ?? this.suggest,
+  );
+  Map<String, Object> toJson() => {
+    'maxGuests': maxGuests,
+    'maxPerGuest': maxPerGuest,
+    'votes': votes,
+    'approve': approve,
+    'open': open,
+    'suggest': suggest,
+  };
+  factory JamRules.fromJson(Object? raw) {
+    final data = jamMap(raw);
+    jamKeys(data, {
+      'maxGuests',
+      'maxPerGuest',
+      'votes',
+      'approve',
+      'open',
+      'suggest',
+    });
+    if (data['votes'] is! bool ||
+        data['approve'] is! bool ||
+        data['open'] is! bool ||
+        data['suggest'] is! bool) {
+      throw const JamException('Reglas inválidas.');
+    }
+    final guests = jamInt(data['maxGuests'], max: 15);
+    final each = jamInt(data['maxPerGuest'], max: 50);
+    if (guests < 1 || each < 1) throw const JamException('Reglas inválidas.');
+    return JamRules(
+      maxGuests: guests,
+      maxPerGuest: each,
+      votes: data['votes'],
+      approve: data['approve'],
+      open: data['open'],
+      suggest: data['suggest'],
     );
   }
 }
@@ -346,20 +497,58 @@ class JamParticipant {
     required this.name,
     this.connected = true,
     this.permissions = const JamPermissions(),
+    this.role = JamRole.guest,
+    this.muted = false,
+    this.listening = true,
   });
   final String id, name;
-  final bool connected;
+  final bool connected, muted, listening;
   final JamPermissions permissions;
+  final JamRole role;
+  bool get isHost => role == JamRole.host;
+
+  /// Anfitrión y coanfitriones moderan y no tienen límites de invitado.
+  bool get isStaff => role != JamRole.guest;
+  JamParticipant copyWith({
+    String? name,
+    bool? connected,
+    JamPermissions? permissions,
+    JamRole? role,
+    bool? muted,
+    bool? listening,
+  }) => JamParticipant(
+    id: id,
+    name: name ?? this.name,
+    connected: connected ?? this.connected,
+    permissions: permissions ?? this.permissions,
+    role: role ?? this.role,
+    muted: muted ?? this.muted,
+    listening: listening ?? this.listening,
+  );
   Map<String, Object> toJson() => {
     'id': id,
     'name': name,
     'connected': connected,
     'permissions': permissions.toJson(),
+    'role': role.name,
+    'muted': muted,
+    'listening': listening,
   };
   factory JamParticipant.fromJson(Object? raw) {
     final data = jamMap(raw);
-    jamKeys(data, {'id', 'name', 'connected', 'permissions'});
-    if (data['connected'] is! bool) {
+    jamKeys(data, {
+      'id',
+      'name',
+      'connected',
+      'permissions',
+      'role',
+      'muted',
+      'listening',
+    });
+    if (data['connected'] is! bool ||
+        data['muted'] is! bool ||
+        data['listening'] is! bool ||
+        !JamRole.values.any((r) => r.name == data['role'])) {
       throw const JamException('Participante inválido.');
     }
     return JamParticipant(
@@ -367,6 +556,9 @@ class JamParticipant {
       name: jamText(data['name'], max: 32),
       connected: data['connected'],
       permissions: JamPermissions.fromJson(data['permissions']),
+      role: JamRole.values.firstWhere((r) => r.name == data['role']),
+      muted: data['muted'],
+      listening: data['listening'],
     );
   }
 }
@@ -376,21 +568,62 @@ class JamQueueEntry {
     required this.id,
     required this.track,
     required this.addedBy,
+    this.status = JamEntryStatus.queued,
+    this.up = const [],
+    this.down = const [],
   });
   final String id, addedBy;
   final JamTrack track;
+  final JamEntryStatus status;
+
+  /// Ids de quienes votaron a favor / en contra (un voto por persona).
+  final List<String> up, down;
+  int get score => up.length - down.length;
+  bool get playable => status != JamEntryStatus.pending;
+  JamQueueEntry copyWith({
+    JamEntryStatus? status,
+    List<String>? up,
+    List<String>? down,
+  }) => JamQueueEntry(
+    id: id,
+    track: track,
+    addedBy: addedBy,
+    status: status ?? this.status,
+    up: up ?? this.up,
+    down: down ?? this.down,
+  );
   Map<String, Object> toJson() => {
     'id': id,
     'track': track.toJson(),
     'addedBy': addedBy,
+    'status': status.name,
+    'up': up,
+    'down': down,
   };
   factory JamQueueEntry.fromJson(Object? raw) {
     final data = jamMap(raw);
-    jamKeys(data, {'id', 'track', 'addedBy'});
+    jamKeys(data, {'id', 'track', 'addedBy', 'status', 'up', 'down'});
+    List<String> votes(Object? value) {
+      if (value is! List || value.length > 16) {
+        throw const JamException('Votos inválidos.');
+      }
+      final ids = value.map(jamIdentifier).toList();
+      if (ids.toSet().length != ids.length) {
+        throw const JamException('Votos inválidos.');
+      }
+      return ids;
+    }
+
+    if (!JamEntryStatus.values.any((v) => v.name == data['status'])) {
+      throw const JamException('Estado de canción inválido.');
+    }
     return JamQueueEntry(
       id: jamIdentifier(data['id']),
       track: JamTrack.fromJson(data['track']),
       addedBy: jamIdentifier(data['addedBy']),
+      status: JamEntryStatus.values.firstWhere((v) => v.name == data['status']),
+      up: votes(data['up']),
+      down: votes(data['down']),
     );
   }
 }

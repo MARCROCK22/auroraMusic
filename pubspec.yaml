@@ -49,6 +49,8 @@ dependencies:
   flutter_inappwebview: 6.1.5
   url_launcher: 6.3.2
   adblocker_webview: 2.3.0
+  # JAM remota: cliente puro Dart (sin plugins nativos ni deep links propios).
+  supabase: 2.16.5
 
 dev_dependencies:
   integration_test:

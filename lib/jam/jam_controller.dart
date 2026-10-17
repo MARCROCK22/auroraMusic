@@ -4,20 +4,41 @@ import '../app_controller.dart';
 import '../core/models.dart';
 import 'jam_models.dart';
 import 'jam_service.dart';
+import 'jam_suggestions.dart';
+import 'transport/jam_config.dart';
+import 'transport/jam_transport.dart';
+import 'transport/supabase_jam_transport.dart';
+import '../sources/innertube_source.dart';
 import 'jam_playback_bridge.dart';
 
 class JamController extends ChangeNotifier {
-  JamController({required this.app, JamService? service})
-    : service = service ?? JamService() {
+  JamController({
+    required this.app,
+    JamService? service,
+    JamTransport? transport,
+  }) : service = service ?? JamService(),
+       _transport = transport {
     bridge = JamPlaybackBridge(app: app, service: this.service);
     this.service.addListener(_sessionChanged);
     bridge.addListener(_notify);
     this.service.onSkip = next;
+    this.service.onPlayPause = (play) async {
+      if (play != app.audio.isPlaying) await togglePlayback();
+    };
     _completed = app.audio.completed.listen((_) {
       if (this.service.isHost && bridge.enabled) unawaited(next());
     });
   }
   final AppController app;
+  JamTransport? _transport;
+
+  /// Transporte en línea (Supabase); no está disponible sin --dart-define.
+  JamTransport get remote =>
+      _transport ??= SupabaseJamTransport(JamSupabaseConfig.fromEnvironment);
+  bool get remoteAvailable => remote.available;
+  String? get remoteProblem => remote.unavailableReason;
+  Timer? _suggestTimer;
+  bool _suggesting = false;
   final JamService service;
   late final JamPlaybackBridge bridge;
   bool busy = false, searching = false;
@@ -57,18 +78,84 @@ class JamController extends ChangeNotifier {
   Future<void> host(String address, String name) => _run(() async {
     await bridge.disable();
     await service.host(address: address, name: name);
+    _startHostTimer();
+  });
+  void _startHostTimer() {
     _broadcastTimer?.cancel();
     _broadcastTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (bridge.enabled && !_hostLoading && service.isHost) _publish();
     });
+  }
+
+  Future<void> hostOnline(String name) => _run(() async {
+    await bridge.disable();
+    await service.hostRemote(remote, name: name);
+    _startHostTimer();
+    _startSuggestions();
   });
   Future<void> join(String code, String name) => _run(() async {
     await bridge.disable();
-    await service.join(JamInvite.decode(code), name: name);
+    if (jamRemoteCodeFrom(code) != null) {
+      await service.joinRemote(remote, code, name: name);
+      _startSuggestions();
+    } else {
+      await service.join(JamInvite.decode(code), name: name);
+    }
   });
+
+  /// Enlace `aurora://jam/CODIGO` recibido del sistema (Android/Windows).
+  Future<void> joinFromLink(String link, String name) {
+    final code = jamRemoteCodeFrom(link);
+    if (code == null) {
+      error = 'El enlace de Jam no es válido.';
+      _notify();
+      return Future.value();
+    }
+    return join(code, name);
+  }
+
+  /// Cada dispositivo calcula SUS sugerencias con SU perfil y publica solo
+  /// pistas públicas (máx. 5 cada 60 s). Nada del perfil sale del equipo.
+  void _startSuggestions() {
+    _suggestTimer?.cancel();
+    unawaited(refreshSuggestions());
+    _suggestTimer = Timer.periodic(
+      jamSuggestionsInterval + const Duration(seconds: 5),
+      (_) => unawaited(refreshSuggestions()),
+    );
+  }
+
+  Future<void> refreshSuggestions() async {
+    if (_suggesting || !service.connected || !service.isRemote) return;
+    _suggesting = true;
+    try {
+      final adapter = JamSuggestionAdapter(
+        related: (track) {
+          final source = app.source;
+          final id = track.id.startsWith('yt:') ? track.id.substring(3) : null;
+          return source is InnerTubeSource && id != null
+              ? source.related(id)
+              : Future.value(const []);
+        },
+        seeds: () => app.recentTracks,
+        local: () => app.queue,
+      );
+      final items = await adapter.build(current: app.currentTrack);
+      if (items.isNotEmpty && service.connected) {
+        service.publishSuggestions(items);
+      }
+    } on JamException {
+      // Límite de ritmo o permiso desactivado: se reintenta en el siguiente ciclo.
+    } catch (_) {
+    } finally {
+      _suggesting = false;
+    }
+  }
+
   Future<void> reconnect() => _run(service.reconnect);
   Future<void> leave() => _run(() async {
     _broadcastTimer?.cancel();
+    _suggestTimer?.cancel();
     await service.close();
     await bridge.disable();
   });
@@ -228,6 +315,11 @@ class JamController extends ChangeNotifier {
 
   void _sessionChanged() {
     if (_disposed) return;
+    if (service.isHost &&
+        service.isRemote &&
+        !(_broadcastTimer?.isActive ?? false)) {
+      _startHostTimer(); // tras recibir el mando por traspaso
+    }
     if (!service.connected && bridge.enabled) {
       unawaited(bridge.disable());
     } else if (!service.isHost && bridge.enabled) {
@@ -255,6 +347,7 @@ class JamController extends ChangeNotifier {
     _disposed = true;
     _searchGeneration++;
     _broadcastTimer?.cancel();
+    _suggestTimer?.cancel();
     unawaited(_completed?.cancel());
     service.removeListener(_sessionChanged);
     bridge.removeListener(_notify);

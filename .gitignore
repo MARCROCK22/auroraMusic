@@ -53,3 +53,8 @@ app.*.map.json
 
 # Notas internas locales
 RETOMAR_AURORA.md
+
+# Credenciales locales de la Jam en línea (nunca commitear)
+dart_defines.json
+dart_defines.local.json
+*.defines.json

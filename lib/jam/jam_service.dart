@@ -1,8 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'jam_models.dart';
+import 'jam_peer.dart';
+import 'jam_suggestions.dart';
+import 'transport/jam_hub.dart';
+import 'transport/jam_transport.dart';
+
+part 'jam_service_remote.dart';
 
 /// Host owns every mutation. Participant commands never carry playback/provider credentials.
 class JamService extends ChangeNotifier {
@@ -23,10 +30,10 @@ class JamService extends ChangeNotifier {
   JamPlayback? playback;
   Future<void> Function()? onSkip;
   HttpServer? _server;
-  WebSocket? _client;
+  JamPeer? _client;
   HttpClient? _httpClient;
   Timer? _expiryTimer, _pingTimer;
-  final Map<String, WebSocket> _sockets = {};
+  final Map<String, JamPeer> _sockets = {};
   final Map<String, String> _resumeTokens = {};
   final Map<String, List<DateTime>> _rates = {};
   final Set<String> _joiningIds = {};
@@ -36,6 +43,20 @@ class JamService extends ChangeNotifier {
   int _generation = 0;
   int _pendingUpgrades = 0;
   bool _disposed = false;
+  JamRules rules = const JamRules();
+  JamTransport? _transport;
+  JamHubHost? _hub;
+  JamRoomInfo? _room;
+  String _uid = '';
+  Timer? _beatTimer, _retryTimer, _hostLostTimer;
+  int _attempt = 0;
+  bool _stopRetry = false;
+  final Map<String, List<JamSuggestion>> _suggestions = {};
+  final Map<String, DateTime> _lastSuggest = {};
+  String? _lastCode;
+  final Set<String> _skipVotes = {};
+  Future<void> Function(bool play)? onPlayPause;
+  bool get isRemote => _transport != null;
   bool get isHost => connection == JamConnection.hosting;
   bool get connected => isHost || connection == JamConnection.connected;
   JamParticipant? get me =>
@@ -97,11 +118,8 @@ class JamService extends ChangeNotifier {
         JamParticipant(
           id: 'host',
           name: name,
-          permissions: const JamPermissions(
-            skip: true,
-            reorder: true,
-            remove: true,
-          ),
+          role: JamRole.host,
+          permissions: JamPermissions.all,
         ),
       ];
       error = null;
@@ -189,7 +207,7 @@ class JamService extends ChangeNotifier {
       }
       _joiningIds.add(id);
       reservedId = id;
-      final socket = await WebSocketTransformer.upgrade(request);
+      final socket = WebSocketPeer(await WebSocketTransformer.upgrade(request));
       if (!isHost || invite != session) {
         await socket.close();
         return;
@@ -216,7 +234,6 @@ class JamService extends ChangeNotifier {
         (message) => _receiveCommand(id, message),
         onDone: () => _disconnected(id, socket),
         onError: (_) => _disconnected(id, socket),
-        cancelOnError: true,
       );
       _changed();
     } catch (_) {
@@ -261,33 +278,9 @@ class JamService extends ChangeNotifier {
     try {
       await _client?.close();
       _httpClient?.close(force: true);
-      final http = HttpClient()..connectionTimeout = const Duration(seconds: 5);
-      // A redirect can never leak authorization to another host or port.
-      http.connectionFactory = (uri, proxyHost, proxyPort) {
-        if (uri.host != session.address ||
-            uri.port != session.port ||
-            proxyHost != null) {
-          throw const JamException('Destino de conexión de Jam inválido.');
-        }
-        return Socket.startConnect(
-          InternetAddress(session.address),
-          session.port,
-        );
-      };
-      http.findProxy = (_) => 'DIRECT';
-      _httpClient = http;
-      final socket = await WebSocket.connect(
-        'ws://${session.address}:${session.port}/jam/${session.sessionId}',
-        customClient: http,
-        headers: {
-          'Authorization': 'Bearer ${session.accessToken}',
-          'X-Aurora-Name': Uri.encodeComponent(_name),
-          if (_resumeToken != null) ...{
-            'X-Aurora-Participant': participantId,
-            'X-Aurora-Resume': _resumeToken!,
-          },
-        },
-      ).timeout(const Duration(seconds: 6));
+      final JamPeer socket = _transport != null
+          ? await _remotePeer(session)
+          : await _lanPeer(session);
       if (_disposed || generation != _generation) {
         await socket.close();
         return;
@@ -303,7 +296,8 @@ class JamService extends ChangeNotifier {
                 jamKeys(data, {'kind', 'participantId', 'resumeToken'});
                 final id = jamIdentifier(data['participantId']);
                 final resume = jamIdentifier(data['resumeToken']);
-                if (id == 'host' || resume.length != 43) {
+                if (id == 'host' ||
+                    (_transport == null && resume.length != 43)) {
                   throw const JamException('Identidad inválida.');
                 }
                 participantId = id;
@@ -329,6 +323,7 @@ class JamService extends ChangeNotifier {
                     clockOffsetMs =
                         jamInt(data['serverTimeMs'], max: 8640000000000000) -
                         (before + roundTrip ~/ 2);
+                    _notify();
                   }
                 }
               case 'playback':
@@ -342,6 +337,15 @@ class JamService extends ChangeNotifier {
                   playback = state;
                 }
                 _notify();
+              case 'kicked':
+                jamKeys(data, {'kind'});
+                _endRemote('Te expulsaron de la Jam.');
+              case 'handoff':
+                jamKeys(data, {'kind', 'to', 'from'});
+                _handoff(
+                  jamIdentifier(data['to']),
+                  jamIdentifier(data['from']),
+                );
               case 'error':
                 jamKeys(data, {'kind', 'code'});
                 if (!{
@@ -349,6 +353,8 @@ class JamService extends ChangeNotifier {
                   'rate',
                   'full',
                   'invalid',
+                  'limit',
+                  'muted',
                 }.contains(data['code'])) {
                   throw const JamException('Código de error inválido.');
                 }
@@ -357,10 +363,7 @@ class JamService extends ChangeNotifier {
               case 'closed':
                 jamKeys(data, {'kind'});
                 connection = JamConnection.closed;
-                error = 'El anfitrión cerró la Jam.';
-                invite = null;
-                _pingTimer?.cancel();
-                _notify();
+                _endRemote('El anfitrión cerró la Jam.');
               default:
                 throw const JamException('Protocolo de Jam inválido.');
             }
@@ -375,7 +378,7 @@ class JamService extends ChangeNotifier {
             _notify();
           }
         },
-        onError: (_) {
+        onError: (Object _) {
           if (generation == _generation) {
             _clientDisconnected();
             if (!ready.isCompleted) {
@@ -391,22 +394,62 @@ class JamService extends ChangeNotifier {
             }
           }
         },
-        cancelOnError: true,
       );
-      await ready.future.timeout(const Duration(seconds: 5));
+      await ready.future.timeout(
+        Duration(seconds: _transport == null ? 5 : 12),
+      );
       _pingTimer?.cancel();
-      _pingTimer = Timer.periodic(const Duration(seconds: 2), (_) => _ping());
+      _pingTimer = Timer.periodic(
+        Duration(seconds: _transport == null ? 2 : 8),
+        (_) => _ping(),
+      );
       _ping();
-    } catch (_) {
+      _attempt = 0;
+      _hostLostTimer?.cancel();
+    } catch (failure) {
       if (generation != _generation || _disposed) return;
       _httpClient?.close(force: true);
       await _client?.close();
       _client = null;
       connection = JamConnection.disconnected;
-      error = connectionHelp;
+      _lastCode = failure is JamRemoteException ? failure.code : null;
+      error = failure is JamException ? failure.message : connectionHelp;
       _notify();
-      throw const JamException(connectionHelp);
+      _scheduleRetry();
+      throw JamException(error!);
     }
+  }
+
+  Future<JamPeer> _lanPeer(JamInvite session) async {
+    final http = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+    // A redirect can never leak authorization to another host or port.
+    http.connectionFactory = (uri, proxyHost, proxyPort) {
+      if (uri.host != session.address ||
+          uri.port != session.port ||
+          proxyHost != null) {
+        throw const JamException('Destino de conexión de Jam inválido.');
+      }
+      return Socket.startConnect(
+        InternetAddress(session.address),
+        session.port,
+      );
+    };
+    http.findProxy = (_) => 'DIRECT';
+    _httpClient = http;
+    return WebSocketPeer(
+      await WebSocket.connect(
+        'ws://${session.address}:${session.port}/jam/${session.sessionId}',
+        customClient: http,
+        headers: {
+          'Authorization': 'Bearer ${session.accessToken}',
+          'X-Aurora-Name': Uri.encodeComponent(_name),
+          if (_resumeToken != null) ...{
+            'X-Aurora-Participant': participantId,
+            'X-Aurora-Resume': _resumeToken!,
+          },
+        },
+      ).timeout(const Duration(seconds: 6)),
+    );
   }
 
   void _snapshot(Map<String, dynamic> data) {
@@ -417,6 +460,7 @@ class JamService extends ChangeNotifier {
       'queue',
       'participants',
       'playback',
+      'rules',
     });
     final next = jamInt(data['revision']);
     if (next < revision) return;
@@ -445,6 +489,7 @@ class JamService extends ChangeNotifier {
         !entries.any((entry) => entry.id == state!.entryId)) {
       throw const JamException('Pista de reproducción inválida.');
     }
+    if (data['rules'] != null) rules = JamRules.fromJson(data['rules']);
     revision = next;
     queue = entries;
     participants = people;
@@ -468,7 +513,14 @@ class JamService extends ChangeNotifier {
         _sockets[id],
         jsonEncode({
           'kind': 'error',
-          'code': {'permissions', 'rate', 'full'}.contains(failure.message)
+          'code':
+              {
+                'permissions',
+                'rate',
+                'full',
+                'limit',
+                'muted',
+              }.contains(failure.message)
               ? failure.message
               : 'invalid',
         }),
@@ -491,15 +543,83 @@ class JamService extends ChangeNotifier {
     if (participant == null) throw const JamException('permissions');
     switch (data['kind']) {
       case 'add':
-        jamKeys(data, {'kind', 'track'});
+        jamKeys(data, {'kind', 'track', 'suggested'});
+        if (participant.muted) throw const JamException('muted');
+        if (!participant.permissions.add) {
+          throw const JamException('permissions');
+        }
         final track = JamTrack.fromJson(data['track']);
         if (queue.any((entry) => entry.track.keys.any(track.keys.contains))) {
           return;
         }
         if (queue.length >= 200) throw const JamException('full');
+        if (!participant.isStaff &&
+            queue.where((e) => e.addedBy == id).length >= rules.maxPerGuest) {
+          throw const JamException('limit');
+        }
         queue = [
           ...queue,
-          JamQueueEntry(id: jamRandomSecret(12), track: track, addedBy: id),
+          JamQueueEntry(
+            id: jamRandomSecret(12),
+            track: track,
+            addedBy: id,
+            status: participant.isStaff
+                ? (data['suggested'] == true
+                      ? JamEntryStatus.suggested
+                      : JamEntryStatus.queued)
+                : rules.approve
+                ? JamEntryStatus.pending
+                : JamEntryStatus.queued,
+          ),
+        ];
+        _changed();
+      case 'suggest':
+        jamKeys(data, {'kind', 'items'});
+        final raw = data['items'];
+        if (!rules.suggest || participant.muted) {
+          throw const JamException('permissions');
+        }
+        if (raw is! List || raw.length > jamSuggestionsPerPerson) {
+          throw const JamException('invalid');
+        }
+        final last = _lastSuggest[id];
+        if (last != null && clock().difference(last) < jamSuggestionsInterval) {
+          throw const JamException('rate');
+        }
+        _suggestions[id] = raw.map(JamSuggestion.fromJson).toList();
+        _lastSuggest[id] = clock();
+        _rebuildSuggested();
+        _changed();
+      case 'vote':
+        jamKeys(data, {'kind', 'entryId', 'v'});
+        if (!rules.votes || participant.muted) {
+          throw const JamException('permissions');
+        }
+        _vote(id, jamIdentifier(data['entryId']), jamInt(data['v'], max: 1));
+      case 'voteskip':
+        jamKeys(data, {'kind'});
+        if (!rules.votes || participant.muted) {
+          throw const JamException('permissions');
+        }
+        _skipVotes.add(id);
+        final voters = participants.where((p) => p.connected).length;
+        if (_skipVotes.length * 2 > voters) {
+          _skipVotes.clear();
+          unawaited(onSkip?.call());
+        }
+        _notify();
+      case 'pause':
+        jamKeys(data, {'kind', 'play'});
+        if (!participant.permissions.pause || data['play'] is! bool) {
+          throw const JamException('permissions');
+        }
+        unawaited(onPlayPause?.call(data['play'] as bool));
+      case 'listen':
+        jamKeys(data, {'kind', 'on'});
+        if (data['on'] is! bool) throw const JamException('invalid');
+        participants = [
+          for (final p in participants)
+            p.id == id ? p.copyWith(listening: data['on'] as bool) : p,
         ];
         _changed();
       case 'remove':
@@ -571,6 +691,33 @@ class JamService extends ChangeNotifier {
   void reorder(String entryId, int to) =>
       _sendCommand({'kind': 'reorder', 'entryId': entryId, 'to': to});
   void skip() => _sendCommand({'kind': 'skip'});
+
+  /// Publica las sugerencias de este dispositivo (máx. 5, cada 60 s).
+  void publishSuggestions(List<JamSuggestion> items) => _sendCommand({
+    'kind': 'suggest',
+    'items': [for (final i in items.take(jamSuggestionsPerPerson)) i.toJson()],
+  });
+  void voteSkip() => _sendCommand({'kind': 'voteskip'});
+
+  /// [v]: 1 a favor, -1 en contra, 0 quita el voto.
+  void vote(String entryId, int v) =>
+      _sendCommand({'kind': 'vote', 'entryId': entryId, 'v': v});
+  void requestPlayPause(bool play) =>
+      _sendCommand({'kind': 'pause', 'play': play});
+  void announceListening(bool on) {
+    if (connected && !isHost) _sendCommand({'kind': 'listen', 'on': on});
+  }
+
+  /// Sugerencias («A continuación»): solo las añade el anfitrión.
+  void addSuggested(JamTrack track) {
+    if (!isHost) return;
+    _command('host', {
+      'kind': 'add',
+      'track': track.toJson(),
+      'suggested': true,
+    });
+  }
+
   void _sendCommand(Map<String, dynamic> command) {
     if (!connected) {
       throw const JamException(
@@ -603,12 +750,7 @@ class JamService extends ChangeNotifier {
     participants = participants
         .map(
           (person) => person.id == id
-              ? JamParticipant(
-                  id: id,
-                  name: person.name,
-                  connected: person.connected,
-                  permissions: permissions,
-                )
+              ? person.copyWith(permissions: permissions)
               : person,
         )
         .toList();
@@ -663,6 +805,7 @@ class JamService extends ChangeNotifier {
 
   void _broadcast() {
     if (!isHost) return;
+    _prune();
     final data = jsonEncode({
       'kind': 'state',
       'revision': revision,
@@ -670,26 +813,18 @@ class JamService extends ChangeNotifier {
       'queue': queue.map((e) => e.toJson()).toList(),
       'participants': participants.map((p) => p.toJson()).toList(),
       'playback': playback?.toJson(),
+      'rules': rules.toJson(),
     });
     for (final socket in _sockets.values) {
       _sendSocket(socket, data);
     }
   }
 
-  void _disconnected(String id, WebSocket socket) {
+  void _disconnected(String id, JamPeer socket) {
     if (_sockets[id] != socket) return;
     _sockets.remove(id);
     participants = participants
-        .map(
-          (p) => p.id == id
-              ? JamParticipant(
-                  id: id,
-                  name: p.name,
-                  connected: false,
-                  permissions: p.permissions,
-                )
-              : p,
-        )
+        .map((p) => p.id == id ? p.copyWith(connected: false) : p)
         .toList();
     if (isHost) _changed();
   }
@@ -698,7 +833,8 @@ class JamService extends ChangeNotifier {
     _pingTimer?.cancel();
     if (connection != JamConnection.closed) {
       connection = JamConnection.disconnected;
-      error = connectionHelp;
+      error = isRemote ? _remoteLostMessage() : connectionHelp;
+      _scheduleRetry();
     }
     _notify();
   }
@@ -712,16 +848,15 @@ class JamService extends ChangeNotifier {
     _server = null;
     final client = _client;
     _client = null;
-    if (client != null && client.readyState == WebSocket.open) {
+    if (client != null && client.isOpen) {
       _sendSocket(client, jsonEncode({'kind': 'leave'}));
     }
     if (isHost) {
       for (final socket in _sockets.values) {
-        if (socket.readyState == WebSocket.open) {
-          _sendSocket(socket, jsonEncode({'kind': 'closed'}));
-        }
+        if (socket.isOpen) _sendSocket(socket, jsonEncode({'kind': 'closed'}));
       }
     }
+    await _closeRemote();
     final sockets = [..._sockets.values];
     _sockets.clear();
     connection = JamConnection.closed;
@@ -730,6 +865,8 @@ class JamService extends ChangeNotifier {
     _resumeToken = null;
     _resumeTokens.clear();
     _rates.clear();
+    _suggestions.clear();
+    _lastSuggest.clear();
     _joiningIds.clear();
     queue = [];
     participants = [];
@@ -795,15 +932,10 @@ String _commandError(Object? code) => switch (code) {
   'permissions' => 'El anfitrión no habilitó ese permiso.',
   'rate' => 'Demasiadas solicitudes. Espera unos segundos.',
   'full' => 'La cola compartida llegó al límite de 200 canciones.',
+  'limit' => 'Llegaste al límite de canciones que puedes agregar.',
+  'muted' => 'El anfitrión te silenció.',
   _ => 'La solicitud de Jam no es válida.',
 };
 
-bool _sendSocket(WebSocket? socket, String data) {
-  if (socket == null || socket.readyState != WebSocket.open) return false;
-  try {
-    socket.add(data);
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
+bool _sendSocket(JamPeer? socket, String data) =>
+    socket != null && socket.isOpen && socket.add(data);
