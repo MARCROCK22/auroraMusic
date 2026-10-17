@@ -10,7 +10,9 @@ import '../app_controller.dart';
 import '../core/audio_backend.dart';
 import '../core/models.dart';
 import '../core/source_backend.dart';
+import '../core/desktop_shell.dart';
 import '../core/window_controls.dart';
+import 'desktop_settings_tiles.dart';
 import '../jam/jam_controller.dart';
 import 'studio/studio_navigation.dart';
 import 'studio/studio_transport.dart';
@@ -89,6 +91,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
   late final AudioBackend _audio;
+  late final DesktopShell _desktop;
   bool _playerOpen = false;
   bool _foreground = true;
   bool _analysisEnabled = false;
@@ -102,6 +105,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     WidgetsBinding.instance.addObserver(this);
     _audio = ref.read(controllerProvider).audio;
     WindowControls.setCloseConfirmation(_confirmWindowClose);
+    _desktop = DesktopShell(ref.read(controllerProvider))..start();
     _guardWebClose();
     _audio.setVisualizationEnabled(false);
   }
@@ -150,6 +154,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _desktop.dispose();
     WindowControls.setCloseConfirmation(null);
     WindowControls.guardClose(false);
     _jam?.removeListener(_jamChanged);
@@ -1746,6 +1751,12 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
           ),
         ],
       ),
+      if (WindowControls.supported)
+        (
+          title: 'Ventana y bandeja',
+          subtitle: 'Cierre, bandeja del sistema e inicio',
+          children: [DesktopSettingsTiles(shell: _desktop)],
+        ),
       (
         title: 'Ecualizador',
         subtitle: c.webPlayback
