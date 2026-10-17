@@ -16,7 +16,10 @@ import 'studio/studio_navigation.dart';
 import 'studio/studio_transport.dart';
 import 'studio/session_aside.dart';
 import 'studio/downloads_studio_page.dart';
+import '../shortcuts/shortcut_host.dart';
+import '../shortcuts/shortcut_service.dart';
 import 'lyrics_panel.dart';
+import 'shortcuts_settings_panel.dart';
 import 'artwork.dart';
 import 'dj_discovery_page.dart';
 import 'home_music_page.dart';
@@ -207,6 +210,75 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     }
   }
 
+  double _volumeBeforeMute = 0.7;
+
+  void _runShortcut(AppController c, ShortcutId id) {
+    final seek = const Duration(seconds: 5);
+    switch (id) {
+      case ShortcutId.playPause:
+        c.togglePlayback();
+      case ShortcutId.next:
+        c.next();
+      case ShortcutId.previous:
+        c.previous();
+      case ShortcutId.shuffle:
+        c.setShuffle(!c.shuffle);
+      case ShortcutId.repeat:
+        c.cycleRepeat();
+      case ShortcutId.mute:
+        if (c.audio.volume > 0) {
+          _volumeBeforeMute = c.audio.volume;
+          c.setVolume(0);
+        } else {
+          c.setVolume(_volumeBeforeMute);
+        }
+      case ShortcutId.volumeUp:
+        c.setVolume(c.audio.volume + 0.05);
+      case ShortcutId.volumeDown:
+        c.setVolume(c.audio.volume - 0.05);
+      case ShortcutId.seekForward:
+      case ShortcutId.seekBack:
+        final target =
+            c.audio.position + (id == ShortcutId.seekForward ? seek : -seek);
+        final max = c.audio.duration;
+        c.seek(
+          target < Duration.zero
+              ? Duration.zero
+              : (max > Duration.zero && target > max ? max : target),
+        );
+      case ShortcutId.favorite:
+        final track = c.currentTrack;
+        if (track != null) c.toggleFavorite(track);
+      case ShortcutId.jam:
+        _navigate(9);
+      case ShortcutId.queue:
+        _navigate(5);
+      case ShortcutId.home:
+        _navigate(0);
+      case ShortcutId.search:
+        _navigate(1);
+      case ShortcutId.library:
+        _navigate(2);
+      case ShortcutId.downloads:
+        _navigate(3);
+      case ShortcutId.searchFocus:
+        _navigate(1);
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _searchFocus.requestFocus(),
+        );
+      case ShortcutId.vinyl:
+        _navigate(4);
+      case ShortcutId.lyrics:
+        _navigate(6);
+      case ShortcutId.equalizer:
+        _navigate(7);
+      case ShortcutId.sleep:
+        c.setSleepTimer(
+          c.sleepRemaining == null ? const Duration(minutes: 30) : null,
+        );
+    }
+  }
+
   void _closeMusic() {
     WindowControls.guardClose(false);
     ref.read(controllerProvider).closeYouTubeMusic();
@@ -262,26 +334,11 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       (_, _) => _syncVisualization(),
     );
     final web = _webAudio;
-    final shell = CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.digit1, control: true): () =>
-            _navigate(0),
-        const SingleActivator(LogicalKeyboardKey.digit2, control: true): () =>
-            _navigate(1),
-        const SingleActivator(LogicalKeyboardKey.digit3, control: true): () =>
-            _navigate(2),
-        const SingleActivator(LogicalKeyboardKey.digit4, control: true): () =>
-            _navigate(3),
-        const SingleActivator(LogicalKeyboardKey.keyV, control: true): () =>
-            _navigate(4),
-        const SingleActivator(LogicalKeyboardKey.keyL, control: true): () =>
-            _navigate(6),
-        const SingleActivator(LogicalKeyboardKey.keyK, control: true): () {
-          _navigate(1);
-          WidgetsBinding.instance.addPostFrameCallback(
-            (_) => _searchFocus.requestFocus(),
-          );
-        },
+    final shell = ShortcutHost(
+      service: ref.watch(shortcutServiceProvider),
+      onAction: (id) => _runShortcut(c, id),
+      enabled: (id) => _section != 10 || id != ShortcutId.playPause,
+      extraBindings: {
         if (_section != 10)
           const SingleActivator(LogicalKeyboardKey.mediaPlayPause):
               c.togglePlayback,
@@ -466,6 +523,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         selected: _section,
         onNavigate: _navigate,
         onPlaylist: (playlist) => _openLibrary(playlist: playlist),
+        shortcuts: ref.watch(shortcutServiceProvider),
       );
     }
     final colors = Theme.of(context).colorScheme;
@@ -683,7 +741,9 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
           Padding(
             padding: const EdgeInsets.only(left: 4),
             child: Text(
-              'Ctrl+K',
+              ref
+                  .watch(shortcutServiceProvider)
+                  .labelOf(ShortcutId.searchFocus),
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
@@ -1829,6 +1889,13 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
               );
             },
           ),
+        ],
+      ),
+      (
+        title: 'Atajos',
+        subtitle: 'Teclado y combinaciones',
+        children: [
+          ShortcutsSettingsPanel(service: ref.read(shortcutServiceProvider)),
         ],
       ),
       (

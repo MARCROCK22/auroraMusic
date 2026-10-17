@@ -1,3 +1,4 @@
+import '../../shortcuts/shortcut_service.dart';
 import 'package:flutter/material.dart';
 import '../../app_controller.dart';
 import '../../core/window_controls.dart';
@@ -167,7 +168,9 @@ class StudioSidebar extends StatelessWidget {
     required this.selected,
     required this.onNavigate,
     required this.onPlaylist,
+    this.shortcuts,
   });
+  final ShortcutService? shortcuts;
   final AppController controller;
   final int selected;
   final ValueChanged<int> onNavigate;
@@ -197,7 +200,7 @@ class StudioSidebar extends StatelessWidget {
                     'Inicio',
                     'Inicio',
                     StudioSymbols.home,
-                    'Ctrl+1',
+                    shortcuts?.labelOf(ShortcutId.home) ?? 'Ctrl+1',
                   ),
                   _nav(
                     context,
@@ -205,7 +208,7 @@ class StudioSidebar extends StatelessWidget {
                     'Búsqueda',
                     'Buscar',
                     StudioSymbols.search,
-                    'Ctrl+2',
+                    shortcuts?.labelOf(ShortcutId.search) ?? 'Ctrl+2',
                   ),
                   _nav(context, 8, 'DJ', 'DJ', StudioSymbols.explore, ''),
                   _nav(
@@ -232,7 +235,7 @@ class StudioSidebar extends StatelessWidget {
                     'Biblioteca',
                     'Biblioteca',
                     StudioSymbols.libraryMusic,
-                    'Ctrl+3',
+                    shortcuts?.labelOf(ShortcutId.library) ?? 'Ctrl+3',
                   ),
                   _nav(
                     context,
@@ -240,7 +243,7 @@ class StudioSidebar extends StatelessWidget {
                     'Descargas',
                     'Descargas locales',
                     StudioSymbols.downloadDone,
-                    'Ctrl+4',
+                    shortcuts?.labelOf(ShortcutId.downloads) ?? 'Ctrl+4',
                   ),
                   if (controller.usesOfficialYouTubeMusic ||
                       controller.usesYouTubeWebAudio)
@@ -290,7 +293,7 @@ class StudioSidebar extends StatelessWidget {
                     'Modo Vinilo',
                     'Modo Vinilo',
                     StudioSymbols.album,
-                    'Ctrl+V',
+                    shortcuts?.labelOf(ShortcutId.vinyl) ?? 'Ctrl+I',
                   ),
                   _nav(
                     context,
@@ -298,7 +301,7 @@ class StudioSidebar extends StatelessWidget {
                     'Letras Dinámicas',
                     'Letras',
                     StudioSymbols.lyrics,
-                    'Ctrl+L',
+                    shortcuts?.labelOf(ShortcutId.lyrics) ?? 'Ctrl+L',
                   ),
                   _nav(
                     context,
