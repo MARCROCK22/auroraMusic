@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:aurora_music/app_controller.dart';
 import 'package:aurora_music/core/models.dart';
+import 'package:aurora_music/ui/studio/home_introduction.dart';
 import 'package:aurora_music/main.dart';
 import 'package:aurora_music/ui/aurora_shell.dart';
 import 'package:aurora_music/ui/jam/jam_page.dart';
@@ -37,6 +38,7 @@ void main() {
   late _ProgressiveSource source;
 
   setUp(() async {
+    studioClock = () => DateTime(2026, 10, 18, 2, 30);
     audio = _TrackingAudio();
     source = _ProgressiveSource();
     controller = await createTestController(

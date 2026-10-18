@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:aurora_music/app_controller.dart';
 import 'package:aurora_music/core/models.dart';
+import 'package:aurora_music/ui/studio/home_introduction.dart';
 import 'package:aurora_music/main.dart';
 import 'package:aurora_music/ui/aurora_shell.dart';
 import 'package:aurora_music/ui/jam/jam_page.dart';
@@ -90,6 +91,7 @@ void main() {
   });
 
   setUp(() async {
+    studioClock = () => DateTime(2026, 10, 18, 2, 30);
     controller = await createTestController(
       tracks: fixture,
       playlists: const [
