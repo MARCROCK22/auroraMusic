@@ -1,6 +1,7 @@
 #include "flutter_window.h"
 
 #include <optional>
+#include <thread>
 #include <flutter/standard_method_codec.h>
 #include <flutter/method_result_functions.h>
 
@@ -85,6 +86,8 @@ bool FlutterWindow::OnCreate() {
           // Cierre real pedido por Dart (actualizador): ignora la bandeja.
           real_exit_ = true;
           PostMessage(host, WM_CLOSE, 0, 0);
+          // Solo este camino lleva vigilante: el instalador necesita el proceso muerto.
+          ArmExitWatchdog();
         } else if (name == "guardClose") {
           const auto* enabled = args ? std::get_if<bool>(args) : nullptr;
           close_guard_enabled_ = enabled && *enabled;
@@ -141,6 +144,31 @@ bool FlutterWindow::OnCreate() {
   flutter_controller_->ForceRedraw();
 
   return true;
+}
+
+// Red de seguridad del actualizador: si 3 s despues el proceso sigue vivo
+// (Dart colgado, guardia de cierre activa, WebView2 sin soltar), lo termina.
+// Hilo nativo independiente de Dart y de close_guard_enabled_.
+void FlutterWindow::ArmExitWatchdog() {
+  if (watchdog_armed_) return;
+  watchdog_armed_ = true;
+  const HWND host = GetHandle();
+  const NOTIFYICONDATAW tray = tray_;
+  const RECT rect = normal_rect_;
+  const bool maximized = IsZoomed(host) != FALSE;
+  std::thread([tray, rect, maximized]() {
+    Sleep(3000);
+    SaveGeometry(rect, maximized);
+    NOTIFYICONDATAW t = tray;
+    Shell_NotifyIconW(NIM_DELETE, &t);
+    ReleaseInstanceMutex();
+    // Ultimo recurso si ExitProcess se cuelga en un DLL.
+    std::thread([]() {
+      Sleep(2000);
+      TerminateProcess(GetCurrentProcess(), 0);
+    }).detach();
+    ExitProcess(0);
+  }).detach();
 }
 
 void FlutterWindow::OnDestroy() {

@@ -14,6 +14,9 @@ constexpr ULONG_PTR kForwardArgsMagic = 0x41555241;  // "AURA"
 // Si es la primera, deja el mutex abierto toda la vida del proceso.
 bool ForwardToExistingInstance(const std::wstring& arguments);
 
+// Libera el mutex de instancia unica (cierre forzado del actualizador).
+void ReleaseInstanceMutex();
+
 bool IsAutostartEnabled();
 bool SetAutostart(bool enabled);
 

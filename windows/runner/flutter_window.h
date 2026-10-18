@@ -36,6 +36,7 @@ class FlutterWindow : public Win32Window {
   bool close_guard_enabled_ = false;
   bool close_request_pending_ = false;
   bool close_confirmed_ = false;
+  bool watchdog_armed_ = false;
   // Cierre real (Alt+F4, menu del sistema, «Salir» de la bandeja): ignora la
   // preferencia de bandeja. Solo el boton X de Aurora puede ocultar a la bandeja.
   bool real_exit_ = false;
@@ -57,6 +58,7 @@ class FlutterWindow : public Win32Window {
   void RestoreFromTray();
   void HideToTray();
   void RequestClose();
+  void ArmExitWatchdog();
   void SendTrayAction(const char* action);
   void ShowInitial();
 };
