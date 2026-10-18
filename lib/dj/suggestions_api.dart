@@ -29,9 +29,13 @@ import 'dart:typed_data';
 
 import '../core/models.dart';
 import 'ai_dj.dart';
+import 'coherence.dart';
 import 'dj_modes.dart';
 import 'recommendations.dart';
 import 'reco_memory.dart';
+
+/// Peso de la coherencia de artista en la relevancia.
+const djCoherenceWeight = 0.8;
 
 class ParticipantTaste {
   const ParticipantTaste(this.id, this.profile, {this.weight = 1});
@@ -78,8 +82,14 @@ class Suggestion {
     this.comment, {
     this.forParticipant,
     this.bucket = RecBucket.similar,
+    this.coherence = 0.5,
+    this.coherenceReason = '',
   });
   final Track track;
+
+  /// Coherencia de artista con la semilla/gustos (0..1, 0,5 = sin datos).
+  final double coherence;
+  final String coherenceReason;
 
   /// Razón legible en español («Porque escuchas X», «Descubrimiento»…).
   final String reason;
@@ -291,6 +301,8 @@ class SuggestionsApi {
             ),
             forParticipant: picks[i].forParticipant,
             bucket: picks[i].bucket,
+            coherence: picks[i].coherence,
+            coherenceReason: picks[i].coherenceReason,
           );
           prev = picks[i].track;
           return s;
@@ -298,7 +310,16 @@ class SuggestionsApi {
     ];
   }
 
-  List<({Track track, String reason, String? forParticipant, RecBucket bucket})>
+  List<
+    ({
+      Track track,
+      String reason,
+      String? forParticipant,
+      RecBucket bucket,
+      double coherence,
+      String coherenceReason,
+    })
+  >
   _rank(
     SessionContext ctx,
     List<DjCandidate> candidates,
@@ -347,6 +368,28 @@ class SuggestionsApi {
       items.add(_Item(c, embedDjTrack(t)));
     }
 
+    // Coherencia de ARTISTA con la semilla (nunca por título): baja la
+    // puntuación; el rechazo duro solo si quedan suficientes alternativas.
+    final seedArtists = <String>{
+      ...ctx.favoriteArtists,
+      ...tasteTop(combined, 'a:', 12),
+      for (final t in [?ctx.current, ...ctx.queueTail.take(3)])
+        ...coherenceArtists(t),
+    };
+    final coh = CoherenceContext(
+      artists: seedArtists,
+      genres: {...tasteTop(combined, 'g:', 6), ...?ctx.current?.genres},
+      decade: ctx.current == null ? null : djDecade(ctx.current!),
+    );
+    final cohOf = <_Item, CoherenceResult>{
+      for (final i in items) i: scoreCoherence(i.track, coh, decade: i.decade),
+    };
+    final soft = [
+      for (final i in items)
+        if (!cohOf[i]!.hardReject) i,
+    ];
+    if (soft.length >= ctx.limit) items.retainWhere(soft.contains);
+
     // Tramos de relajación del filtro de repetición: ventana completa,
     // mitad, cuarto y sin filtro (entonces solo pesa la penalización).
     List<_Item> eligible(double tier) => [
@@ -382,6 +425,7 @@ class SuggestionsApi {
               ? djRecentPenalty
               : 0) -
           (ctx.skippedArtists.contains(i.artist) ? djSkippedArtistPenalty : 0) +
+          djCoherenceWeight * (cohOf[i]!.score - 0.5) +
           djPriorWeight * i.candidate.prior +
           (currentVector == null
               ? 0
@@ -513,6 +557,8 @@ class SuggestionsApi {
           reason: reasonOf(chosen[k]),
           forParticipant: turns[k],
           bucket: chosen[k].candidate.bucket,
+          coherence: cohOf[chosen[k]]!.score,
+          coherenceReason: cohOf[chosen[k]]!.reason,
         ),
     ];
   }

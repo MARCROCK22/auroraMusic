@@ -114,3 +114,37 @@ $env:LIVE_YT='1'; flutter test --no-pub test/live_youtube_match_test.dart   # re
 * `ProviderSpotifyCatalog` contra Spotify real (token anónimo + consultas
   privadas): solo probado con catálogo falso.
 * Calidad subjetiva de la mezcla con historial real de usuarios.
+
+## Coherencia de artista (filtro anti «solo coincide el título»)
+
+**Causa raíz del caso «Ado» → «Ado (Teledrama Theme Song)»** (verificado en el
+código; reproducido en `test/coherence_test.dart`): las fuentes de descubrimiento
+buscan por TEXTO el nombre del artista (`'$seed songs'` y `djDiscoveryQueries` en
+`app_controller.dart`; la radio de YouTube también mezcla pistas ajenas) y aceptan
+cualquier resultado. El motor solo medía similitud de vectores y los tokens del
+título entran en el vector, así que nada comparaba el ARTISTA del candidato con
+el de la semilla. Además `ProviderSpotifyCatalog.artistTopTracks` tomaba el primer
+artista de la búsqueda sin comprobar el nombre (ahora exige nombre igual).
+
+**Cómo lo resuelven las plataformas** (conocimiento general, sin llamadas):
+resuelven *entidades*, no texto: cada pista y artista tiene un ID (Spotify URI,
+MusicBrainz MBID, YouTube channel/Topic); las pistas se unifican por ISRC o
+huella de audio; la recomendación usa filtrado colaborativo (co-ocurrencia de
+artistas en listas y sesiones), género, popularidad y embeddings de audio, nunca
+«el título contiene la palabra». YouTube Music distingue canales oficiales y
+«- Topic» (generados desde el catálogo del sello).
+
+**Qué aplica en Aurora, gratis y sin claves:** comparación de artista normalizada
+(acentos, mayúsculas, `feat./&/,`, « - Topic», japonés), colaboradores y `feat.`
+del título, alias opcionales, género/década de los metadatos que ya haya
+(Spotify solo lo ya autorizado; si no hay, se cae a lo local). No aplican ISRC,
+MusicBrainz ni co-ocurrencia global (requieren red/datos externos).
+
+**Implementación** (`lib/dj/coherence.dart`): `scoreCoherence(track, ctx)` →
+`CoherenceResult(score 0..1, reason, hardReject)`; `CoherenceFilter.rank(
+candidates, ctx)` acepta candidatos de cualquier cubo (radio incluida), ordena y
+solo descarta rechazos duros (artista distinto, el nombre semilla solo en el
+título y sin género común) mientras quede alguno; nunca vacía. `SuggestionsApi`
+la aplica a todo (cola, DJ, Jam): `djCoherenceWeight` en la relevancia y
+`Suggestion.coherence`/`coherenceReason`; el rechazo duro solo actúa si quedan
+≥ `limit` candidatos limpios.

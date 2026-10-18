@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import '../core/models.dart';
 import '../dj/ai_dj.dart';
+import '../dj/coherence.dart';
 import '../dj/suggestions_api.dart';
 import 'spotify/spotify_metadata_provider.dart';
 import 'youtube_match.dart';
@@ -32,8 +33,13 @@ class ProviderSpotifyCatalog implements SpotifyCatalog {
       type: SpotifyEntityType.artist,
       limit: 3,
     );
-    if (page.items.isEmpty) return const [];
-    return (await provider.details(page.items.first)).tracks;
+    // Solo un artista cuyo nombre coincide: no el primer resultado a ciegas.
+    final want = coherenceNorm(artist);
+    final match = page.items
+        .where((e) => coherenceNorm(e.name) == want)
+        .firstOrNull;
+    if (match == null) return const [];
+    return (await provider.details(match)).tracks;
   }
 
   @override
