@@ -42,7 +42,8 @@ class StudioPanel extends StatelessWidget {
         borderRadius: StudioPalette.sleeve,
         boxShadow: const [BoxShadow(color: Colors.black, offset: Offset(3, 4))],
       ),
-      child: child,
+      // Own Material so ink (hover/selected/focus) paints above the panel fill.
+      child: Material(type: MaterialType.transparency, child: child),
     );
   }
 }

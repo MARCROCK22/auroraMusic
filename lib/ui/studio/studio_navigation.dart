@@ -1,5 +1,6 @@
 import '../../shortcuts/shortcut_service.dart';
 import 'package:flutter/material.dart';
+import '../aurora_states.dart';
 import '../../app_controller.dart';
 import '../../core/window_controls.dart';
 import '../../core/models.dart';
@@ -440,7 +441,12 @@ class StudioSidebar extends StatelessWidget {
       child: Tooltip(
         message: tooltip,
         child: Material(
-          color: chosen ? colors.surfaceContainer : colors.surfaceContainerLow,
+          color: chosen
+              ? Color.alphaBlend(
+                  AuroraStates.of(context).selected,
+                  colors.surfaceContainerLow,
+                )
+              : colors.surfaceContainerLow,
           child: InkWell(
             onTap: () => onNavigate(index),
             child: Container(
@@ -448,12 +454,7 @@ class StudioSidebar extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
               decoration: BoxDecoration(
                 border: chosen
-                    ? Border(
-                        left: BorderSide(
-                          color: colors.primaryContainer,
-                          width: 2,
-                        ),
-                      )
+                    ? Border(left: BorderSide(color: colors.primary, width: 3))
                     : null,
                 boxShadow: chosen
                     ? const [
@@ -477,7 +478,7 @@ class StudioSidebar extends StatelessWidget {
                       label,
                       style: TextStyle(
                         color: chosen
-                            ? colors.primary
+                            ? colors.onSurface
                             : colors.onSurfaceVariant,
                         fontSize: 14,
                         fontWeight: chosen ? FontWeight.w700 : FontWeight.w400,
@@ -486,11 +487,7 @@ class StudioSidebar extends StatelessWidget {
                   ),
                   if (shortcut.isNotEmpty &&
                       MediaQuery.textScalerOf(context).scale(1) <= 1.5)
-                    StudioStamp(
-                      shortcut,
-                      filled: true,
-                      color: colors.outlineVariant,
-                    ),
+                    StudioStamp(shortcut, filled: true, color: colors.outline),
                 ],
               ),
             ),
