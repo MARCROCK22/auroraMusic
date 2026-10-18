@@ -25,14 +25,19 @@ const track = Track(
 
 class FixtureLyrics extends LyricsService {
   @override
-  Future<LyricsResult> load(Track track, Directory supportDirectory) async =>
-      const LyricsResult(
-        LyricsKind.synced,
-        lines: [
-          LyricLine(Duration(seconds: 8), 'Primer verso'),
-          LyricLine(Duration(seconds: 16), 'Segundo verso'),
-        ],
-      );
+  Future<LyricsResult> load(
+    Track track,
+    Directory supportDirectory, {
+    bool force = false,
+    void Function(LyricsResult)? onInterim,
+    Duration slowAfter = const Duration(seconds: 3),
+  }) async => const LyricsResult(
+    LyricsKind.synced,
+    lines: [
+      LyricLine(Duration(seconds: 8), 'Primer verso'),
+      LyricLine(Duration(seconds: 16), 'Segundo verso'),
+    ],
+  );
 }
 
 void main() {

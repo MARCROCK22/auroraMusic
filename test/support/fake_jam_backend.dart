@@ -159,7 +159,8 @@ class FakeJamTransport implements JamTransport {
     }
     final n = backend._seq++;
     final code = 'ABCD${2 + n % 8}${2 + (n ~/ 8) % 8}';
-    final r = FakeRoom(code, uid)..members[uid] = _Member(uid, name, JamRole.host);
+    final r = FakeRoom(code, uid)
+      ..members[uid] = _Member(uid, name, JamRole.host);
     backend.rooms[code] = r;
     return _info(r);
   }

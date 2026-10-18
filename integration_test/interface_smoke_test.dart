@@ -23,15 +23,20 @@ class _FixtureSource extends FakeSource {
 
 class _FixtureLyrics extends LyricsService {
   @override
-  Future<LyricsResult> load(Track track, Directory supportDirectory) async =>
-      const LyricsResult(
-        LyricsKind.synced,
-        lines: [
-          LyricLine(Duration.zero, 'Una luz sobre el camino'),
-          LyricLine(Duration(seconds: 2), 'La música nos acompaña'),
-          LyricLine(Duration(seconds: 4), 'Y seguimos escuchando'),
-        ],
-      );
+  Future<LyricsResult> load(
+    Track track,
+    Directory supportDirectory, {
+    bool force = false,
+    void Function(LyricsResult)? onInterim,
+    Duration slowAfter = const Duration(seconds: 3),
+  }) async => const LyricsResult(
+    LyricsKind.synced,
+    lines: [
+      LyricLine(Duration.zero, 'Una luz sobre el camino'),
+      LyricLine(Duration(seconds: 2), 'La música nos acompaña'),
+      LyricLine(Duration(seconds: 4), 'Y seguimos escuchando'),
+    ],
+  );
 }
 
 void main() {

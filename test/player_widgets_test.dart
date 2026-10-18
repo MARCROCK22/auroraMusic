@@ -13,8 +13,13 @@ import 'support/fakes.dart';
 
 class _QuietLyrics extends LyricsService {
   @override
-  Future<LyricsResult> load(Track track, Directory supportDirectory) async =>
-      const LyricsResult(LyricsKind.notFound);
+  Future<LyricsResult> load(
+    Track track,
+    Directory supportDirectory, {
+    bool force = false,
+    void Function(LyricsResult)? onInterim,
+    Duration slowAfter = const Duration(seconds: 3),
+  }) async => const LyricsResult(LyricsKind.notFound);
 }
 
 class _TrackingAudio extends FakeAudio {
@@ -238,7 +243,7 @@ void main() {
       );
       await tester.pump();
       expect(find.text('Current record\nArtist'), findsOneWidget);
-      expect(find.text('No se encontraron letras.'), findsOneWidget);
+      expect(find.text('Sin letra disponible'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   });

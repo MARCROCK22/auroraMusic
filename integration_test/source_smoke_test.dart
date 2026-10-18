@@ -10,7 +10,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 const online = bool.fromEnvironment('AURORA_ONLINE_SMOKE');
 const tools = String.fromEnvironment('AURORA_TOOLS');
 // Override when a public fixture becomes unavailable or restricted upstream.
-const sample = String.fromEnvironment('AURORA_SAMPLE_URL', defaultValue: 'https://www.youtube.com/watch?v=jNQXAC9IVRw');
+const sample = String.fromEnvironment(
+  'AURORA_SAMPLE_URL',
+  defaultValue: 'https://www.youtube.com/watch?v=jNQXAC9IVRw',
+);
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
