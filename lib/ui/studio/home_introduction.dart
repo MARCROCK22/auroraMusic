@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app_controller.dart';
@@ -5,6 +7,21 @@ import '../../core/models.dart';
 import '../artwork.dart';
 import 'studio_components.dart';
 import 'studio_symbols.dart';
+
+/// Reloj de la portada; los tests lo fijan para no depender de la hora real.
+@visibleForTesting
+DateTime Function() studioClock = DateTime.now;
+
+/// Título editorial de la portada según la hora local.
+String studioGreeting(DateTime t) => switch (t.hour) {
+  < 5 => 'Madrugada acústica',
+  < 8 => 'Amanecer sonoro',
+  < 12 => 'Mañana en calma',
+  < 15 => 'Mediodía de vinilo',
+  < 19 => 'Tarde en cinta',
+  < 22 => 'Anochecer cálido',
+  _ => 'Noche de válvulas',
+};
 
 /// Native translation of the reference's editorial header and master sleeve.
 class StudioHomeIntroduction extends StatelessWidget {
@@ -27,7 +44,6 @@ class StudioHomeIntroduction extends StatelessWidget {
         c.currentTrack ??
         c.recentTracks.firstOrNull ??
         c.tracks.where((t) => !t.isPendingSpotifyMatch).firstOrNull;
-    final now = TimeOfDay.now().format(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -44,25 +60,7 @@ class StudioHomeIntroduction extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 16),
-        Wrap(
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 20,
-          runSpacing: 8,
-          children: [
-            Text(
-              'Madrugada acústica',
-              style: Theme.of(context).textTheme.displayLarge?.copyWith(
-                fontStyle: FontStyle.italic,
-                fontSize: MediaQuery.sizeOf(context).width <= 400
-                    ? 28
-                    : MediaQuery.sizeOf(context).width < 600
-                    ? 38
-                    : 56,
-              ),
-            ),
-            StudioStamp(now, filled: true, color: colors.primary),
-          ],
-        ),
+        const StudioGreetingRow(),
         const SizedBox(height: 8),
         Text(
           'La resonancia del recinto está optimizada a 432Hz. El flujo analógico simula la atenuación natural de cinta magnética Studer A800.',
@@ -341,6 +339,65 @@ class StudioHomeIntroduction extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Título y hora de la portada; se actualiza solo cuando cambia el minuto.
+class StudioGreetingRow extends StatefulWidget {
+  const StudioGreetingRow({super.key});
+
+  @override
+  State<StudioGreetingRow> createState() => _StudioGreetingRowState();
+}
+
+class _StudioGreetingRowState extends State<StudioGreetingRow> {
+  late DateTime _now = studioClock();
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 20), (_) {
+      final now = studioClock();
+      if (now.hour != _now.hour || now.minute != _now.minute) {
+        setState(() => _now = now);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final width = MediaQuery.sizeOf(context).width;
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 20,
+      runSpacing: 8,
+      children: [
+        Text(
+          studioGreeting(_now),
+          style: Theme.of(context).textTheme.displayLarge?.copyWith(
+            fontStyle: FontStyle.italic,
+            fontSize: width <= 400
+                ? 28
+                : width < 600
+                ? 38
+                : 56,
+          ),
+        ),
+        StudioStamp(
+          TimeOfDay.fromDateTime(_now).format(context),
+          filled: true,
+          color: colors.primary,
+        ),
+      ],
     );
   }
 }
