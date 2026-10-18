@@ -5,9 +5,12 @@ import 'package:flutter/services.dart';
 
 import '../app_controller.dart';
 import '../core/models.dart';
+import '../jam/jam_controller.dart';
 import '../lyrics/lyrics_service.dart';
+import '../shortcuts/shortcut_service.dart';
 import 'artwork.dart';
 import 'studio/studio_symbols.dart';
+import 'studio/studio_transport.dart';
 
 String _formatTime(Duration value) {
   final seconds = value.inSeconds;
@@ -32,8 +35,13 @@ class LyricsPanel extends StatefulWidget {
     required this.controller,
     this.service,
     this.onClose,
+    this.jam,
+    this.shortcuts,
   });
   final AppController controller;
+  // Mismos permisos y rutas que la barra inferior cuando hay una Jam.
+  final JamController? jam;
+  final ShortcutService? shortcuts;
   final LyricsService? service;
   final VoidCallback? onClose;
   @override
@@ -633,6 +641,8 @@ class _LyricsPanelState extends State<LyricsPanel> {
     ),
   );
 
+  String? _hint(ShortcutId id) => widget.shortcuts?.labelOf(id);
+
   Widget _playbackControls() {
     final controller = widget.controller;
     final audio = controller.audio;
@@ -696,13 +706,29 @@ class _LyricsPanelState extends State<LyricsPanel> {
           ),
           Row(
             children: [
-              IconButton.filled(
-                tooltip: audio.isPlaying ? 'Pausar' : 'Reproducir',
-                onPressed: enabled ? controller.togglePlayback : null,
-                icon: Icon(
-                  audio.isPlaying
-                      ? Icons.pause_rounded
-                      : Icons.play_arrow_rounded,
+              ListenableBuilder(
+                listenable: Listenable.merge([controller, ?widget.jam]),
+                builder: (context, _) => Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TransportPreviousButton(
+                      controller: controller,
+                      jam: widget.jam,
+                      size: 24,
+                      shortcut: _hint(ShortcutId.previous),
+                    ),
+                    TransportPlayButton(
+                      controller: controller,
+                      jam: widget.jam,
+                      shortcut: _hint(ShortcutId.playPause),
+                    ),
+                    TransportNextButton(
+                      controller: controller,
+                      jam: widget.jam,
+                      size: 24,
+                      shortcut: _hint(ShortcutId.next),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(width: 8),
