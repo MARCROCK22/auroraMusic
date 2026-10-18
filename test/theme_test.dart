@@ -112,10 +112,7 @@ void main() {
           schemes[0].surfaceContainerHigh,
         );
         expect(themes[0].popupMenuTheme.color, schemes[0].surfaceContainerHigh);
-        expect(
-          themes[0].listTileTheme.selectedColor,
-          schemes[0].onPrimaryContainer,
-        );
+        expect(themes[0].listTileTheme.selectedColor, schemes[0].onSurface);
       }
     },
   );

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'ui/aurora_states.dart';
 import 'core/window_controls.dart';
 import 'jam/jam_protocol.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -224,8 +225,8 @@ ThemeData auroraTheme(Brightness brightness, Color accent) {
           dark ? .09 : .05,
         ),
         onSurface: dark ? ivory : const Color(0xff201a16),
-        onSurfaceVariant: dark ? mutedIvory : const Color(0xff51463e),
-        outline: dark ? const Color(0xff827468) : const Color(0xff88796d),
+        onSurfaceVariant: dark ? mutedIvory : const Color(0xff44392f),
+        outline: dark ? const Color(0xff827468) : const Color(0xff76675b),
         outlineVariant: dark
             ? const Color(0xff51463d)
             : const Color(0xffc4b6a8),
@@ -323,8 +324,15 @@ ThemeData auroraTheme(Brightness brightness, Color accent) {
           color: scheme.onSurface,
         ),
       );
+  final states = AuroraStates.from(scheme);
   return ThemeData(
     useMaterial3: true,
+    extensions: [states],
+    hoverColor: states.hover,
+    focusColor: states.focusRing.withValues(alpha: .22),
+    highlightColor: states.pressed,
+    splashColor: states.pressed,
+    disabledColor: states.disabledText,
     colorScheme: scheme,
     fontFamily: bodyFont,
     textTheme: textTheme,
@@ -337,19 +345,34 @@ ThemeData auroraTheme(Brightness brightness, Color accent) {
         backgroundColor: scheme.primaryContainer,
         foregroundColor: scheme.onPrimaryContainer,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-      ),
+      ).copyWith(overlayColor: _overlay(states)),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
-      style: OutlinedButton.styleFrom(
-        minimumSize: const Size(0, 44),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-      ),
+      style:
+          OutlinedButton.styleFrom(
+            minimumSize: const Size(0, 44),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(6),
+            ),
+          ).copyWith(
+            overlayColor: _overlay(states),
+            side: WidgetStateProperty.resolveWith(
+              (s) => BorderSide(
+                color: s.contains(WidgetState.disabled)
+                    ? states.disabledText
+                    : s.contains(WidgetState.focused)
+                    ? states.focusRing
+                    : scheme.outline,
+                width: s.contains(WidgetState.focused) ? 2 : 1,
+              ),
+            ),
+          ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
         minimumSize: const Size(0, 44),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      ),
+      ).copyWith(overlayColor: _overlay(states)),
     ),
     appBarTheme: const AppBarTheme(
       backgroundColor: Colors.transparent,
@@ -365,11 +388,11 @@ ThemeData auroraTheme(Brightness brightness, Color accent) {
       fillColor: scheme.surfaceContainer,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide(color: scheme.outlineVariant),
+        borderSide: BorderSide(color: scheme.outline),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide(color: scheme.outlineVariant),
+        borderSide: BorderSide(color: scheme.outline),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
@@ -386,8 +409,8 @@ ThemeData auroraTheme(Brightness brightness, Color accent) {
       surfaceTintColor: Colors.transparent,
     ),
     listTileTheme: ListTileThemeData(
-      selectedColor: scheme.onPrimaryContainer,
-      selectedTileColor: scheme.primaryContainer,
+      selectedColor: states.onSelected,
+      selectedTileColor: states.selected,
       iconColor: scheme.onSurfaceVariant,
     ),
     popupMenuTheme: PopupMenuThemeData(
@@ -397,10 +420,15 @@ ThemeData auroraTheme(Brightness brightness, Color accent) {
     ),
     iconButtonTheme: IconButtonThemeData(
       style: ButtonStyle(
-        foregroundColor: WidgetStatePropertyAll(scheme.onSurfaceVariant),
-        overlayColor: WidgetStatePropertyAll(
-          scheme.primary.withValues(alpha: .12),
+        foregroundColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.disabled)
+              ? states.disabledText
+              : s.contains(WidgetState.hovered) ||
+                    s.contains(WidgetState.focused)
+              ? scheme.onSurface
+              : scheme.onSurfaceVariant,
         ),
+        overlayColor: _overlay(states),
       ),
     ),
     sliderTheme: SliderThemeData(
@@ -414,3 +442,14 @@ ThemeData auroraTheme(Brightness brightness, Color accent) {
     ),
   );
 }
+
+WidgetStateProperty<Color?> _overlay(AuroraStates st) =>
+    WidgetStateProperty.resolveWith(
+      (s) => s.contains(WidgetState.pressed)
+          ? st.pressed
+          : s.contains(WidgetState.focused)
+          ? st.focusRing.withValues(alpha: .28)
+          : s.contains(WidgetState.hovered)
+          ? st.hover
+          : null,
+    );

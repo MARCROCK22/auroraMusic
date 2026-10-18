@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'aurora_states.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -1619,11 +1620,10 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       track: t,
       extras: extras,
       builder: (context, hot) => ListTile(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: active
+            ? auroraSelectedShape(context)
+            : RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         selected: active,
-        selectedTileColor: Theme.of(
-          context,
-        ).colorScheme.primary.withValues(alpha: .06),
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         leading: Artwork(
           track: t,
@@ -2539,6 +2539,9 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                         itemBuilder: (_, i) => ListTile(
                           key: ValueKey('${player.queue[i].id}-$i'),
                           selected: i == player.queueIndex,
+                          shape: i == player.queueIndex
+                              ? auroraSelectedShape(context, radius: 8)
+                              : null,
                           leading: Artwork(
                             track: player.queue[i],
                             artworkContext: ArtworkContext.thumbnailCompact,
