@@ -32,9 +32,6 @@ class DjPanel extends StatelessWidget {
           (playlist) => playlist.trackIds.any(libraryIds.contains),
         ) ||
         c.recentTracks.isNotEmpty;
-    final contextTracks = recommendations
-        .map((recommendation) => recommendation.track)
-        .toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -93,7 +90,7 @@ class DjPanel extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
                 onTap: () =>
-                    c.playTrack(recommendation.track, context: contextTracks),
+                    c.playTrack(recommendation.track, replaceQueue: false),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -101,7 +98,7 @@ class DjPanel extends StatelessWidget {
                       tooltip: 'Reproducir ${recommendation.track.title}',
                       onPressed: () => c.playTrack(
                         recommendation.track,
-                        context: contextTracks,
+                        replaceQueue: false,
                       ),
                       icon: const Icon(Icons.play_arrow_rounded),
                     ),
@@ -223,17 +220,13 @@ class DjPanel extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
-                onTap: () =>
-                    c.playTrack(track, context: c.discoveredRecommendations),
+                onTap: () => c.playTrack(track, replaceQueue: false),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton(
                       tooltip: 'Reproducir ${track.title}',
-                      onPressed: () => c.playTrack(
-                        track,
-                        context: c.discoveredRecommendations,
-                      ),
+                      onPressed: () => c.playTrack(track, replaceQueue: false),
                       icon: const Icon(Icons.play_arrow_rounded),
                     ),
                     TrackMenuButton(

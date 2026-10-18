@@ -1296,7 +1296,12 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         if (i < count) {
           return entries
               ? _entryTile(c, c.searchEntries[i])
-              : _trackTile(c, c.searchResults[i], c.searchResults);
+              : _trackTile(
+                  c,
+                  c.searchResults[i],
+                  c.searchResults,
+                  searchResult: true,
+                );
         }
         return Padding(
           padding: const EdgeInsets.all(16),
@@ -1604,6 +1609,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     List<Track> items, {
     Key? key,
     MusicPlaylist? playlist,
+    bool searchResult = false,
   }) {
     final active = c.currentTrack?.id == t.id;
     final playlistIndex = playlist?.trackIds.indexOf(t.id) ?? -1;
@@ -1668,7 +1674,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         ),
         onTap: t.isPendingSpotifyMatch
             ? () => _matchSpotify(c, t)
-            : () => c.playTrack(t, context: items),
+            : () => c.playTrack(t, context: items, replaceQueue: !searchResult),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [

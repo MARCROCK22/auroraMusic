@@ -1583,22 +1583,54 @@ class AppController extends ChangeNotifier {
     '',
   );
 
-  Future<void> playTrack(Track track, {List<Track>? context}) async {
+  /// [replaceQueue] false (resultados de búsqueda/descubrimiento): suena solo
+  /// [track] y la cola de por delante se conserva; [context] se ignora.
+  Future<void> playTrack(
+    Track track, {
+    List<Track>? context,
+    bool replaceQueue = true,
+  }) async {
     if (_jamPlaybackActive) return;
     final selected =
         tracks.where((item) => item.id == track.id).firstOrNull ?? track;
     if (_routeToYouTubeMusic(selected)) return;
     if (_personalDjActive) stopPersonalDj();
-    await _playTrack(track, context: context);
+    await _playTrack(track, context: context, replaceQueue: replaceQueue);
   }
 
-  Future<void> _playTrack(Track track, {List<Track>? context}) async {
+  Future<void> _playTrack(
+    Track track, {
+    List<Track>? context,
+    bool replaceQueue = true,
+  }) async {
     _playIntent = true;
     _expiryRetries = 0;
     final remembered = {for (final item in tracks) item.id: item};
     final selected = remembered[track.id] ?? track;
     if (_routeToYouTubeMusic(selected)) return;
     final seen = <String>{};
+    if (!replaceQueue) {
+      // Lo sonado y lo que viene se quedan; solo se quita la pista tocada de
+      // delante. El relleno de _playCurrent completa si faltan.
+      final head = queueIndex >= 0 && queueIndex < queue.length
+          ? queueIndex + 1
+          : 0;
+      final ahead = [
+        for (final t in queue.skip(head))
+          if (t.id != selected.id && !recommendationTracksMatch(t, selected)) t,
+      ];
+      queue = [...queue.take(head), selected, ...ahead];
+      queueIndex = head;
+      autoAddedIds.remove(selected.id);
+      manualQueuedIds.remove(selected.id);
+      _shuffleHistory.clear();
+      _shufflePlayed
+        ..clear()
+        ..add(queueIndex);
+      _resumePosition = Duration.zero;
+      await _playCurrent();
+      return;
+    }
     queue = [];
     autoAddedIds.clear();
     manualQueuedIds.clear();

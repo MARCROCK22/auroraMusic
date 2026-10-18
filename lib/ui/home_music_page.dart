@@ -124,6 +124,7 @@ class HomeMusicPage extends StatelessWidget {
                       context,
                       recommendations[index].track,
                       recommendedTracks,
+                      replaceQueue: false,
                     ),
                   ),
                 )
@@ -153,6 +154,7 @@ class HomeMusicPage extends StatelessWidget {
                       context,
                       c.discoveredRecommendations[index],
                       c.discoveredRecommendations,
+                      replaceQueue: false,
                     ),
                   ),
                 ),
@@ -238,8 +240,12 @@ class HomeMusicPage extends StatelessWidget {
     },
   );
 
-  Future<void> _play(BuildContext context, Track track, List<Track> tracks) =>
-      track.isPendingSpotifyMatch
+  Future<void> _play(
+    BuildContext context,
+    Track track,
+    List<Track> tracks, {
+    bool replaceQueue = true,
+  }) => track.isPendingSpotifyMatch
       ? SpotifyMatchDialog.show(
           context,
           track: track,
@@ -247,7 +253,11 @@ class HomeMusicPage extends StatelessWidget {
           onSave: (match, {required play}) =>
               controller.matchSpotifyTrack(track.id, match, play: play),
         )
-      : controller.playTrack(track, context: tracks);
+      : controller.playTrack(
+          track,
+          context: tracks,
+          replaceQueue: replaceQueue,
+        );
 }
 
 class _GroupCard extends StatelessWidget {
