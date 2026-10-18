@@ -4,12 +4,13 @@ import '../core/models.dart';
 import '../metadata/spotify/spotify_browser_controller.dart';
 import '../metadata/spotify/spotify_metadata_provider.dart';
 import 'artwork.dart';
+import 'spotify_auto_add.dart';
 
-/// Metadata navigation only; audio matching belongs to the application.
+/// Navegación de metadatos; el emparejado con YouTube es automático (adder).
 class SpotifyBrowserPanel extends StatefulWidget {
-  const SpotifyBrowserPanel({super.key, this.browser, required this.onQueue});
+  const SpotifyBrowserPanel({super.key, this.browser, required this.adder});
   final SpotifyBrowserController? browser;
-  final Future<void> Function(Track) onQueue;
+  final SpotifyAutoAdder adder;
 
   @override
   State<SpotifyBrowserPanel> createState() => _SpotifyBrowserPanelState();
@@ -32,9 +33,26 @@ class _SpotifyBrowserPanelState extends State<SpotifyBrowserPanel> {
     super.dispose();
   }
 
+  SpotifyAutoAdder get _adder => widget.adder;
+
+  /// Carga las páginas que falten (hasta el tope del lote) y añade todo.
+  Future<void> _addAll({required bool toJam}) async {
+    final first = _browser.detail;
+    if (first == null) return;
+    SpotifyMetadataDetails detail = first;
+    while (detail.nextOffset != null &&
+        detail.tracks.length < SpotifyAutoAdder.maxBatch) {
+      await _browser.loadMoreDetails();
+      final next = _browser.detail;
+      if (next == null || next.tracks.length == detail.tracks.length) break;
+      detail = next;
+    }
+    await _adder.addAll(detail.title, detail.tracks, toJam: toJam);
+  }
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: _browser,
+    listenable: Listenable.merge([_browser, _adder]),
     builder: (context, _) => ListView(
       children: [
         Padding(
@@ -81,9 +99,10 @@ class _SpotifyBrowserPanelState extends State<SpotifyBrowserPanel> {
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 24, vertical: 8),
           child: Text(
-            'Spotify aporta información. Para añadir a la cola, elige una coincidencia de YouTube.',
+            'Spotify aporta la información; Aurora encuentra automáticamente la versión en YouTube.',
           ),
         ),
+        if (_adder.batch != null) _batchCard(context, _adder.batch!),
         if (_browser.loading || _browser.detailLoading)
           const LinearProgressIndicator(minHeight: 2),
         if (_browser.error != null)
@@ -161,19 +180,19 @@ class _SpotifyBrowserPanelState extends State<SpotifyBrowserPanel> {
               overflow: TextOverflow.ellipsis,
             ),
             onTap: item.track != null
-                ? () => widget.onQueue(item.track!)
+                ? () => _adder.add(item.track!)
                 : () => _openDetails(item),
-            trailing: IconButton(
-              tooltip: item.track != null
-                  ? 'Elegir audio para ${item.name}'
-                  : 'Ver ${item.name}',
-              onPressed: item.track != null
-                  ? () => widget.onQueue(item.track!)
-                  : () => _openDetails(item),
-              icon: Icon(
-                item.track != null ? Icons.add_to_queue : Icons.chevron_right,
-              ),
-            ),
+            trailing: item.track != null
+                ? _trackActions(item.track!)
+                : IconButton(
+                    tooltip: 'Ver ${item.name}',
+                    constraints: const BoxConstraints(
+                      minWidth: 48,
+                      minHeight: 48,
+                    ),
+                    onPressed: () => _openDetails(item),
+                    icon: const Icon(Icons.chevron_right),
+                  ),
           ),
         if (_browser.page?.hasMore == true)
           Padding(
@@ -219,6 +238,31 @@ class _SpotifyBrowserPanelState extends State<SpotifyBrowserPanel> {
               ),
               if (details.description.isNotEmpty) Text(details.description),
               Text('${details.total} canciones'),
+              if (details.tracks.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      FilledButton.tonalIcon(
+                        onPressed: _adder.batch != null
+                            ? null
+                            : () => _addAll(toJam: false),
+                        icon: const Icon(Icons.playlist_add),
+                        label: const Text('Añadir todo a la cola'),
+                      ),
+                      if (_adder.jamAvailable)
+                        OutlinedButton.icon(
+                          onPressed: _adder.batch != null
+                              ? null
+                              : () => _addAll(toJam: true),
+                          icon: const Icon(Icons.group_add_outlined),
+                          label: const Text('Añadir todo a la Jam'),
+                        ),
+                    ],
+                  ),
+                ),
             ],
           ),
         ),
@@ -245,12 +289,8 @@ class _SpotifyBrowserPanelState extends State<SpotifyBrowserPanel> {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
-            onTap: () => widget.onQueue(track),
-            trailing: IconButton(
-              tooltip: 'Elegir audio para ${track.title}',
-              onPressed: () => widget.onQueue(track),
-              icon: const Icon(Icons.add_to_queue),
-            ),
+            onTap: () => _adder.add(track),
+            trailing: _trackActions(track),
           ),
         if (details.hasMore)
           Padding(
@@ -262,6 +302,92 @@ class _SpotifyBrowserPanelState extends State<SpotifyBrowserPanel> {
               child: const Text('Ver más canciones'),
             ),
           ),
+      ],
+    );
+  }
+
+  Widget _batchCard(BuildContext context, SpotifyBatchProgress b) => Semantics(
+    liveRegion: true,
+    label: 'Emparejando ${b.done} de ${b.total}',
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Buscando en YouTube · ${b.done}/${b.total}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 6),
+                LinearProgressIndicator(
+                  value: b.total == 0 ? null : b.done / b.total,
+                  minHeight: 3,
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: _adder.cancelBatch,
+            child: const Text('Cancelar'),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  /// «+» (cola) y ⋯ (reproducir, Jam). Mientras empareja muestra progreso.
+  Widget _trackActions(Track track) {
+    const box = BoxConstraints(minWidth: 48, minHeight: 48);
+    final busy = _adder.isBusy(track.id);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (busy)
+          const SizedBox(
+            width: 48,
+            height: 48,
+            child: Center(
+              child: SizedBox.square(
+                dimension: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          )
+        else
+          IconButton(
+            tooltip: 'Añadir a la cola: ${track.title}',
+            constraints: box,
+            onPressed: () => _adder.add(track),
+            icon: const Icon(Icons.add_to_queue),
+          ),
+        PopupMenuButton<VoidCallback>(
+          tooltip: 'Más opciones de ${track.title}',
+          enabled: !busy,
+          onSelected: (run) => run(),
+          itemBuilder: (_) => [
+            PopupMenuItem(
+              value: () => _adder.add(track),
+              child: const Text('Añadir a la cola'),
+            ),
+            PopupMenuItem(
+              value: () => _adder.add(track, play: true),
+              child: const Text('Reproducir ahora'),
+            ),
+            if (_adder.jamAvailable)
+              PopupMenuItem(
+                value: () => _adder.add(track, toJam: true),
+                child: const Text('Añadir a la Jam'),
+              ),
+            PopupMenuItem(
+              value: () => _adder.manual(track),
+              child: const Text('Elegir versión a mano…'),
+            ),
+          ],
+        ),
       ],
     );
   }

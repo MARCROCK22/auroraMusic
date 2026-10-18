@@ -1,6 +1,7 @@
 import 'package:aurora_music/core/models.dart';
 import 'package:aurora_music/metadata/spotify/spotify_browser_controller.dart';
 import 'package:aurora_music/metadata/spotify/spotify_metadata_provider.dart';
+import 'package:aurora_music/ui/spotify_auto_add.dart';
 import 'package:aurora_music/ui/spotify_browser_panel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,6 +9,14 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'dart:io';
 import 'dart:ui' as ui;
+
+SpotifyAutoAdder _manualAdder(void Function(Track) onTrack) => SpotifyAutoAdder(
+  save: (_, _, {play = false}) async => true,
+  queueLength: () => 0,
+  unqueue: (_) {},
+  manual: (track, {replacing}) async => onTrack(track),
+  messenger: () => null,
+);
 
 void main() {
   const track = Track(
@@ -62,7 +71,7 @@ void main() {
               key: const ValueKey('spotify-review'),
               child: SpotifyBrowserPanel(
                 browser: browser,
-                onQueue: (_) async {},
+                adder: _manualAdder((_) {}),
               ),
             ),
           ),
@@ -124,7 +133,7 @@ void main() {
             child: Scaffold(
               body: SpotifyBrowserPanel(
                 browser: browser,
-                onQueue: (value) async => selected = value,
+                adder: _manualAdder((value) => selected = value),
               ),
             ),
           ),
@@ -158,10 +167,10 @@ void main() {
       browser.publish();
       await tester.pump();
       await tester.ensureVisible(
-        find.byTooltip('Elegir audio para Canción de prueba'),
+        find.byTooltip('Añadir a la cola: Canción de prueba'),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Elegir audio para Canción de prueba'));
+      await tester.tap(find.byTooltip('Añadir a la cola: Canción de prueba'));
       expect(selected, track);
       await tester.ensureVisible(find.text('Ver más resultados'));
       await tester.pumpAndSettle();
@@ -193,16 +202,16 @@ void main() {
           home: Scaffold(
             body: SpotifyBrowserPanel(
               browser: browser,
-              onQueue: (value) async => selected = value,
+              adder: _manualAdder((value) => selected = value),
             ),
           ),
         ),
       );
       await tester.ensureVisible(
-        find.byTooltip('Elegir audio para Canción de prueba'),
+        find.byTooltip('Añadir a la cola: Canción de prueba'),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Elegir audio para Canción de prueba'));
+      await tester.tap(find.byTooltip('Añadir a la cola: Canción de prueba'));
       expect(selected?.pageUrl, isNull);
       expect(selected?.isPendingSpotifyMatch, isTrue);
       await tester.ensureVisible(find.text('Ver más canciones'));

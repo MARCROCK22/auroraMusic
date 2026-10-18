@@ -131,6 +131,7 @@ class YoutubeMatcher {
   YoutubeMatcher({
     required this.search,
     this.threshold = 0.62,
+    this.doubtFloor = 0.35,
     this.persist = true,
     this.cacheKey = 'ytMatchCache',
     this.maxCache = 500,
@@ -139,6 +140,9 @@ class YoutubeMatcher {
 
   final Future<List<Track>> Function(String query, SearchKind kind) search;
   final double threshold;
+
+  /// Mínimo para ofrecer una coincidencia «dudosa» (modo [match] `lenient`).
+  final double doubtFloor;
   final bool persist;
   final String cacheKey;
   final int maxCache;
@@ -162,17 +166,19 @@ class YoutubeMatcher {
   }
 
   /// Mejor candidato aceptado, o null si ninguno llega a [threshold].
-  Future<YoutubeMatch?> match(Track spotify) async {
+  /// Con [lenient] devuelve también el mejor entre [doubtFloor] y [threshold]
+  /// (confianza baja: quien llame debe avisar al usuario).
+  Future<YoutubeMatch?> match(Track spotify, {bool lenient = false}) async {
     await (_loading ??= _load());
     final key = keyOf(spotify), now = _clock();
     final hit = _cache[key];
     if (hit != null) {
       final track = hit['track'];
       if (track is Map<String, dynamic>) {
-        return YoutubeMatch(
-          Track.fromJson(track),
-          (hit['confidence'] as num).toDouble(),
-        );
+        final confidence = (hit['confidence'] as num).toDouble();
+        return confidence >= threshold || lenient
+            ? YoutubeMatch(Track.fromJson(track), confidence)
+            : null;
       }
       final at = DateTime.fromMillisecondsSinceEpoch(hit['at'] as int? ?? 0);
       if (now.difference(at) < _missTtl) return null; // fallo reciente
@@ -193,7 +199,37 @@ class YoutubeMatcher {
       final prefs = await recsPrefs();
       await prefs?.setString(cacheKey, jsonEncode(_cache));
     }
-    return best;
+    return best != null && (lenient || best.confidence >= threshold)
+        ? best
+        : null;
+  }
+
+  /// Empareja varias pistas con [concurrency] búsquedas a la vez. El resultado
+  /// conserva el orden de [tracks]; `null` = sin coincidencia o cancelada.
+  /// Reutiliza la caché de [match]; [cancelled] se consulta antes de cada pista.
+  Future<List<YoutubeMatch?>> matchMany(
+    List<Track> tracks, {
+    int concurrency = 3,
+    bool lenient = false,
+    bool Function()? cancelled,
+    void Function(int done, int total)? onProgress,
+  }) async {
+    final out = List<YoutubeMatch?>.filled(tracks.length, null);
+    var next = 0, done = 0;
+    Future<void> worker() async {
+      while (next < tracks.length && !(cancelled?.call() ?? false)) {
+        final i = next++;
+        try {
+          out[i] = await match(tracks[i], lenient: lenient);
+        } catch (_) {}
+        onProgress?.call(++done, tracks.length);
+      }
+    }
+
+    await Future.wait([
+      for (var w = 0; w < concurrency.clamp(1, 8); w++) worker(),
+    ]);
+    return out;
   }
 
   Future<YoutubeMatch?> _best(Track spotify) async {
@@ -215,6 +251,6 @@ class YoutubeMatcher {
       }
       if (best != null && best.confidence >= threshold) return best;
     }
-    return null;
+    return best != null && best.confidence >= doubtFloor ? best : null;
   }
 }

@@ -140,5 +140,71 @@ void main() {
       );
       expect(await m.match(blinding), isNull);
     });
+
+    test(
+      'lenient devuelve la mejor dudosa; estricto null; sin re-buscar',
+      () async {
+        var calls = 0;
+        final m = YoutubeMatcher(
+          persist: false,
+          search: (q, kind) async {
+            calls++;
+            return [
+              yt('jjjjjjjjjj1', 'Blinding Lights (Live)', 'The Weeknd', 262),
+            ];
+          },
+        );
+        final low = await m.match(blinding, lenient: true);
+        expect(low!.track.id, 'yt:jjjjjjjjjj1');
+        expect(low.confidence, lessThan(m.threshold));
+        expect(low.confidence, greaterThanOrEqualTo(m.doubtFloor));
+        final before = calls;
+        expect(await m.match(blinding), isNull);
+        expect(calls, before);
+      },
+    );
+
+    test(
+      'matchMany: concurrencia acotada, progreso, caché y cancelación',
+      () async {
+        var running = 0, peak = 0, calls = 0;
+        final m = YoutubeMatcher(
+          persist: false,
+          search: (q, kind) async {
+            calls++;
+            running++;
+            if (running > peak) peak = running;
+            await Future<void>.delayed(const Duration(milliseconds: 5));
+            running--;
+            final n = q.split(' ').first;
+            return [yt('k${n.padLeft(10, '0')}', n, 'Artista', 200)];
+          },
+        );
+        final tracks = [for (var i = 0; i < 8; i++) sp('$i', 'Artista', 200)];
+        final progress = <int>[];
+        final out = await m.matchMany(
+          tracks,
+          concurrency: 3,
+          onProgress: (done, total) => progress.add(done),
+        );
+        expect(out.every((e) => e != null), isTrue);
+        expect(peak, lessThanOrEqualTo(3));
+        expect(progress.last, 8);
+        final before = calls;
+        await m.matchMany(tracks);
+        expect(calls, before, reason: 'todo viene de caché');
+
+        var stop = false;
+        final fresh = [for (var i = 20; i < 30; i++) sp('$i', 'Artista', 200)];
+        final cancelled = await m.matchMany(
+          fresh,
+          concurrency: 1,
+          cancelled: () => stop,
+          onProgress: (done, _) => stop = done >= 2,
+        );
+        expect(cancelled.whereType<YoutubeMatch>().length, lessThan(10));
+        expect(cancelled.length, 10);
+      },
+    );
   });
 }

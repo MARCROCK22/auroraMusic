@@ -31,7 +31,10 @@ import 'jam/jam_flows.dart';
 import 'jam/jam_page.dart';
 import 'jam/jam_widgets.dart';
 import 'playlist_shelf.dart';
+import 'spotify_auto_add.dart';
 import 'spotify_browser_panel.dart';
+import '../metadata/youtube_match.dart';
+import '../sources/innertube_source.dart';
 export 'artwork.dart';
 import 'spotify_import_dialog.dart';
 import 'spotify_match_dialog.dart';
@@ -107,6 +110,58 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   Future<void> _startJam({List<Track> seed = const []}) =>
       startJamFlow(context, _ensureJam(), seed: seed);
   bool _spotifySearch = false;
+  SpotifyAutoAdder? _spotifyAdderCache;
+
+  /// Spotify → YouTube automático; sin InnerTube cae al diálogo manual.
+  SpotifyAutoAdder get _spotifyAdder => _spotifyAdderCache ??= () {
+    AppController app() => ref.read(controllerProvider);
+    final source = app().source;
+    return SpotifyAutoAdder(
+      matcher: source is InnerTubeSource && !app().usesOfficialYouTubeMusic
+          ? YoutubeMatcher(
+              search: (q, k) => source.searchPage(q, k).then((p) => p.tracks),
+            )
+          : null,
+      save: (spotify, match, {play = false}) =>
+          app().importSpotifyMetadataMatch(spotify, match, play: play),
+      queueLength: () => app().queue.length,
+      unqueue: (id) {
+        final i = app().queue.lastIndexWhere((q) => q.id == id);
+        if (i >= 0) app().removeFromQueue(i);
+      },
+      manual: (track, {replacing}) => _spotifyManual(track, replacing),
+      messenger: () => mounted ? ScaffoldMessenger.maybeOf(context) : null,
+      jam: () => _jam,
+    );
+  }();
+
+  Future<void> _spotifyManual(Track track, Track? replacing) {
+    final c = ref.read(controllerProvider);
+    if (c.usesOfficialYouTubeMusic) {
+      return Future<void>.sync(
+        () => c.openYouTubeMusic(
+          Uri.https('music.youtube.com', '/search', {
+            'q': '${track.title} ${track.artist}',
+          }),
+        ),
+      );
+    }
+    return SpotifyMatchDialog.show(
+      context,
+      track: track,
+      saveLabel: 'Añadir a la cola',
+      playLabel: 'Reproducir',
+      onSearch: () => c.findSpotifyMatches(track),
+      onSave: (match, {required play}) async {
+        final ok = await c.importSpotifyMetadataMatch(track, match, play: play);
+        if (ok && replacing != null && replacing.id != match.id) {
+          _spotifyAdder.unqueue(replacing.id);
+        }
+        return ok;
+      },
+    );
+  }
+
   MusicPlaylist? _playlist;
   bool _likesSelected = false;
   final _search = TextEditingController();
@@ -214,6 +269,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     WindowControls.guardClose(false);
     _jam?.removeListener(_jamChanged);
     _jam?.dispose();
+    _spotifyAdderCache?.dispose();
     if (_analysisEnabled) _audio.setVisualizationEnabled(false);
     _updates.dispose();
     _search.dispose();
@@ -1024,29 +1080,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       ),
       Expanded(
         child: _spotifySearch
-            ? SpotifyBrowserPanel(
-                onQueue: (track) => c.usesOfficialYouTubeMusic
-                    ? Future<void>.sync(
-                        () => c.openYouTubeMusic(
-                          Uri.https('music.youtube.com', '/search', {
-                            'q': '${track.title} ${track.artist}',
-                          }),
-                        ),
-                      )
-                    : SpotifyMatchDialog.show(
-                        context,
-                        track: track,
-                        saveLabel: 'Añadir a la cola',
-                        playLabel: 'Reproducir',
-                        onSearch: () => c.findSpotifyMatches(track),
-                        onSave: (match, {required play}) =>
-                            c.importSpotifyMetadataMatch(
-                              track,
-                              match,
-                              play: play,
-                            ),
-                      ),
-              )
+            ? SpotifyBrowserPanel(adder: _spotifyAdder)
             : _audioSearchPage(c),
       ),
     ],
