@@ -5,6 +5,7 @@ import '../jam/jam_controller.dart';
 import '../jam/jam_models.dart';
 import '../metadata/youtube_match.dart';
 import 'jam/jam_widgets.dart';
+import 'undo_snackbar.dart';
 
 typedef SpotifyManualMatch =
     Future<void> Function(Track spotify, {Track? replacing});
@@ -87,24 +88,20 @@ class SpotifyAutoAdder extends ChangeNotifier {
     int secs = 4,
     String? who,
   }) {
-    final m = messenger();
-    m?.hideCurrentSnackBar();
-    m?.showSnackBar(
-      SnackBar(
-        content: who == null
-            ? Text(text)
-            : Row(
-                children: [
-                  JamAvatar(name: who, size: 24),
-                  const SizedBox(width: 10),
-                  Expanded(child: Text(text)),
-                ],
-              ),
-        duration: Duration(seconds: secs),
-        action: label == null
-            ? null
-            : SnackBarAction(label: label, onPressed: onTap ?? () {}),
-      ),
+    showUndoSnackBar(
+      messenger(),
+      who == null
+          ? Text(text)
+          : Row(
+              children: [
+                JamAvatar(name: who, size: 24),
+                const SizedBox(width: 10),
+                Expanded(child: Text(text)),
+              ],
+            ),
+      label: label,
+      onAction: onTap,
+      duration: Duration(seconds: secs),
     );
   }
 

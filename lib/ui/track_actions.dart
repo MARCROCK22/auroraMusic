@@ -7,6 +7,7 @@ import '../core/models.dart';
 import '../jam/jam_controller.dart';
 import '../shortcuts/shortcut_service.dart';
 import 'jam/jam_flows.dart';
+import 'undo_snackbar.dart';
 
 /// Lo que el shell ofrece a cualquier fila de canciones: la Jam (si existe)
 /// y el selector de listas. Sin scope las filas solo ofrecen acciones de cola.
@@ -57,15 +58,12 @@ class TrackActions {
   }
 
   void _say(String text, {String? undoLabel, VoidCallback? undo}) {
-    _messenger?.hideCurrentSnackBar();
-    _messenger?.showSnackBar(
-      SnackBar(
-        content: Text(text),
-        duration: const Duration(seconds: 3),
-        action: undo == null
-            ? null
-            : SnackBarAction(label: undoLabel ?? 'Deshacer', onPressed: undo),
-      ),
+    showUndoSnackBar(
+      _messenger,
+      Text(text),
+      label: undo == null ? null : (undoLabel ?? 'Deshacer'),
+      onAction: undo,
+      duration: const Duration(seconds: 5),
     );
   }
 
