@@ -43,10 +43,24 @@ std::wstring WideFromUtf8(const std::string& utf8) {
   return out;
 }
 
+namespace {
+HANDLE g_instance_mutex = nullptr;
+}
+
+void ReleaseInstanceMutex() {
+  if (g_instance_mutex) {
+    CloseHandle(g_instance_mutex);
+    g_instance_mutex = nullptr;
+  }
+}
+
 bool ForwardToExistingInstance(const std::wstring& arguments) {
   // El handle se mantiene abierto hasta que el proceso termina.
   HANDLE mutex = CreateMutexW(nullptr, TRUE, kMutexName);
-  if (mutex && GetLastError() != ERROR_ALREADY_EXISTS) return false;
+  if (mutex && GetLastError() != ERROR_ALREADY_EXISTS) {
+    g_instance_mutex = mutex;
+    return false;
+  }
 
   // La primera instancia puede estar aun creando su ventana: reintenta.
   HWND target = nullptr;

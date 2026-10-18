@@ -10,7 +10,27 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'hard_exit.dart';
 import 'update_service.dart';
 
-enum UpdatePhase { idle, checking, available, downloading, error }
+enum UpdatePhase { idle, checking, available, downloading, installing, error }
+
+/// Resultado de la última actualización, evaluado al arrancar.
+class UpdateOutcome {
+  const UpdateOutcome.updated(this.version)
+    : failed = false,
+      logPath = null,
+      installerPath = null;
+  const UpdateOutcome.failed(this.version, this.logPath, this.installerPath)
+    : failed = true;
+  final bool failed;
+  final String version;
+  final String? logPath;
+  final String? installerPath;
+}
+
+/// Lanza un proceso sin esperarlo (inyectable para pruebas).
+typedef ProcessLauncher = Future<void> Function(String exe, List<String> args);
+
+Future<void> _launchDetached(String exe, List<String> args) =>
+    Process.start(exe, args, mode: ProcessStartMode.detached);
 
 class PrefsUpdateStore implements UpdateStore {
   PrefsUpdateStore(this.prefs);
@@ -25,19 +45,36 @@ class PrefsUpdateStore implements UpdateStore {
 /// verificada e instalación. Solo Windows y Android; en otras plataformas no
 /// hace nada.
 class UpdateController extends ChangeNotifier {
-  UpdateController(this.prefs, {UpdateService? service})
-    : _service =
-          service ??
-          UpdateService(
-            transport: HttpUpdateTransport(),
-            store: PrefsUpdateStore(prefs),
-          );
+  UpdateController(
+    this.prefs, {
+    UpdateService? service,
+    ProcessLauncher? launcher,
+    Future<void> Function()? hardExit,
+    void Function(int)? exitProcess,
+    Future<Directory> Function()? dirProvider,
+    bool? windows,
+  }) : _launch = launcher ?? _launchDetached,
+       _hardExit = hardExit ?? requestHardExit,
+       _exit = exitProcess ?? exit,
+       _dirProvider = dirProvider,
+       _windows = windows ?? Platform.isWindows,
+       _service =
+           service ??
+           UpdateService(
+             transport: HttpUpdateTransport(),
+             store: PrefsUpdateStore(prefs),
+           );
 
   static const _channel = MethodChannel('aurora/updater');
   static const _interval = Duration(hours: 6);
 
   final SharedPreferences prefs;
   final UpdateService _service;
+  final ProcessLauncher _launch;
+  final Future<void> Function() _hardExit;
+  final void Function(int) _exit;
+  final Future<Directory> Function()? _dirProvider;
+  final bool _windows;
   Timer? _timer;
   SemVer? _current;
   List<String> _abis = const [];
@@ -48,8 +85,9 @@ class UpdateController extends ChangeNotifier {
   String? error;
   String? info; // «Estás al día», etc.
   bool dismissed = false; // «Más tarde»: oculto hasta reiniciar
+  UpdateOutcome? outcome; // éxito/fracaso de la actualización anterior
 
-  bool get supported => Platform.isWindows || Platform.isAndroid;
+  bool get supported => _windows || Platform.isAndroid;
   String get currentVersion => _current?.toString() ?? '';
   bool get autoCheck => prefs.getBool('updateAuto') ?? true;
   bool get beta => prefs.getBool('updateBeta') ?? false;
@@ -58,6 +96,7 @@ class UpdateController extends ChangeNotifier {
       !dismissed &&
       (phase == UpdatePhase.available ||
           phase == UpdatePhase.downloading ||
+          phase == UpdatePhase.installing ||
           (phase == UpdatePhase.error));
 
   Future<void> start() async {
@@ -71,13 +110,63 @@ class UpdateController extends ChangeNotifier {
         );
       }
       final dir = await _dir();
-      if (_current != null) UpdateService.cleanup(dir, _current!);
+      await _verifyPending(dir);
     } on Object {
       return; // sin versión no se puede comparar
     }
     // Revisa cada hora si ya pasaron 6 h: cubre la app viva en la bandeja.
     _timer = Timer.periodic(const Duration(hours: 1), (_) => _auto());
     unawaited(_auto());
+  }
+
+  /// Compara la marca `pendingUpdate` con la versión instalada. Si coincide,
+  /// limpia instaladores viejos; si no, conserva todo para reintentar a mano.
+  Future<void> _verifyPending(Directory dir) async {
+    final cur = _current;
+    if (cur == null) return;
+    final target = prefs.getString('pendingUpdate');
+    final log = File('${dir.path}${Platform.pathSeparator}install.log');
+    if (target == null) {
+      UpdateService.cleanup(dir, cur);
+      return;
+    }
+    await prefs.remove('pendingUpdate');
+    final want = SemVer.tryParse(target);
+    if (want != null && cur.compareTo(want) >= 0) {
+      outcome = UpdateOutcome.updated('$cur');
+      UpdateService.cleanup(dir, cur);
+      try {
+        if (log.existsSync()) log.deleteSync();
+      } on FileSystemException {
+        // Se borrará en la próxima actualización correcta.
+      }
+    } else {
+      String? installer;
+      if (dir.existsSync()) {
+        for (final f in dir.listSync().whereType<File>()) {
+          if (f.path.toLowerCase().endsWith('.exe')) installer = f.path;
+        }
+      }
+      outcome = UpdateOutcome.failed(target, log.path, installer);
+    }
+    notifyListeners();
+  }
+
+  void dismissOutcome() {
+    outcome = null;
+    notifyListeners();
+  }
+
+  /// «Abrir el instalador»: lo selecciona en el Explorador (o abre la carpeta).
+  Future<void> openInstaller() async {
+    final o = outcome;
+    if (o == null || !_windows) return;
+    final path = o.installerPath;
+    if (path != null) {
+      await _launch('explorer.exe', ['/select,$path']);
+    } else if (o.logPath != null) {
+      await _launch('explorer.exe', [File(o.logPath!).parent.path]);
+    }
   }
 
   Future<void> setAuto(bool v) async {
@@ -149,7 +238,10 @@ class UpdateController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<Directory> _dir() async => Directory(
+  Future<Directory> _dir() async =>
+      _dirProvider != null ? await _dirProvider() : await _defaultDir();
+
+  Future<Directory> _defaultDir() async => Directory(
     '${(await getTemporaryDirectory()).path}${Platform.pathSeparator}aurora_update',
   );
 
@@ -158,7 +250,7 @@ class UpdateController extends ChangeNotifier {
   Future<void> install() async {
     final r = release;
     if (r == null || phase == UpdatePhase.downloading) return;
-    final asset = r.assetFor(windows: Platform.isWindows, abis: _abis);
+    final asset = r.assetFor(windows: _windows, abis: _abis);
     if (asset == null) {
       _fail('Este release no incluye un instalador para tu plataforma.');
       return;
@@ -185,15 +277,27 @@ class UpdateController extends ChangeNotifier {
           notifyListeners();
         },
       );
-      if (Platform.isWindows) {
+      if (_windows) {
         // El instalador (Inno Setup) cierra, reemplaza y relanza Aurora.
-        await Process.start(file.path, const [
-          '/VERYSILENT',
+        // /SILENT (no /VERYSILENT) deja una ventanita de progreso; el log
+        // permite diagnosticar si no se completa.
+        await prefs.setString('pendingUpdate', '${r.version}');
+        phase = UpdatePhase.installing;
+        progress = null;
+        notifyListeners();
+        await _launch(file.path, [
+          '/SILENT',
           '/SUPPRESSMSGBOXES',
           '/NORESTART',
           '/CLOSEAPPLICATIONS',
-        ], mode: ProcessStartMode.detached);
-        await requestHardExit();
+          '/FORCECLOSEAPPLICATIONS',
+          '/LOG=${file.parent.path}${Platform.pathSeparator}install.log',
+        ]);
+        // Red de seguridad en Dart; el runner nativo tiene la suya (3 s).
+        await _hardExit().timeout(
+          const Duration(seconds: 3),
+          onTimeout: () => _exit(0),
+        );
       } else {
         await _channel.invokeMethod<void>('install', {'path': file.path});
         phase = UpdatePhase.available;
@@ -208,6 +312,7 @@ class UpdateController extends ChangeNotifier {
   }
 
   void _fail(String message) {
+    unawaited(prefs.remove('pendingUpdate'));
     error = message;
     phase = UpdatePhase.error;
     progress = null;

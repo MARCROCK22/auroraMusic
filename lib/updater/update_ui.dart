@@ -139,8 +139,29 @@ class UpdateBanner extends StatelessWidget {
     listenable: controller,
     builder: (context, _) {
       final u = controller;
-      if (!u.showBanner) return const SizedBox.shrink();
       final colors = Theme.of(context).colorScheme;
+      final o = u.outcome;
+      if (o != null) return _OutcomeBar(controller: u, outcome: o);
+      if (!u.showBanner) return const SizedBox.shrink();
+      if (u.phase == UpdatePhase.installing) {
+        return Material(
+          color: colors.secondaryContainer,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Instalando la actualización… Aurora se reiniciará sola.',
+                  style: TextStyle(color: colors.onSecondaryContainer),
+                ),
+                const SizedBox(height: 4),
+                const LinearProgressIndicator(minHeight: 2),
+              ],
+            ),
+          ),
+        );
+      }
       final busy = u.phase == UpdatePhase.downloading;
       return Material(
         color: colors.secondaryContainer,
@@ -196,6 +217,50 @@ class UpdateBanner extends StatelessWidget {
       );
     },
   );
+}
+
+class _OutcomeBar extends StatelessWidget {
+  const _OutcomeBar({required this.controller, required this.outcome});
+  final UpdateController controller;
+  final UpdateOutcome outcome;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final o = outcome;
+    return Material(
+      color: o.failed ? colors.errorContainer : colors.secondaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        child: Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          children: [
+            Text(
+              o.failed
+                  ? 'La actualización no se completó (${o.version}).'
+                  : 'Actualizada a ${o.version}.',
+            ),
+            if (o.failed) ...[
+              FilledButton(
+                onPressed: controller.openInstaller,
+                child: const Text('Abrir el instalador'),
+              ),
+              if (o.logPath != null)
+                SelectableText(
+                  'Registro: ${o.logPath}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+            ],
+            TextButton(
+              onPressed: controller.dismissOutcome,
+              child: const Text('Cerrar'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// Sección de Ajustes → Actualizaciones.
