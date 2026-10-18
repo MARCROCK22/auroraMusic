@@ -11,7 +11,8 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 SpotifyAutoAdder _manualAdder(void Function(Track) onTrack) => SpotifyAutoAdder(
-  save: (_, _, {play = false}) async => true,
+  save: (_, _, {next = false}) async => true,
+  playSeed: (_, _, {context, extras}) async => true,
   queueLength: () => 0,
   unqueue: (_) {},
   manual: (track, {replacing}) async => onTrack(track),
@@ -95,7 +96,7 @@ void main() {
           })
           .then((_) {});
       await capture('spotify-search-800');
-      tester.view.physicalSize = const Size(320, 800);
+      tester.view.physicalSize = const Size(320, 1400);
       browser.detail = SpotifyMetadataDetails(
         entity: const SpotifyMetadataEntity(
           type: SpotifyEntityType.album,
@@ -118,7 +119,7 @@ void main() {
     (tester) async {
       final browser = _FixtureBrowser();
       addTearDown(browser.dispose);
-      tester.view.physicalSize = const Size(320, 800);
+      tester.view.physicalSize = const Size(320, 1400);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -127,7 +128,7 @@ void main() {
         MaterialApp(
           home: MediaQuery(
             data: const MediaQueryData(
-              size: Size(320, 800),
+              size: Size(320, 1400),
               textScaler: TextScaler.linear(2),
             ),
             child: Scaffold(

@@ -31,6 +31,9 @@ import 'jam/jam_flows.dart';
 import 'jam/jam_page.dart';
 import 'jam/jam_widgets.dart';
 import 'playlist_shelf.dart';
+import '../dj/ai_dj.dart';
+import '../metadata/spotify/spotify_metadata_provider.dart';
+import '../metadata/spotify_recs.dart';
 import 'spotify_auto_add.dart';
 import 'spotify_browser_panel.dart';
 import '../metadata/youtube_match.dart';
@@ -122,8 +125,19 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
               search: (q, k) => source.searchPage(q, k).then((p) => p.tracks),
             )
           : null,
-      save: (spotify, match, {play = false}) =>
-          app().importSpotifyMetadataMatch(spotify, match, play: play),
+      save: (spotify, match, {next = false}) =>
+          app().importSpotifyMetadataMatch(spotify, match, next: next),
+      playSeed: (spotify, match, {context, extras}) => app().playSpotifySeed(
+        spotify,
+        match,
+        context: context,
+        extras: extras,
+      ),
+      moreFromArtist: source is InnerTubeSource
+          ? (seed) => ProviderSpotifyCatalog(
+              SpotifyMetadataProvider(),
+            ).artistTopTracks(djPrimaryArtist(seed))
+          : null,
       queueLength: () => app().queue.length,
       unqueue: (id) {
         final i = app().queue.lastIndexWhere((q) => q.id == id);

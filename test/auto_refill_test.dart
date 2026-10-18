@@ -1,5 +1,6 @@
 import 'package:aurora_music/app_controller.dart';
 import 'package:aurora_music/core/models.dart';
+import 'package:aurora_music/core/queue_policy.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'support/fakes.dart';
 
@@ -38,8 +39,11 @@ void main() {
   test('cola que se agota: se rellena y la siguiente suena sola', () async {
     final app = await make();
     await app.playTrack(library[0], context: [library[0]]);
-    await eventually(() => app.queue.length >= 6);
-    expect(app.queue.length - app.queueIndex - 1, greaterThanOrEqualTo(5));
+    await eventually(() => app.queue.length >= 1 + kQueueLookahead);
+    expect(
+      app.queue.length - app.queueIndex - 1,
+      greaterThanOrEqualTo(kQueueLookahead),
+    );
     expect(app.autoAddedIds, isNotEmpty);
     expect(app.autoAddedIds.contains(library[0].id), isFalse);
     final first = app.queue[1];
@@ -51,7 +55,7 @@ void main() {
   test('sin red: usa la biblioteca, sin repetir artista seguido', () async {
     final app = await make();
     await app.playTrack(library[0], context: [library[0]]);
-    await eventually(() => app.queue.length >= 6);
+    await eventually(() => app.queue.length >= 1 + kQueueLookahead);
     for (var i = 1; i < app.queue.length; i++) {
       expect(app.queue[i].artist, isNot(app.queue[i - 1].artist));
     }

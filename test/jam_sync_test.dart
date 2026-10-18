@@ -127,38 +127,46 @@ void main() {
   });
 
   for (final kind in ['vacío', 'error', 'lento']) {
-    test('la cola nunca baja de 5 con motor $kind', () async {
-      final backend = FakeJamBackend();
-      final host = await peer(
-        backend,
-        library: library,
-        timeout: const Duration(milliseconds: 100),
-        adapter: () => JamSuggestionAdapter(
-          related: (_) async {
-            if (kind == 'error') throw StateError('sin red');
-            if (kind == 'lento') {
-              await Future<void>.delayed(const Duration(seconds: 3));
-            }
-            return const [];
-          },
-          seeds: () => [library[0]],
-          local: () => const [],
-        ),
-      );
-      await host.jam.hostOnline('Ana');
-      host.jam.add(song(100));
-      await eventually(() => input(host) != null);
-      final service = host.jam.service;
-      await eventually(() => service.upcomingQueued >= 5, 'relleno inicial');
-      for (var i = 0; i < 8; i++) {
-        host.audio.completions.add(null);
-        await eventually(
-          () => service.upcomingQueued >= 5 && !host.jam.busy,
-          'relleno tras pista $i',
+    test(
+      'la cola nunca baja de ${JamController.minAhead} con motor $kind',
+      () async {
+        final backend = FakeJamBackend();
+        final host = await peer(
+          backend,
+          library: library,
+          timeout: const Duration(milliseconds: 100),
+          adapter: () => JamSuggestionAdapter(
+            related: (_) async {
+              if (kind == 'error') throw StateError('sin red');
+              if (kind == 'lento') {
+                await Future<void>.delayed(const Duration(seconds: 3));
+              }
+              return const [];
+            },
+            seeds: () => [library[0]],
+            local: () => const [],
+          ),
         );
-        expect(service.playback?.entryId, isNotNull);
-      }
-    });
+        await host.jam.hostOnline('Ana');
+        host.jam.add(song(100));
+        await eventually(() => input(host) != null);
+        final service = host.jam.service;
+        await eventually(
+          () => service.upcomingQueued >= JamController.minAhead,
+          'relleno inicial',
+        );
+        for (var i = 0; i < 8; i++) {
+          host.audio.completions.add(null);
+          await eventually(
+            () =>
+                service.upcomingQueued >= JamController.minAhead &&
+                !host.jam.busy,
+            'relleno tras pista $i',
+          );
+          expect(service.playback?.entryId, isNotNull);
+        }
+      },
+    );
   }
 
   test('último recurso: repite favoritos aunque ya hayan sonado', () async {
@@ -171,7 +179,9 @@ void main() {
     await eventually(() => input(host) != null);
     for (var i = 0; i < 12; i++) {
       host.audio.completions.add(null);
-      await eventually(() => host.jam.service.upcomingQueued >= 5);
+      await eventually(
+        () => host.jam.service.upcomingQueued >= small.length - 1,
+      );
     }
     expect(host.jam.service.queue.length, lessThanOrEqualTo(200));
   });
