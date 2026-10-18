@@ -1000,7 +1000,12 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       case 5:
         return QueuePanel(controller: c);
       case 6:
-        return LyricsPanel(controller: c, onClose: () => _navigate(0));
+        return LyricsPanel(
+          controller: c,
+          jam: _jam,
+          shortcuts: ref.read(shortcutServiceProvider),
+          onClose: () => _navigate(0),
+        );
       case 7:
         return _settings(c);
       case 8:
@@ -2505,7 +2510,13 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   Future<void> _showLyrics(AppController c) => showDialog<void>(
     context: context,
     useRootNavigator: true,
-    builder: (_) => Dialog.fullscreen(child: LyricsPanel(controller: c)),
+    builder: (_) => Dialog.fullscreen(
+      child: LyricsPanel(
+        controller: c,
+        jam: _jam,
+        shortcuts: ref.read(shortcutServiceProvider),
+      ),
+    ),
   );
 
   Future<void> _showQueue(AppController c) => showModalBottomSheet<void>(

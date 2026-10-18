@@ -146,11 +146,7 @@ class _StudioTransportState extends State<StudioTransport> {
                         : colors.onSurfaceVariant,
                   ),
                 ),
-              IconButton(
-                tooltip: jamAudio ? 'No disponible en una Jam' : 'Anterior',
-                onPressed: track == null || jamAudio ? null : c.previous,
-                icon: const Icon(StudioSymbols.skipPrevious, size: 18),
-              ),
+              TransportPreviousButton(controller: c, jam: j, size: 18),
               _play(c),
               _next(c, 18, track != null),
               if (wide)
@@ -311,76 +307,18 @@ class _StudioTransportState extends State<StudioTransport> {
       );
     },
   );
-  bool get _jamAudio =>
-      widget.jam != null &&
-      widget.jam!.active &&
-      widget.controller.jamPlaybackActive;
+  bool get _jamAudio => transportJamAudio(widget.controller, widget.jam);
 
-  Widget _play(AppController c) {
-    final colors = Theme.of(context).colorScheme;
-    final j = widget.jam;
-    final jamAudio = _jamAudio;
-    final enabled = jamAudio ? j!.canPause : c.currentTrack != null;
-    return Container(
-      decoration: BoxDecoration(
-        color: enabled ? colors.primaryContainer : colors.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: const [BoxShadow(color: Colors.black, offset: Offset(2, 3))],
-      ),
-      child: IconButton(
-        tooltip: jamAudio && !enabled
-            ? 'Lo controla ${j!.hostName}'
-            : c.audio.isPlaying
-            ? 'Pausar'
-            : 'Reproducir',
-        onPressed: !enabled
-            ? null
-            : jamAudio
-            ? j!.togglePlayback
-            : c.togglePlayback,
-        icon: c.busy && !jamAudio
-            ? const SizedBox.square(
-                dimension: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : Icon(
-                c.audio.isPlaying
-                    ? StudioSymbols.pause
-                    : StudioSymbols.playArrow,
-                color: enabled ? colors.onPrimaryContainer : colors.outline,
-                size: 22,
-              ),
-      ),
-    );
-  }
+  Widget _play(AppController c) =>
+      TransportPlayButton(controller: c, jam: widget.jam);
 
-  Widget _next(AppController c, double size, bool hasTrack) {
-    final j = widget.jam;
-    if (!_jamAudio) {
-      return IconButton(
-        tooltip: 'Siguiente',
-        onPressed: hasTrack ? c.next : null,
-        icon: Icon(StudioSymbols.skipNext, size: size),
-      );
-    }
-    final votes = j!.service.rules.votes;
-    return IconButton(
-      tooltip: j.canSkip
-          ? 'Siguiente'
-          : votes
-          ? 'Votar para saltar'
-          : 'Lo controla ${j.hostName}',
-      onPressed: !hasTrack || (!j.canSkip && !votes)
-          ? null
-          : j.canSkip
-          ? j.next
-          : j.service.voteSkip,
-      icon: Icon(
-        j.canSkip ? StudioSymbols.skipNext : Icons.how_to_vote_outlined,
+  Widget _next(AppController c, double size, bool hasTrack) =>
+      TransportNextButton(
+        controller: c,
+        jam: widget.jam,
         size: size,
-      ),
-    );
-  }
+        hasTrack: hasTrack,
+      );
 
   Widget _progress(AppController c, bool hasTrack) {
     final j = widget.jam;
@@ -469,6 +407,137 @@ class _StudioNeedle extends SliderComponentShape {
       Paint()
         ..color = StudioPalette.well
         ..strokeWidth = 1,
+    );
+  }
+}
+
+String _hint(String? shortcut) => shortcut == null ? '' : ' ($shortcut)';
+
+/// ¿Suena audio de una Jam? Con Jam, pista y permisos salen de la sesión.
+bool transportJamAudio(AppController c, JamController? jam) =>
+    jam != null && jam.active && c.jamPlaybackActive;
+
+/// Botones de transporte compartidos por la barra inferior y el panel de
+/// letras: así ambos aplican las mismas reglas (cola, shuffle, Jam, permisos).
+/// El padre se redibuja con el controlador y la Jam.
+class TransportPlayButton extends StatelessWidget {
+  const TransportPlayButton({
+    super.key,
+    required this.controller,
+    this.jam,
+    this.shortcut,
+  });
+  final AppController controller;
+  final JamController? jam;
+  final String? shortcut;
+  @override
+  Widget build(BuildContext context) {
+    final c = controller;
+    final colors = Theme.of(context).colorScheme;
+    final j = jam;
+    final jamAudio = transportJamAudio(c, jam);
+    final enabled = jamAudio ? j!.canPause : c.currentTrack != null;
+    return Container(
+      decoration: BoxDecoration(
+        color: enabled ? colors.primaryContainer : colors.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: const [BoxShadow(color: Colors.black, offset: Offset(2, 3))],
+      ),
+      child: IconButton(
+        tooltip: jamAudio && !enabled
+            ? 'Lo controla ${j!.hostName}'
+            : '${c.audio.isPlaying ? 'Pausar' : 'Reproducir'}${_hint(shortcut)}',
+        onPressed: !enabled
+            ? null
+            : jamAudio
+            ? j!.togglePlayback
+            : c.togglePlayback,
+        icon: c.busy && !jamAudio
+            ? const SizedBox.square(
+                dimension: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Icon(
+                c.audio.isPlaying
+                    ? StudioSymbols.pause
+                    : StudioSymbols.playArrow,
+                color: enabled ? colors.onPrimaryContainer : colors.outline,
+                size: 22,
+              ),
+      ),
+    );
+  }
+}
+
+class TransportNextButton extends StatelessWidget {
+  const TransportNextButton({
+    super.key,
+    required this.controller,
+    this.jam,
+    this.size = 18,
+    this.shortcut,
+    this.hasTrack,
+  });
+  final AppController controller;
+  final JamController? jam;
+  final double size;
+  final String? shortcut;
+  // Con audio de Jam la pista viene de la sesión, no del controlador.
+  final bool? hasTrack;
+  @override
+  Widget build(BuildContext context) {
+    final c = controller;
+    final hasTrack = this.hasTrack ?? c.currentTrack != null;
+    final j = jam;
+    if (!transportJamAudio(c, jam)) {
+      return IconButton(
+        tooltip: 'Siguiente${_hint(shortcut)}',
+        onPressed: hasTrack ? c.next : null,
+        icon: Icon(StudioSymbols.skipNext, size: size),
+      );
+    }
+    final votes = j!.service.rules.votes;
+    return IconButton(
+      tooltip: j.canSkip
+          ? 'Siguiente${_hint(shortcut)}'
+          : votes
+          ? 'Votar para saltar'
+          : 'Lo controla ${j.hostName}',
+      onPressed: !hasTrack || (!j.canSkip && !votes)
+          ? null
+          : j.canSkip
+          ? j.next
+          : j.service.voteSkip,
+      icon: Icon(
+        j.canSkip ? StudioSymbols.skipNext : Icons.how_to_vote_outlined,
+        size: size,
+      ),
+    );
+  }
+}
+
+class TransportPreviousButton extends StatelessWidget {
+  const TransportPreviousButton({
+    super.key,
+    required this.controller,
+    this.jam,
+    this.size = 18,
+    this.shortcut,
+  });
+  final AppController controller;
+  final JamController? jam;
+  final double size;
+  final String? shortcut;
+  @override
+  Widget build(BuildContext context) {
+    final off =
+        controller.currentTrack == null || transportJamAudio(controller, jam);
+    return IconButton(
+      tooltip: transportJamAudio(controller, jam)
+          ? 'No disponible en una Jam'
+          : 'Anterior${_hint(shortcut)}',
+      onPressed: off ? null : controller.previous,
+      icon: Icon(StudioSymbols.skipPrevious, size: size),
     );
   }
 }
