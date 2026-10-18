@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -5,6 +6,9 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
 import '../core/models.dart';
+import 'lyrics_match.dart';
+
+export 'lyrics_match.dart' show LyricsConfidence;
 
 enum LyricsKind { synced, plain, instrumental, notFound }
 
@@ -15,50 +19,118 @@ class LyricLine {
 }
 
 class LyricsResult {
-  const LyricsResult(this.kind, {this.lines = const [], this.text = ''});
+  const LyricsResult(
+    this.kind, {
+    this.lines = const [],
+    this.text = '',
+    this.source = '',
+    this.confidence = LyricsConfidence.medium,
+    this.fromCache = false,
+  });
   final LyricsKind kind;
   final List<LyricLine> lines;
   final String text;
+
+  /// Origen legible: «LRCLIB», «lyrics.ovh», «Archivo local».
+  final String source;
+  final LyricsConfidence confidence;
+
+  /// Viene de la caché local (red lenta o sin conexión): se muestra como «guardada».
+  final bool fromCache;
+
+  LyricsResult asCached() => LyricsResult(
+    kind,
+    lines: lines,
+    text: text,
+    source: source,
+    confidence: confidence,
+    fromCache: true,
+  );
 }
 
+/// Letra candidata de una búsqueda manual («Buscar otra letra»).
+class LyricsCandidate {
+  const LyricsCandidate({
+    required this.title,
+    required this.artist,
+    required this.album,
+    required this.seconds,
+    required this.content,
+    required this.synced,
+    required this.score,
+    this.source = 'LRCLIB',
+  });
+  final String title;
+  final String artist;
+  final String album;
+  final int seconds;
+  final String content;
+  final bool synced;
+  final double score;
+  final String source;
+}
+
+typedef LyricsQuery = ({
+  String artist,
+  String title,
+  String album,
+  int seconds,
+});
+
 class LyricsService {
-  LyricsService({HttpClient Function()? clientFactory})
-    : _clientFactory = clientFactory ?? HttpClient.new;
+  LyricsService({
+    HttpClient Function()? clientFactory,
+    this.backoff = const Duration(milliseconds: 400),
+    this.retries = 2,
+    this.now = DateTime.now,
+  }) : _clientFactory = clientFactory ?? HttpClient.new;
   static const maxBytes = 1024 * 1024;
-  static const timeout = Duration(seconds: 10);
+  static const timeout = Duration(seconds: 3);
+  static const negativeTtl = Duration(hours: 24);
+  static const maxCacheFiles = 400;
+  // shortcut: versión fija, no se lee de package_info; actualizar al subir de versión.
+  static const userAgent =
+      'Aurora/1.2.0 (https://github.com/kaz-py/auroraMusic)';
   final HttpClient Function() _clientFactory;
+  final Duration backoff;
+  final int retries;
+  final DateTime Function() now;
   bool _disposed = false;
   int _generation = 0;
   final Set<HttpClient> _clients = {};
 
+  // ---- LRC ------------------------------------------------------------
+
+  static final _tag = RegExp(r'\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]');
+  static final _offsetTag = RegExp(
+    r'\[offset:\s*([+-]?\d+)\s*\]',
+    caseSensitive: false,
+  );
+
   static List<LyricLine> parseLrc(String input) {
     final out = <LyricLine>[];
+    final rows = input.split(RegExp(r'\r?\n'));
     var offset = 0;
-    final lyricLines = input.split(RegExp(r'\r?\n'));
-    for (final line in lyricLines) {
-      final off = RegExp(
-        r'\[offset:([+-]?\d+)\]',
-        caseSensitive: false,
-      ).firstMatch(line);
+    for (final row in rows) {
+      final off = _offsetTag.firstMatch(row);
       if (off != null) offset = int.tryParse(off.group(1)!) ?? 0;
     }
-    for (final line in lyricLines) {
-      if (RegExp(r'\[offset:[+-]?\d+\]', caseSensitive: false).hasMatch(line)) {
-        continue;
-      }
-      final tags = RegExp(
-        r'\[(\d{1,3}):(\d{2})(?:\.(\d{1,3}))?\]',
-      ).allMatches(line).toList();
-      if (tags.isEmpty) continue;
-      final validTags = tags
-          .where((tag) => (int.tryParse(tag.group(2)!) ?? 60) < 60)
+    for (final row in rows) {
+      if (_offsetTag.hasMatch(row)) continue;
+      final tags = _tag
+          .allMatches(row)
+          .where((t) => (int.tryParse(t.group(2)!) ?? 60) < 60)
           .toList();
-      if (validTags.isEmpty) continue;
-      final lyric = line
-          .replaceAll(RegExp(r'\[\d{1,3}:\d{2}(?:\.\d{1,3})?\]'), '')
+      if (tags.isEmpty) continue;
+      final lyric = row
+          .replaceAll(_tag, '')
+          .replaceAll(
+            RegExp(r'<\d{1,3}:\d{2}(?:[.:]\d{1,3})?>'),
+            '',
+          ) // LRC mejorado
           .trim();
       if (lyric.isEmpty) continue;
-      for (final tag in validTags) {
+      for (final tag in tags) {
         final fraction = (tag.group(3) ?? '0').padRight(3, '0').substring(0, 3);
         final millis =
             (int.tryParse(tag.group(1)!) ?? 0) * 60000 +
@@ -66,7 +138,7 @@ class LyricsService {
             (int.tryParse(fraction) ?? 0) +
             offset;
         out.add(
-          LyricLine(Duration(milliseconds: millis.clamp(0, 1 << 60)), lyric),
+          LyricLine(Duration(milliseconds: millis.clamp(0, 1 << 40)), lyric),
         );
       }
     }
@@ -74,82 +146,294 @@ class LyricsService {
     return out;
   }
 
-  static String _queryTitle(String s) => s
-      .replaceAll(
-        RegExp(
-          r'\s*[-–|]\s*(official\s+)?(music\s+)?(video|audio|lyrics?)(\s+\w+)*\s*$',
-          caseSensitive: false,
-        ),
-        '',
-      )
-      .replaceAll(
-        RegExp(
-          r'\s*\([^)]*(official|video|audio|lyrics?)[^)]*\)',
-          caseSensitive: false,
-        ),
-        '',
-      )
-      .trim();
-  static String _clean(String s) => _queryTitle(
-    s,
-  ).toLowerCase().replaceAll(RegExp(r'[^\p{L}\p{N}]', unicode: true), '');
-  static (String, String) _metadata(Track track) {
-    final split = RegExp(r'^(.+?)\s+-\s+(.+)$').firstMatch(track.title);
-    if (split != null && _clean(split.group(1)!) == _clean(track.artist)) {
-      return (track.artist, _queryTitle(split.group(2)!));
+  static LyricsResult _result(
+    String content,
+    String source,
+    LyricsConfidence confidence, {
+    bool allowSync = true,
+  }) {
+    final lines = allowSync ? parseLrc(content) : const <LyricLine>[];
+    if (lines.isNotEmpty) {
+      return LyricsResult(
+        LyricsKind.synced,
+        lines: lines,
+        source: source,
+        confidence: confidence,
+      );
     }
-    return (track.artist, _queryTitle(track.title));
+    // Sin sincronía fiable: texto plano sin marcas de tiempo.
+    final text = content
+        .split(RegExp(r'\r?\n'))
+        .map((l) => l.replaceAll(_tag, '').trim())
+        .where(
+          (l) => !RegExp(r'^\[[a-z]+:.*\]$', caseSensitive: false).hasMatch(l),
+        )
+        .join('\n')
+        .trim();
+    return text.isEmpty
+        ? const LyricsResult(LyricsKind.notFound)
+        : LyricsResult(
+            LyricsKind.plain,
+            text: text,
+            source: source,
+            confidence: confidence,
+          );
   }
 
-  Future<LyricsResult> load(Track track, Directory supportDirectory) async {
-    final generation = ++_generation;
-    final local = await _readCache(track, supportDirectory);
-    if (_disposed || generation != _generation) {
-      return const LyricsResult(LyricsKind.notFound);
+  // ---- consulta ---------------------------------------------------------
+
+  static LyricsQuery queryFor(Track track) {
+    final artist = cleanArtist(track.artist);
+    return (
+      artist: artist,
+      title: cleanTitle(track.title, artist: track.artist),
+      album: (track.album ?? '').trim(),
+      seconds: track.duration.inSeconds,
+    );
+  }
+
+  /// Cascada: LRCLIB get → LRCLIB search → lyrics.ovh; la caché local solo
+  /// respalda (red caída, o respuesta lenta mediante [onInterim]) y se corrige
+  /// con cada respuesta nueva. Una letra elegida/importada a mano no se pisa.
+  /// Lanza si todo falló por red y no hay caché.
+  Future<LyricsResult> load(
+    Track track,
+    Directory root, {
+    bool force = false,
+    void Function(LyricsResult cached)? onInterim,
+    Duration slowAfter = const Duration(seconds: 3),
+  }) async {
+    final generation = _begin();
+    bool stale() => _disposed || generation != _generation;
+    const none = LyricsResult(LyricsKind.notFound);
+    final cached = await _readCache(track, root);
+    if (stale()) return none;
+    if (cached != null && !force) {
+      if (cached.negative && now().difference(cached.at) < negativeTtl) {
+        return none; // LRCLIB ya confirmó que no existe hace menos de 24 h
+      }
+      if (cached.manual && !cached.negative) return cached.result.asCached();
     }
-    if (local != null) return _result(local);
-    final (artist, title) = _metadata(track);
-    final client = _clientFactory()..connectionTimeout = timeout;
-    _clients.add(client);
-    try {
-      final uri = Uri.https('lrclib.net', '/api/get', {
-        'artist_name': artist,
-        'track_name': title,
+    final backup = cached == null || cached.negative
+        ? null
+        : cached.result.asCached();
+    Timer? slow;
+    if (backup != null && onInterim != null) {
+      slow = Timer(slowAfter, () {
+        if (!stale()) onInterim(backup);
       });
-      final request = await client.getUrl(uri).timeout(timeout);
-      final response = await request.close().timeout(timeout);
-      if (response.statusCode == 404) {
-        return const LyricsResult(LyricsKind.notFound);
-      }
-      if (response.statusCode != 200) {
-        throw HttpException('Lyrics service returned ${response.statusCode}.');
-      }
-      final bytes = await _readBounded(response).timeout(timeout);
-      final data = jsonDecode(utf8.decode(bytes));
-      if (data is! Map<String, dynamic> ||
-          !_matches(data, artist, title, track.duration)) {
-        return const LyricsResult(LyricsKind.notFound);
-      }
-      if (data['instrumental'] == true) {
-        return const LyricsResult(LyricsKind.instrumental);
-      }
-      final synced = data['syncedLyrics'];
-      final plain = data['plainLyrics'];
-      final content = synced is String && synced.trim().isNotEmpty
-          ? synced
-          : plain is String
-          ? plain
-          : '';
-      if (content.isEmpty) return const LyricsResult(LyricsKind.notFound);
-      if (_disposed || generation != _generation) {
-        return const LyricsResult(LyricsKind.notFound);
-      }
-      await _writeCache(track, supportDirectory, content);
-      return _result(content);
-    } finally {
-      _clients.remove(client);
-      client.close(force: true);
     }
+    final q = queryFor(track);
+    HttpClient? client;
+    Object? lastError;
+    try {
+      client = _clientFactory()..connectionTimeout = timeout;
+      _clients.add(client);
+      final http = client;
+      LyricsResult? found;
+      Future<void> step(Future<LyricsResult?> Function() run) async {
+        if (found != null || stale()) return;
+        try {
+          found = await run();
+        } catch (e) {
+          lastError = e;
+        }
+      }
+
+      await step(() => _lrclibGet(http, q));
+      await step(() async => (await _lrclibSearch(http, q, best: true))?.$1);
+      await step(() => _ovh(http, q));
+      if (stale()) return none;
+      final hit = found;
+      if (hit != null) {
+        await _writeCache(track, root, hit); // corrige la caché anterior
+        return hit;
+      }
+      if (backup != null) return backup;
+      if (lastError != null) throw lastError!;
+      await _writeNegative(track, root);
+      return none;
+    } catch (_) {
+      if (stale()) return none; // petición abortada por cambio de pista
+      if (backup != null) return backup;
+      rethrow;
+    } finally {
+      slow?.cancel();
+      if (client != null) {
+        _clients.remove(client);
+        client.close(force: true);
+      }
+    }
+  }
+
+  int _begin() {
+    // Una carga nueva aborta las peticiones de la anterior.
+    for (final c in _clients) {
+      c.close(force: true);
+    }
+    _clients.clear();
+    return ++_generation;
+  }
+
+  Future<LyricsResult?> _lrclibGet(HttpClient client, LyricsQuery q) async {
+    final data = await _getJson(
+      client,
+      Uri.https('lrclib.net', '/api/get', {
+        'artist_name': q.artist,
+        'track_name': q.title,
+        if (q.album.isNotEmpty) 'album_name': q.album,
+        if (q.seconds > 0) 'duration': '${q.seconds}',
+      }),
+    );
+    if (data is! Map<String, dynamic>) return null;
+    return _fromLrclib(data, q);
+  }
+
+  LyricsResult? _fromLrclib(Map<String, dynamic> d, LyricsQuery q) {
+    final m = _score(d, q);
+    if (!m.acceptable) return null;
+    if (d['instrumental'] == true) {
+      return const LyricsResult(LyricsKind.instrumental, source: 'LRCLIB');
+    }
+    final synced = d['syncedLyrics'], plain = d['plainLyrics'];
+    final useSynced = synced is String && synced.trim().isNotEmpty && m.syncOk;
+    final content = useSynced ? synced : (plain is String ? plain : '');
+    if (content.trim().isEmpty) return null;
+    return _result(content, 'LRCLIB', m.confidence, allowSync: useSynced);
+  }
+
+  LyricsMatch _score(Map<String, dynamic> d, LyricsQuery q) =>
+      scoreLyricsCandidate(
+        wantedArtist: q.artist,
+        wantedTitle: q.title,
+        wantedSeconds: q.seconds,
+        artist: '${d['artistName'] ?? ''}',
+        title: '${d['trackName'] ?? d['name'] ?? ''}',
+        seconds: d['duration'] is num ? d['duration'] as num : null,
+      );
+
+  /// Mejor candidato aceptable (sincronizada preferida) y la lista puntuada.
+  Future<(LyricsResult, List<LyricsCandidate>)?> _lrclibSearch(
+    HttpClient client,
+    LyricsQuery q, {
+    required bool best,
+  }) async {
+    var data = await _getJson(
+      client,
+      Uri.https('lrclib.net', '/api/search', {
+        'track_name': q.title,
+        'artist_name': q.artist,
+      }),
+    );
+    if (data is! List || data.isEmpty) {
+      data = await _getJson(
+        client,
+        Uri.https('lrclib.net', '/api/search', {'q': '${q.artist} ${q.title}'}),
+      );
+    }
+    if (data is! List) return null;
+    final scored = <(Map<String, dynamic>, LyricsMatch)>[];
+    for (final e in data.take(40)) {
+      if (e is Map<String, dynamic>) scored.add((e, _score(e, q)));
+    }
+    double rank((Map<String, dynamic>, LyricsMatch) c) {
+      final s = c.$1['syncedLyrics'];
+      return c.$2.score +
+          (s is String && s.trim().isNotEmpty && c.$2.syncOk ? .08 : 0);
+    }
+
+    scored.sort((a, b) => rank(b).compareTo(rank(a)));
+    final good = scored.where((c) => c.$2.acceptable).toList();
+    if (best) {
+      for (final c in good) {
+        final r = _fromLrclib(c.$1, q);
+        if (r != null) return (r, const <LyricsCandidate>[]);
+      }
+      return null;
+    }
+    return (
+      const LyricsResult(LyricsKind.notFound),
+      [
+        for (final c in scored)
+          if (_content(c.$1).isNotEmpty)
+            LyricsCandidate(
+              title: '${c.$1['trackName'] ?? c.$1['name'] ?? ''}',
+              artist: '${c.$1['artistName'] ?? ''}',
+              album: '${c.$1['albumName'] ?? ''}',
+              seconds: (c.$1['duration'] as num?)?.round() ?? 0,
+              content: _content(c.$1),
+              synced: _syncedOf(c.$1).isNotEmpty,
+              score: c.$2.score,
+            ),
+      ],
+    );
+  }
+
+  static String _syncedOf(Map<String, dynamic> d) {
+    final s = d['syncedLyrics'];
+    return s is String ? s.trim() : '';
+  }
+
+  static String _content(Map<String, dynamic> d) {
+    final s = _syncedOf(d);
+    if (s.isNotEmpty) return s;
+    final pl = d['plainLyrics'];
+    return pl is String ? pl.trim() : '';
+  }
+
+  Future<LyricsResult?> _ovh(HttpClient client, LyricsQuery q) async {
+    if (q.artist.isEmpty || q.title.isEmpty) return null;
+    final data = await _getJson(
+      client,
+      Uri.https(
+        'api.lyrics.ovh',
+        '/v1/${Uri.encodeComponent(q.artist)}/${Uri.encodeComponent(q.title)}',
+      ),
+    );
+    final text = data is Map ? data['lyrics'] : null;
+    if (text is! String || text.trim().isEmpty) return null;
+    // lyrics.ovh no ofrece duración: confianza media-baja, nunca sincronizada.
+    return _result(text, 'lyrics.ovh', LyricsConfidence.low, allowSync: false);
+  }
+
+  /// GET JSON con reintentos (red, 429, 5xx) y backoff exponencial. 404 → null.
+  Future<Object?> _getJson(HttpClient client, Uri uri) async {
+    Object? error;
+    for (var attempt = 0; attempt <= retries; attempt++) {
+      if (_disposed) throw const HttpException('cancelado');
+      try {
+        final request = await client.getUrl(uri).timeout(timeout);
+        request.headers.set(HttpHeaders.userAgentHeader, userAgent);
+        request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+        final response = await request.close().timeout(timeout);
+        if (response.statusCode == 404) {
+          await response.drain<void>();
+          return null;
+        }
+        if (response.statusCode == 429 || response.statusCode >= 500) {
+          await response.drain<void>();
+          throw HttpException('${uri.host} respondió ${response.statusCode}.');
+        }
+        if (response.statusCode != 200) {
+          await response.drain<void>();
+          return null; // 4xx distinto de 429: petición no válida, sin reintento
+        }
+        final bytes = await _readBounded(response).timeout(timeout);
+        try {
+          return jsonDecode(utf8.decode(bytes));
+        } on FormatException {
+          return null; // respuesta rara: se trata como «sin datos»
+        }
+      } on FormatException {
+        rethrow; // tamaño excedido: no reintentar
+      } catch (e) {
+        error = e;
+        if (attempt < retries) {
+          await Future<void>.delayed(backoff * (1 << attempt));
+        }
+      }
+    }
+    throw error!;
   }
 
   static Future<List<int>> _readBounded(HttpClientResponse response) async {
@@ -166,56 +450,194 @@ class LyricsService {
     return builder.takeBytes();
   }
 
-  static bool _matches(
-    Map<String, dynamic> data,
-    String artist,
-    String title,
-    Duration duration,
-  ) =>
-      _clean('${data['artistName'] ?? ''}') == _clean(artist) &&
-      _clean('${data['trackName'] ?? ''}') == _clean(title) &&
-      (duration <= Duration.zero ||
-          (data['duration'] is num &&
-              ((data['duration'] as num) - duration.inSeconds).abs() <= 2));
-  static LyricsResult _result(String content) {
-    final lines = parseLrc(content);
-    if (lines.isNotEmpty) return LyricsResult(LyricsKind.synced, lines: lines);
-    final text = content.trim();
-    return text.isEmpty
-        ? const LyricsResult(LyricsKind.notFound)
-        : LyricsResult(LyricsKind.plain, text: text);
+  /// Candidatos de LRCLIB para elegir a mano (más probables primero).
+  Future<List<LyricsCandidate>> candidates(Track track) async {
+    final generation = _begin();
+    final client = _clientFactory()..connectionTimeout = timeout;
+    _clients.add(client);
+    try {
+      final r = await _lrclibSearch(client, queryFor(track), best: false);
+      return _disposed || generation != _generation
+          ? const []
+          : (r?.$2 ?? const []);
+    } finally {
+      _clients.remove(client);
+      client.close(force: true);
+    }
   }
 
-  String _path(Track track, Directory root) {
+  Future<LyricsResult> choose(
+    Track track,
+    Directory root,
+    LyricsCandidate c,
+  ) async {
+    final result = _result(c.content, c.source, LyricsConfidence.medium);
+    await _writeCache(track, root, result, raw: c.content, manual: true);
+    return result;
+  }
+
+  // ---- caché en disco ---------------------------------------------------
+
+  static String _hash(String id) {
     var hash = 0x811c9dc5;
-    for (final byte in utf8.encode(track.id)) {
+    for (final byte in utf8.encode(id)) {
       hash = ((hash ^ byte) * 0x01000193) & 0xffffffff;
     }
-    return p.join(
-      root.path,
-      'lyrics',
-      '${hash.toRadixString(16).padLeft(8, '0')}.txt',
-    );
+    return hash.toRadixString(16).padLeft(8, '0');
   }
 
-  Future<String?> _readCache(Track track, Directory root) async {
-    final file = File(_path(track, root));
-    if (!await file.exists() || await file.length() > maxBytes) return null;
-    final content = await file.readAsString();
-    // Cache payload is prefixed with the exact track ID to prevent filename collisions.
-    final marker = 'AURORA-LYRICS:${track.id}\n';
-    return content.startsWith(marker) ? content.substring(marker.length) : null;
-  }
+  // En disco no se guarda ni el id crudo (puede ser una ruta): hash + título/artista normalizados.
+  static String _key(Track t) =>
+      '${_hash(t.id)}:${normalizeLyricsKey('${t.artist}${t.title}')}';
 
-  Future<void> _writeCache(Track track, Directory root, String content) async {
-    if (_disposed) return;
-    Directory(p.join(root.path, 'lyrics')).createSync(recursive: true);
-    final bytes = utf8.encode('AURORA-LYRICS:${track.id}\n$content');
-    if (bytes.length > maxBytes) {
-      throw const FormatException('Lyrics exceed 1 MiB.');
+  File _file(Track track, Directory root) =>
+      File(p.join(root.path, 'lyrics', '${_hash(track.id)}.json'));
+
+  Future<_Cached?> _readCache(Track track, Directory root) async {
+    try {
+      final file = _file(track, root);
+      if (await file.exists() && await file.length() <= maxBytes * 2) {
+        final j = jsonDecode(await file.readAsString());
+        if (j is Map && j['k'] == _key(track)) {
+          unawaited(file.setLastModified(now()).catchError((_) {})); // LRU
+          final at = DateTime.fromMillisecondsSinceEpoch(
+            (j['at'] as num?)?.toInt() ?? 0,
+          );
+          final manual = j['manual'] == true;
+          if (j['none'] == true) {
+            return _Cached(
+              const LyricsResult(LyricsKind.notFound),
+              at,
+              negative: true,
+            );
+          }
+          final source = '${j['source'] ?? ''}';
+          if (j['instrumental'] == true) {
+            return _Cached(
+              LyricsResult(LyricsKind.instrumental, source: source),
+              at,
+              manual: manual,
+            );
+          }
+          final conf =
+              LyricsConfidence.values.asNameMap()['${j['confidence']}'] ??
+              LyricsConfidence.medium;
+          final r = _result(
+            '${j['content'] ?? ''}',
+            source,
+            conf,
+            allowSync: j['synced'] != false,
+          );
+          if (r.kind != LyricsKind.notFound) {
+            return _Cached(r, at, manual: manual);
+          }
+        }
+      }
+    } catch (_) {
+      // caché ilegible: se ignora y se vuelve a pedir
     }
-    await File(_path(track, root)).writeAsBytes(bytes, flush: true);
+    return null;
   }
+
+  Future<void> _writeCache(
+    Track track,
+    Directory root,
+    LyricsResult r, {
+    String? raw,
+    bool manual = false,
+  }) => _write(track, root, {
+    if (manual) 'manual': true,
+    'k': _key(track),
+    'at': now().millisecondsSinceEpoch,
+    'source': r.source,
+    'confidence': r.confidence.name,
+    if (r.kind == LyricsKind.instrumental) 'instrumental': true,
+    'synced': r.kind == LyricsKind.synced,
+    'content': raw ?? _serialize(r),
+  });
+
+  Future<void> _writeNegative(Track track, Directory root) => _write(
+    track,
+    root,
+    {'k': _key(track), 'at': now().millisecondsSinceEpoch, 'none': true},
+  );
+
+  static String _serialize(LyricsResult r) {
+    if (r.kind == LyricsKind.synced) {
+      String ts(Duration d) {
+        final ms = d.inMilliseconds;
+        return '[${(ms ~/ 60000).toString().padLeft(2, '0')}:${((ms ~/ 1000) % 60).toString().padLeft(2, '0')}.${((ms % 1000) ~/ 10).toString().padLeft(2, '0')}]';
+      }
+
+      return r.lines.map((l) => '${ts(l.at)}${l.text}').join('\n');
+    }
+    return r.text;
+  }
+
+  Future<void> _write(
+    Track track,
+    Directory root,
+    Map<String, Object?> data,
+  ) async {
+    if (_disposed) return;
+    try {
+      final dir = Directory(p.join(root.path, 'lyrics'))
+        ..createSync(recursive: true);
+      final bytes = utf8.encode(jsonEncode(data));
+      if (bytes.length > maxBytes * 2) return;
+      await _file(track, root).writeAsBytes(bytes, flush: true);
+      final files = dir
+          .listSync()
+          .whereType<File>()
+          .where(
+            (f) => f.path.endsWith('.json') && !f.path.endsWith('offsets.json'),
+          )
+          .toList();
+      if (files.length > maxCacheFiles) {
+        files.sort(
+          (a, b) => a.lastModifiedSync().compareTo(b.lastModifiedSync()),
+        );
+        for (final f in files.take(files.length - maxCacheFiles)) {
+          f.deleteSync();
+        }
+      }
+    } catch (_) {
+      // la caché es opcional
+    }
+  }
+
+  // ---- desfase por pista ------------------------------------------------
+
+  File _offsetsFile(Directory root) =>
+      File(p.join(root.path, 'lyrics', 'offsets.json'));
+
+  Future<int> readOffset(Track track, Directory root) async {
+    try {
+      final j = jsonDecode(await _offsetsFile(root).readAsString());
+      return j is Map ? (j[_hash(track.id)] as num?)?.toInt() ?? 0 : 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<void> saveOffset(Track track, Directory root, int ms) async {
+    try {
+      var map = <String, Object?>{};
+      try {
+        final j = jsonDecode(await _offsetsFile(root).readAsString());
+        if (j is Map<String, dynamic>) map = j;
+      } catch (_) {}
+      map.remove(_hash(track.id));
+      if (ms != 0) map[_hash(track.id)] = ms;
+      while (map.length > 500) {
+        map.remove(map.keys.first);
+      }
+      Directory(p.join(root.path, 'lyrics')).createSync(recursive: true);
+      await _offsetsFile(root).writeAsString(jsonEncode(map), flush: true);
+    } catch (_) {}
+  }
+
+  // ---- importación manual -------------------------------------------------
 
   Future<LyricsResult?> importFile(Track track, Directory root) async {
     final files = await FilePicker.pickFiles(
@@ -237,8 +659,9 @@ class LyricsService {
       throw const FormatException('Choose a lyrics file up to 1 MiB.');
     }
     final content = utf8.decode(bytes, allowMalformed: false);
-    await _writeCache(track, root, content);
-    return _result(content);
+    final result = _result(content, 'Archivo local', LyricsConfidence.high);
+    await _writeCache(track, root, result, raw: content, manual: true);
+    return result;
   }
 
   void dispose() {
@@ -249,4 +672,19 @@ class LyricsService {
     }
     _clients.clear();
   }
+}
+
+class _Cached {
+  const _Cached(
+    this.result,
+    this.at, {
+    this.negative = false,
+    this.manual = false,
+  });
+  final LyricsResult result;
+  final DateTime at;
+  final bool negative;
+
+  /// Elegida o importada por el usuario: la red no la pisa.
+  final bool manual;
 }

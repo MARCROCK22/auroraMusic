@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app_controller.dart';
 import '../core/models.dart';
@@ -50,6 +51,8 @@ class _LyricsPanelState extends State<LyricsPanel> {
   int _offsetMs = 0;
   int _mode = 0;
   int _typeface = 0;
+  int _size = 1;
+  static const _sizes = [.8, 1.0, 1.25];
   Duration? _scrubPosition;
   String? _scrubTrackId;
   final Map<int, GlobalKey> _lineKeys = {};
@@ -73,11 +76,25 @@ class _LyricsPanelState extends State<LyricsPanel> {
     _loading = false;
     _result = null;
     _error = null;
-    if (track != null) unawaited(_load(track));
+    if (track != null) {
+      unawaited(_load(track));
+      unawaited(
+        _service.readOffset(track, widget.controller.supportDirectory).then((
+          v,
+        ) {
+          if (mounted && _trackId == track.id && v != 0) {
+            setState(() {
+              _offsetMs = v;
+              _lastActive = -1;
+            });
+          }
+        }),
+      );
+    }
     if (mounted) setState(() {});
   }
 
-  Future<void> _load(Track track) async {
+  Future<void> _load(Track track, {bool force = false}) async {
     final request = ++_request;
     setState(() {
       _loading = true;
@@ -87,6 +104,17 @@ class _LyricsPanelState extends State<LyricsPanel> {
       final result = await _service.load(
         track,
         widget.controller.supportDirectory,
+        force: force,
+        onInterim: (cached) {
+          if (mounted &&
+              request == _request &&
+              widget.controller.currentTrack?.id == track.id) {
+            setState(() {
+              _result = cached;
+              _loading = false;
+            });
+          }
+        },
       );
       if (!mounted ||
           request != _request ||
@@ -106,6 +134,88 @@ class _LyricsPanelState extends State<LyricsPanel> {
           widget.controller.currentTrack?.id == track.id) {
         setState(() => _loading = false);
       }
+    }
+  }
+
+  Future<void> _copy() async {
+    final r = _result;
+    final text = r == null
+        ? ''
+        : r.kind == LyricsKind.synced
+        ? r.lines.map((l) => l.text).join('\n')
+        : r.text;
+    if (text.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) {
+      ScaffoldMessenger.maybeOf(
+        context,
+      )?.showSnackBar(const SnackBar(content: Text('Letra copiada.')));
+    }
+  }
+
+  void _setOffset(int ms) {
+    setState(() {
+      _offsetMs = ms;
+      _lastActive = -1;
+    });
+    final track = widget.controller.currentTrack;
+    if (track != null) {
+      unawaited(
+        _service.saveOffset(track, widget.controller.supportDirectory, ms),
+      );
+    }
+  }
+
+  Future<void> _pickOther() async {
+    final track = widget.controller.currentTrack;
+    if (track == null) return;
+    final request = ++_request;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    var found = const <LyricsCandidate>[];
+    try {
+      found = await _service.candidates(track);
+    } catch (_) {
+      if (mounted && request == _request) {
+        _error = 'No se pudo buscar otras letras.';
+      }
+    }
+    if (!mounted || request != _request) return;
+    setState(() => _loading = false);
+    if (_error != null) return;
+    if (found.isEmpty) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('No hay otras letras para esta pista.')),
+      );
+      return;
+    }
+    final choice = await showDialog<LyricsCandidate>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Buscar otra letra'),
+        children: [
+          for (final c in found.take(12))
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(context).pop(c),
+              child: Text(
+                '${c.title} · ${c.artist}\n'
+                '${c.seconds > 0 ? _formatTime(Duration(seconds: c.seconds)) : '--:--'} · '
+                '${c.synced ? 'sincronizada' : 'texto plano'} · ${c.source}',
+              ),
+            ),
+        ],
+      ),
+    );
+    if (choice == null || !mounted || request != _request) return;
+    final result = await _service.choose(
+      track,
+      widget.controller.supportDirectory,
+      choice,
+    );
+    if (mounted && widget.controller.currentTrack?.id == track.id) {
+      setState(() => _result = result);
     }
   }
 
@@ -175,6 +285,21 @@ class _LyricsPanelState extends State<LyricsPanel> {
               onPressed: _loading ? null : _import,
               icon: const Icon(StudioSymbols.uploadFile),
             ),
+            IconButton(
+              tooltip: 'Copiar letra',
+              onPressed: _copy,
+              icon: const Icon(Icons.copy_outlined),
+            ),
+            IconButton(
+              tooltip: 'Letra más pequeña',
+              onPressed: _size > 0 ? () => setState(() => _size--) : null,
+              icon: const Icon(Icons.text_decrease),
+            ),
+            IconButton(
+              tooltip: 'Letra más grande',
+              onPressed: _size < 2 ? () => setState(() => _size++) : null,
+              icon: const Icon(Icons.text_increase),
+            ),
             if (!desktop)
               IconButton(
                 tooltip: 'Ajustes de letras',
@@ -235,9 +360,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
                                     ),
                                   ),
                                   Text(
-                                    _result?.kind == LyricsKind.synced
-                                        ? 'LRC SYNC ACTIVO'
-                                        : 'SIN MARCAS LRC',
+                                    _sourceLabel().toUpperCase(),
                                     style: TextStyle(
                                       fontSize: 12,
                                       color: colors.primary,
@@ -400,6 +523,14 @@ class _LyricsPanelState extends State<LyricsPanel> {
     );
   }
 
+  String _sourceLabel() {
+    final r = _result;
+    if (r == null || r.kind == LyricsKind.notFound) return 'Sin letra';
+    final kind = r.kind == LyricsKind.synced ? 'sincronizada' : 'texto plano';
+    final saved = r.fromCache ? ' · guardada' : '';
+    return r.source.isEmpty ? '$kind$saved' : '${r.source} · $kind$saved';
+  }
+
   Widget _modes({VoidCallback? refresh}) => Wrap(
     spacing: 4,
     runSpacing: 4,
@@ -432,10 +563,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
           const Text('SINCRONÍA OFFSET:'),
           OutlinedButton(
             onPressed: () {
-              setState(() {
-                _offsetMs -= 500;
-                _lastActive = -1;
-              });
+              _setOffset(_offsetMs - 500);
               refresh?.call();
             },
             child: const Text('-0.5s'),
@@ -445,10 +573,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
           ),
           OutlinedButton(
             onPressed: () {
-              setState(() {
-                _offsetMs += 500;
-                _lastActive = -1;
-              });
+              _setOffset(_offsetMs + 500);
               refresh?.call();
             },
             child: const Text('+0.5s'),
@@ -456,10 +581,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
           IconButton(
             tooltip: 'Restablecer sincronía',
             onPressed: () {
-              setState(() {
-                _offsetMs = 0;
-                _lastActive = -1;
-              });
+              _setOffset(0);
               refresh?.call();
             },
             icon: const Icon(Icons.restart_alt),
@@ -467,7 +589,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
         ],
       ),
       const Text(
-        'Ajuste manual de esta pista, durante esta sesión.',
+        'Ajuste manual, recordado para esta pista.',
         style: TextStyle(fontSize: 12),
       ),
       const SizedBox(height: 8),
@@ -623,10 +745,19 @@ class _LyricsPanelState extends State<LyricsPanel> {
     }
     if (_loading) {
       return const Center(
-        child: CircularProgressIndicator(semanticsLabel: 'Cargando letras'),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(semanticsLabel: 'Cargando letras'),
+            SizedBox(height: 12),
+            Text('Buscando letra…'),
+          ],
+        ),
       );
     }
-    if (_error != null) return _message(_error!, retry: () => _load(track));
+    if (_error != null) {
+      return _message(_error!, retry: () => _load(track, force: true));
+    }
     if (_mode == 2) {
       return const Center(
         child: Padding(
@@ -640,7 +771,11 @@ class _LyricsPanelState extends State<LyricsPanel> {
     }
     final result = _result;
     if (result == null || result.kind == LyricsKind.notFound) {
-      return _message('No se encontraron letras.', retry: () => _load(track));
+      return _message(
+        'Sin letra disponible',
+        retry: () => _load(track, force: true),
+        other: _pickOther,
+      );
     }
     if (result.kind == LyricsKind.instrumental) {
       return const Center(child: Text('Pista instrumental'));
@@ -670,7 +805,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
                   'Plus Jakarta Sans',
                   'monospace',
                 ][_typeface],
-                fontSize: 24,
+                fontSize: 24 * _sizes[_size],
                 height: 1.65,
               ),
             ),
@@ -811,7 +946,11 @@ class _LyricsPanelState extends State<LyricsPanel> {
     );
   }
 
-  Widget _message(String value, {required VoidCallback retry}) => Center(
+  Widget _message(
+    String value, {
+    required VoidCallback retry,
+    VoidCallback? other,
+  }) => Center(
     child: SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -828,6 +967,12 @@ class _LyricsPanelState extends State<LyricsPanel> {
                 icon: const Icon(StudioSymbols.restartAlt),
                 label: const Text('Reintentar'),
               ),
+              if (other != null)
+                TextButton.icon(
+                  onPressed: other,
+                  icon: const Icon(Icons.manage_search),
+                  label: const Text('Buscar otra letra'),
+                ),
               TextButton.icon(
                 onPressed: _import,
                 icon: const Icon(StudioSymbols.uploadFile),

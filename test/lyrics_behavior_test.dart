@@ -60,6 +60,9 @@ class _ResponseRequest extends Fake implements HttpClientRequest {
   final response = _Response();
 
   @override
+  final HttpHeaders headers = _Headers();
+
+  @override
   Future<HttpClientResponse> close() async => response;
 }
 
@@ -94,8 +97,13 @@ class _DeferredLyrics extends LyricsService {
   final results = <String, Completer<LyricsResult>>{};
 
   @override
-  Future<LyricsResult> load(Track track, Directory supportDirectory) =>
-      (results[track.id] ??= Completer<LyricsResult>()).future;
+  Future<LyricsResult> load(
+    Track track,
+    Directory supportDirectory, {
+    bool force = false,
+    void Function(LyricsResult cached)? onInterim,
+    Duration slowAfter = const Duration(seconds: 3),
+  }) => (results[track.id] ??= Completer<LyricsResult>()).future;
 }
 
 Future<Directory> _temporaryDirectory() =>
@@ -138,13 +146,14 @@ void main() {
         final result = await service.load(_track, directory);
 
         expect(result.kind, LyricsKind.synced);
-        expect(requestedUris, hasLength(1));
-        expect(requestedUris.single.scheme, 'https');
-        expect(requestedUris.single.host, 'lrclib.net');
-        expect(requestedUris.single.path, '/api/get');
-        expect(requestedUris.single.queryParameters, {
+        expect(requestedUris, isNotEmpty);
+        expect(requestedUris.first.scheme, 'https');
+        expect(requestedUris.first.host, 'lrclib.net');
+        expect(requestedUris.first.path, '/api/get');
+        expect(requestedUris.first.queryParameters, {
           'artist_name': 'Fixture Artist',
           'track_name': 'Fixture Song',
+          'duration': '180',
         });
         service.dispose();
       },
@@ -533,6 +542,51 @@ void main() {
         expect(tester.takeException(), isNull);
       },
     );
+
+    testWidgets('muestra «Buscando letra…» mientras carga', (tester) async {
+      await mount(tester);
+      controller.queue = [_track];
+      controller.queueIndex = 0;
+      controller.notifyListeners();
+      await tester.pump();
+      expect(find.text('Buscando letra…'), findsOneWidget);
+    });
+
+    testWidgets('sin letra ofrece Reintentar y Buscar otra letra', (
+      tester,
+    ) async {
+      await mount(tester);
+      controller.queue = [_track];
+      controller.queueIndex = 0;
+      controller.notifyListeners();
+      await tester.pump();
+      service.results[_track.id]!.complete(
+        const LyricsResult(LyricsKind.notFound),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Sin letra disponible'), findsOneWidget);
+      expect(find.text('Reintentar'), findsOneWidget);
+      expect(find.text('Buscar otra letra'), findsOneWidget);
+    });
+
+    testWidgets('indica origen y si la letra es sincronizada o guardada', (
+      tester,
+    ) async {
+      await mount(tester, width: 1100);
+      controller.queue = [_track];
+      controller.queueIndex = 0;
+      controller.notifyListeners();
+      await tester.pump();
+      service.results[_track.id]!.complete(
+        const LyricsResult(
+          LyricsKind.synced,
+          source: 'LRCLIB',
+          lines: [LyricLine(Duration(seconds: 1), 'fixture first')],
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('LRCLIB · SINCRONIZADA'), findsOneWidget);
+    });
   });
 }
 
@@ -557,4 +611,9 @@ class _PendingClient extends Fake implements HttpClient {
 
   @override
   void close({bool force = false}) {}
+}
+
+class _Headers extends Fake implements HttpHeaders {
+  @override
+  void set(String name, Object value, {bool preserveHeaderCase = false}) {}
 }
