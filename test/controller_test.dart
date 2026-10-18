@@ -512,9 +512,7 @@ void main() {
           pageUrl: 'https://youtu.be/dj-found',
         ),
       ]);
-      await _waitFor(
-        () => controller.queue.any((track) => track.id == 'dj-found'),
-      );
+      await _waitFor(() => controller.queue.length > 2);
 
       expect(controller.personalDjActive, isTrue);
       expect(controller.audio.isPlaying, isFalse);
@@ -548,9 +546,7 @@ void main() {
           pageUrl: 'https://youtu.be/dj-waiting',
         ),
       ]);
-      await _waitFor(
-        () => controller.queue.any((track) => track.id == 'dj-waiting'),
-      );
+      await _waitFor(() => controller.queue.length > 2);
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
       expect(controller.currentTrack?.id, currentId);

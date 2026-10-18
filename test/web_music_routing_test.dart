@@ -46,7 +46,7 @@ Future<AppController> _controller({
   Directory? directory,
   Map<String, Object> preferences = const {},
 }) async {
-  SharedPreferences.setMockInitialValues(preferences);
+  SharedPreferences.setMockInitialValues({'autoRefill': false, ...preferences});
   final prefs = await SharedPreferences.getInstance();
   final database = LibraryDatabase(NativeDatabase.memory());
   for (final track in tracks) {

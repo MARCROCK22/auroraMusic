@@ -67,7 +67,7 @@ Future<AppController> _controller(
   LibraryDatabase? database,
   Future<List<Track>> Function(String query, {int limit})? metadataSearch,
 }) async {
-  SharedPreferences.setMockInitialValues({});
+  SharedPreferences.setMockInitialValues({'autoRefill': false});
   final app = AppController(
     audio: audio,
     source: WebMusicSource(

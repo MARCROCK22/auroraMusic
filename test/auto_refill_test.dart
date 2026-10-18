@@ -29,7 +29,7 @@ void main() {
     final app = await createTestController(
       tracks: library,
       audio: audio,
-      preferences: prefs,
+      preferences: {'autoRefill': true, ...prefs},
     );
     addTearDown(() => closeTestController(app));
     return app;

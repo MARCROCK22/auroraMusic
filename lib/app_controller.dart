@@ -228,10 +228,9 @@ class AppController extends ChangeNotifier {
       autoRefill &&
       !_disposed &&
       !_jamPlaybackActive &&
-      !_personalDjActive &&
       !_youtubeMusicActive &&
-      !shuffle &&
-      repeat == RepeatMode.off &&
+      repeat != RepeatMode.one &&
+      (_personalDjActive || (!shuffle && repeat == RepeatMode.off)) &&
       queue.isNotEmpty &&
       queueIndex >= 0;
 
@@ -241,17 +240,98 @@ class AppController extends ChangeNotifier {
     _notify();
   }
 
-  /// Mantiene hasta [target] pistas por delante añadiendo al final de la cola
-  /// (nunca reordena ni quita lo que armó el usuario). Motor → biblioteca →
-  /// favoritos no sonados → favoritos; sin repetir artista seguido.
+  /// Red de seguridad: la cola no termina nunca. Mantiene hasta [target]
+  /// pistas por delante añadiendo al final (nunca reordena ni quita lo que
+  /// armó el usuario). Motor → biblioteca → favoritos → repetir lo sonado;
+  /// sin repetir artista seguido. Actúa también con el DJ personal.
   Future<void> _refillQueue({int target = 5}) {
-    if (!_canAutoRefill || queue.length - queueIndex - 1 >= target) {
+    if (!_canAutoRefill || _upcomingCount >= target) {
       return _refillFuture ?? Future.value();
     }
     return _refillFuture ??= _doRefill(
       target,
     ).whenComplete(() => _refillFuture = null);
   }
+
+  /// Sugerencias del motor local (mismo filtro de coherencia para el DJ y el
+  /// autoplay). Un fallo o un tiempo agotado no apagan nada: se anota un aviso
+  /// discreto, se reintenta con espera creciente y quien llama cae a lo local.
+  /// La radio de YouTube (related) entra como una fuente más del motor, que
+  /// la mezcla por cubo (`mix`) y la filtra igual que el resto.
+  Future<List<Suggestion>> _engineSuggestions() async {
+    final retryAt = _engineRetryAt;
+    if (retryAt != null && DateTime.now().isBefore(retryAt)) return const [];
+    final current = currentTrack;
+    final recent = recentTracks
+        .take(20)
+        .expand(recommendationTrackKeys)
+        .toSet();
+    try {
+      final extra = <DjCandidate>[];
+      final src = source;
+      final id = current?.id.startsWith('yt:') == true
+          ? current!.id.substring(3)
+          : null;
+      if (src is InnerTubeSource && id != null) {
+        try {
+          final related = await src
+              .related(id)
+              .timeout(const Duration(seconds: 6));
+          for (var i = 0; i < related.length; i++) {
+            extra.add(
+              DjCandidate(
+                related[i],
+                'Radio de YouTube',
+                prior: 0.5 / (1 + i / 5),
+                bucket: RecBucket.radio,
+              ),
+            );
+          }
+        } catch (_) {}
+      }
+      final picks = await suggestionsApi
+          .getSuggestions(
+            SessionContext(
+              participants: [selfTaste],
+              mode: _djMode,
+              current: current,
+              library: tracks,
+              recentKeys: recent,
+              queueTail: queue.skip(max(0, queue.length - 3)).toList(),
+              extraCandidates: extra,
+              limit: 12,
+            ),
+          )
+          .timeout(refillEngineTimeout);
+      _engineFailures = 0;
+      _engineRetryAt = null;
+      if (_personalDjActive && personalDjError == _engineDownNotice) {
+        personalDjError = null;
+        _notify();
+      }
+      return picks;
+    } catch (_) {
+      _engineFailures++;
+      _engineRetryAt = DateTime.now().add(
+        Duration(seconds: min(120, 5 << min(_engineFailures - 1, 5))),
+      );
+      if (_personalDjActive && !_disposed) {
+        personalDjError = _engineDownNotice;
+        _notify();
+      }
+      return const [];
+    }
+  }
+
+  static const _engineDownNotice = 'el motor de sugerencias no responde';
+  int _engineFailures = 0;
+  DateTime? _engineRetryAt;
+
+  /// Tiempo máximo que se espera al motor antes de seguir con lo local.
+  Duration refillEngineTimeout = const Duration(seconds: 12);
+
+  /// Sustituye el motor de sugerencias (pruebas).
+  set suggestionsApi(SuggestionsApi api) => _suggestionsApi = api;
 
   Future<void> _doRefill(int target) async {
     final current = currentTrack;
@@ -264,9 +344,14 @@ class AppController extends ChangeNotifier {
         !(usesOfficialYouTubeMusic || usesYouTubeWebAudio) ||
         isNativePlayable(t);
     int need() => target - (queue.length - queueIndex - 1) - picked.length;
-    void take(Iterable<Track> pool, {bool allowRecent = false}) {
+    void take(
+      Iterable<Track> pool, {
+      bool allowRecent = false,
+      bool reuse = false,
+    }) {
       final seen = {
-        for (final t in [...queue, ...picked]) ...recommendationTrackKeys(t),
+        for (final t in [if (!reuse) ...queue, ...picked])
+          ...recommendationTrackKeys(t),
       };
       for (final relaxed in [false, true]) {
         for (final t in pool) {
@@ -292,51 +377,22 @@ class AppController extends ChangeNotifier {
       }
     }
 
-    try {
-      final radio = <DjCandidate>[];
-      final src = source;
-      final id = current?.id.startsWith('yt:') == true
-          ? current!.id.substring(3)
-          : null;
-      if (src is InnerTubeSource && id != null) {
-        try {
-          final related = await src
-              .related(id)
-              .timeout(const Duration(seconds: 6));
-          for (var i = 0; i < related.length; i++) {
-            radio.add(
-              DjCandidate(
-                related[i],
-                'Radio de YouTube',
-                prior: 0.5 / (1 + i / 5),
-                bucket: RecBucket.radio,
-              ),
-            );
-          }
-        } catch (_) {}
-      }
-      final picks = await suggestionsApi.getSuggestions(
-        SessionContext(
-          participants: [selfTaste],
-          mode: _djMode,
-          current: current,
-          library: tracks,
-          recentKeys: recent,
-          queueTail: queue.skip(max(0, queue.length - 3)).toList(),
-          extraCandidates: radio,
-          limit: 12,
-        ),
-      );
-      take([for (final s in picks) s.track]);
-    } catch (_) {
-      // Sin red o motor caído: se sigue con lo local.
-    }
+    take([for (final s in await _engineSuggestions()) s.track]);
     take(tracks);
     final favorites = [
       for (final t in tracks)
         if (favoriteIds.contains(t.id)) t,
     ];
     take(favorites, allowRecent: true);
+    take(tracks, allowRecent: true);
+    // Último recurso: repetir lo ya sonado antes que quedarse en silencio.
+    if (need() > 0 && current != null) {
+      take(
+        [...queue.take(queueIndex), current],
+        allowRecent: true,
+        reuse: true,
+      );
+    }
     if (picked.isEmpty || !_canAutoRefill) return;
     queue.addAll(picked);
     autoAddedIds.addAll(picked.map((t) => t.id));
@@ -705,7 +761,14 @@ class AppController extends ChangeNotifier {
     if (queue.isEmpty || queueIndex < 0) return;
     if (djRefillCount(_upcomingCount, force: force) == 0) return;
     final generation = _personalDjGeneration;
-    final task = _performPersonalDjRefill(generation);
+    final task = _performPersonalDjRefill(generation).catchError((
+      Object exception,
+    ) {
+      // Un fallo nunca apaga el DJ: aviso discreto y la red de seguridad sigue.
+      if (_disposed) return;
+      personalDjError = _plain(exception);
+      _notify();
+    });
     _personalDjRefillTask = task;
     try {
       await task;
@@ -859,6 +922,20 @@ class AppController extends ChangeNotifier {
       }
     }
     if (stale()) return;
+
+    // Mismo motor (Spotify, radio de YouTube y filtro de coherencia) que el autoplay.
+    final engine = await _engineSuggestions();
+    if (stale()) return;
+    for (var i = 0; i < engine.length; i++) {
+      candidates.add(
+        DjCandidate(
+          engine[i].track,
+          engine[i].reason,
+          prior: 0.5 / (1 + i / 5),
+          bucket: engine[i].bucket,
+        ),
+      );
+    }
 
     // Recompute after the awaits: the user may have queued tracks meanwhile.
     final limit = djUpcomingTarget - _upcomingCount;
@@ -1495,7 +1572,6 @@ class AppController extends ChangeNotifier {
     if (_jamPlaybackActive) return;
     if (index < 0 || index >= queue.length) return;
     if (_routeToYouTubeMusic(queue[index])) return;
-    stopPersonalDj();
     _playIntent = true;
     _expiryRetries = 0;
     queueIndex = index;
@@ -1662,19 +1738,18 @@ class AppController extends ChangeNotifier {
         busy = _recovering && fromRecovery;
         _adoptWebTrackMetadata();
         _notify();
-        // Última de la cola: se deja lista la continuación antes de que termine.
-        if (_loadedTrackId == track.id &&
-            audio.isPlaying &&
-            queueIndex == queue.length - 1) {
-          unawaited(_refillQueue());
-        }
-        if (_personalDjActive &&
-            _loadedTrackId == track.id &&
-            audio.isPlaying) {
-          unawaited(_refillPersonalDjQueue());
+        // Con menos de 5 por delante se deja lista la continuación (DJ y red).
+        if (_loadedTrackId == track.id && audio.isPlaying) {
+          unawaited(_topUpQueue());
         }
       }
     }
+  }
+
+  /// El DJ propone primero; la red de seguridad cubre lo que falte.
+  Future<void> _topUpQueue() async {
+    await _refillPersonalDjQueue();
+    await _refillQueue();
   }
 
   /// Suspend personal playback before Jam starts using [audio].
@@ -1833,9 +1908,17 @@ class AppController extends ChangeNotifier {
     _notify();
   }
 
-  Future<void> stopPlayback() async {
+  /// Fin real de la cola (sin pistas que sumar): se avisa y el DJ sigue activo.
+  Future<void> _endOfQueue() async {
+    if (tracks.isEmpty && autoRefill) {
+      error = 'No hay más canciones: añade música a tu biblioteca.';
+    }
+    await stopPlayback(keepDj: true);
+  }
+
+  Future<void> stopPlayback({bool keepDj = false}) async {
     if (_jamPlaybackActive) return;
-    stopPersonalDj();
+    if (!keepDj) stopPersonalDj();
     ++_playGeneration;
     _playIntent = false;
     _cancelRecovery();
@@ -1882,8 +1965,8 @@ class AppController extends ChangeNotifier {
     final hasNoUpcoming = shuffle
         ? queue.length - _shufflePlayed.length <= 0
         : queueIndex == queue.length - 1;
-    if (_personalDjActive && hasNoUpcoming) {
-      await _refillPersonalDjQueue();
+    if (hasNoUpcoming && (_personalDjActive || _canAutoRefill)) {
+      await _topUpQueue();
       if (!_playIntent ||
           _disposed ||
           generation != _playGeneration ||
@@ -1922,12 +2005,13 @@ class AppController extends ChangeNotifier {
         // Autoplay: the DJ continues when the queue runs out.
         final generation = _playGeneration;
         await _refillPersonalDjQueue(force: true);
+        await _refillQueue();
         if (generation != _playGeneration || _disposed || !_playIntent) return;
         candidates = unplayed();
       }
       if (candidates.isEmpty) {
         if (repeat != RepeatMode.all) {
-          await stopPlayback();
+          await _endOfQueue();
           return;
         }
         _shufflePlayed
@@ -1943,7 +2027,7 @@ class AppController extends ChangeNotifier {
             .toList();
       }
       if (candidates.isEmpty) {
-        await stopPlayback();
+        await _endOfQueue();
         return;
       }
       _shuffleHistory.add(queueIndex);
@@ -1966,12 +2050,6 @@ class AppController extends ChangeNotifier {
               )
               .firstOrNull;
       var target = nextIndex();
-      if (target == null && _canAutoRefill) {
-        final generation = _playGeneration;
-        await _refillQueue();
-        if (generation != _playGeneration || _disposed || !_playIntent) return;
-        target = nextIndex();
-      }
       if (target == null && _personalDjActive) {
         // Autoplay: the DJ continues when the queue runs out.
         final generation = _playGeneration;
@@ -1979,8 +2057,14 @@ class AppController extends ChangeNotifier {
         if (generation != _playGeneration || _disposed || !_playIntent) return;
         target = nextIndex();
       }
+      if (target == null && _canAutoRefill) {
+        final generation = _playGeneration;
+        await _refillQueue();
+        if (generation != _playGeneration || _disposed || !_playIntent) return;
+        target = nextIndex();
+      }
       if (target == null) {
-        await stopPlayback();
+        await _endOfQueue();
         return;
       }
       queueIndex = target;
