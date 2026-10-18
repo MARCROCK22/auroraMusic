@@ -93,7 +93,7 @@ el motivo del recomendador clásico. El panel DJ muestra el siguiente motivo.
 ## Cola
 
 - Al iniciar, el DJ llena hasta unas 20 canciones pendientes; después recarga
-  cuando quedan menos de 5. Solo añade al final: no toca la canción actual ni lo
+  cuando quedan menos de 10 (`kQueueLookahead`). Solo añade al final: no toca la canción actual ni lo
   que eligió el usuario.
 - Autoplay: si la cola se termina con el DJ activo, recarga y continúa.
 - Contadores de generación descartan resultados tardíos al detener el DJ o

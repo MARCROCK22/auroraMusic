@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+import '../core/queue_policy.dart';
 import 'jam_models.dart';
 import 'jam_peer.dart';
 import 'jam_suggestions.dart';

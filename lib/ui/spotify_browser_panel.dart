@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../core/models.dart';
+import '../jam/jam_models.dart';
+import 'jam/jam_widgets.dart';
 import '../metadata/spotify/spotify_browser_controller.dart';
 import '../metadata/spotify/spotify_metadata_provider.dart';
 import 'artwork.dart';
@@ -99,7 +101,7 @@ class _SpotifyBrowserPanelState extends State<SpotifyBrowserPanel> {
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 24, vertical: 8),
           child: Text(
-            'Spotify aporta la información; Aurora encuentra automáticamente la versión en YouTube.',
+            'Toca una canción para reproducirla; Aurora encuentra la versión en YouTube y arma la cola con música parecida. Usa + para añadir a la cola.',
           ),
         ),
         if (_adder.batch != null) _batchCard(context, _adder.batch!),
@@ -173,14 +175,12 @@ class _SpotifyBrowserPanelState extends State<SpotifyBrowserPanel> {
               overflow: TextOverflow.ellipsis,
             ),
             subtitle: Text(
-              item.track == null
-                  ? item.subtitle
-                  : _trackDescription(item.track!),
+              item.track == null ? item.subtitle : _describe(item.track!),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
             onTap: item.track != null
-                ? () => _adder.add(item.track!)
+                ? () => _adder.play(item.track!)
                 : () => _openDetails(item),
             trailing: item.track != null
                 ? _trackActions(item.track!)
@@ -272,7 +272,7 @@ class _SpotifyBrowserPanelState extends State<SpotifyBrowserPanel> {
             'Sin canciones disponibles',
             'Este resultado no incluye canciones consultables.',
           ),
-        for (final track in details.tracks)
+        for (final (i, track) in details.tracks.indexed)
           ListTile(
             leading: Artwork(
               track: track,
@@ -285,11 +285,12 @@ class _SpotifyBrowserPanelState extends State<SpotifyBrowserPanel> {
               overflow: TextOverflow.ellipsis,
             ),
             subtitle: Text(
-              _trackDescription(track),
+              _describe(track),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
-            onTap: () => _adder.add(track),
+            onTap: () =>
+                _adder.play(track, context: details.tracks.sublist(i + 1)),
             trailing: _trackActions(track),
           ),
         if (details.hasMore)
@@ -339,21 +340,27 @@ class _SpotifyBrowserPanelState extends State<SpotifyBrowserPanel> {
     ),
   );
 
-  /// «+» (cola) y ⋯ (reproducir, Jam). Mientras empareja muestra progreso.
+  /// «+» (cola) y ⋯ (a continuación, Jam, versión a mano). Mientras empareja
+  /// muestra progreso; el toque en la fila es el que reproduce.
   Widget _trackActions(Track track) {
     const box = BoxConstraints(minWidth: 48, minHeight: 48);
     final busy = _adder.isBusy(track.id);
+    final jam = _adder.jamAvailable;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         if (busy)
-          const SizedBox(
-            width: 48,
-            height: 48,
-            child: Center(
-              child: SizedBox.square(
-                dimension: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
+          Semantics(
+            liveRegion: true,
+            label: 'Buscando versión de ${track.title}',
+            child: const SizedBox(
+              width: 48,
+              height: 48,
+              child: Center(
+                child: SizedBox.square(
+                  dimension: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
               ),
             ),
           )
@@ -373,14 +380,21 @@ class _SpotifyBrowserPanelState extends State<SpotifyBrowserPanel> {
               value: () => _adder.add(track),
               child: const Text('Añadir a la cola'),
             ),
-            PopupMenuItem(
-              value: () => _adder.add(track, play: true),
-              child: const Text('Reproducir ahora'),
-            ),
-            if (_adder.jamAvailable)
+            if (!jam)
+              PopupMenuItem(
+                value: () => _adder.add(track, next: true),
+                child: const Text('Reproducir a continuación'),
+              ),
+            if (jam)
               PopupMenuItem(
                 value: () => _adder.add(track, toJam: true),
                 child: const Text('Añadir a la Jam'),
+              ),
+            if (jam && _adder.jam?.call()?.isStaff == true)
+              PopupMenuItem(
+                value: () =>
+                    _adder.add(track, toJam: true, jamMode: JamAddMode.playNow),
+                child: const Text('Reproducir ahora en la Jam'),
               ),
             PopupMenuItem(
               value: () => _adder.manual(track),
@@ -405,6 +419,10 @@ class _SpotifyBrowserPanelState extends State<SpotifyBrowserPanel> {
     artworkContext: artworkContext,
     radius: item.type == SpotifyEntityType.artist ? artworkContext.size : 8,
   );
+
+  String _describe(Track track) => _adder.isBusy(track.id)
+      ? 'Buscando versión… · ${_trackDescription(track)}'
+      : _trackDescription(track);
 
   String _trackDescription(Track track) => [
     track.artist,

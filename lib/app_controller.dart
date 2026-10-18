@@ -16,6 +16,7 @@ import 'audio/routed_music_audio.dart';
 import 'core/audio_backend.dart';
 import 'core/artwork_metadata.dart';
 import 'core/models.dart';
+import 'core/queue_policy.dart';
 import 'core/source_backend.dart';
 import 'import/spotify_import.dart';
 import 'library/library_database.dart';
@@ -206,6 +207,13 @@ class AppController extends ChangeNotifier {
 
   /// Pistas que el autoplay añadió (marca «Sugerida» en la cola).
   final Set<String> autoAddedIds = {};
+
+  /// Pistas que el usuario puso a mano («Añadir a la cola», «A continuación»).
+  /// Al reproducir desde Spotify se conservan; el resto de lo que viene se
+  /// reemplaza. shortcut: no se guarda entre sesiones, al reiniciar todo lo
+  /// que viene cuenta como contexto reemplazable.
+  final Set<String> manualQueuedIds = {};
+  int _seedGeneration = 0;
   Future<void>? _refillFuture;
   SuggestionsApi? _suggestionsApi;
 
@@ -244,7 +252,7 @@ class AppController extends ChangeNotifier {
   /// pistas por delante añadiendo al final (nunca reordena ni quita lo que
   /// armó el usuario). Motor → biblioteca → favoritos → repetir lo sonado;
   /// sin repetir artista seguido. Actúa también con el DJ personal.
-  Future<void> _refillQueue({int target = 5}) {
+  Future<void> _refillQueue({int target = kQueueLookahead}) {
     if (!_canAutoRefill || _upcomingCount >= target) {
       return _refillFuture ?? Future.value();
     }
@@ -258,7 +266,7 @@ class AppController extends ChangeNotifier {
   /// discreto, se reintenta con espera creciente y quien llama cae a lo local.
   /// La radio de YouTube (related) entra como una fuente más del motor, que
   /// la mezcla por cubo (`mix`) y la filtra igual que el resto.
-  Future<List<Suggestion>> _engineSuggestions() async {
+  Future<List<Suggestion>> _engineSuggestions({int limit = 12}) async {
     final retryAt = _engineRetryAt;
     if (retryAt != null && DateTime.now().isBefore(retryAt)) return const [];
     final current = currentTrack;
@@ -299,7 +307,7 @@ class AppController extends ChangeNotifier {
               recentKeys: recent,
               queueTail: queue.skip(max(0, queue.length - 3)).toList(),
               extraCandidates: extra,
-              limit: 12,
+              limit: limit,
             ),
           )
           .timeout(refillEngineTimeout);
@@ -333,8 +341,22 @@ class AppController extends ChangeNotifier {
   /// Sustituye el motor de sugerencias (pruebas).
   set suggestionsApi(SuggestionsApi api) => _suggestionsApi = api;
 
-  Future<void> _doRefill(int target) async {
+  Future<void> _doRefill(int target) =>
+      _fillQueue(target: target, allowed: () => _canAutoRefill);
+
+  /// Rellena hasta [target] pistas por delante. [priority] (p. ej. más
+  /// canciones del artista de Spotify) entra antes que el motor; [fallbacks]
+  /// false = solo motor y prioritarias (sin biblioteca ni repetir). Inserta en
+  /// [insertAt] (por defecto al final) y descarta lo que ya esté en la cola.
+  Future<void> _fillQueue({
+    required int target,
+    required bool Function() allowed,
+    Future<List<Track>> Function()? priority,
+    bool fallbacks = true,
+    int Function()? insertAt,
+  }) async {
     final current = currentTrack;
+    final before = {for (final t in queue) t.id};
     final recent = recentTracks
         .take(20)
         .expand(recommendationTrackKeys)
@@ -363,9 +385,10 @@ class AppController extends ChangeNotifier {
               (!allowRecent && keys.any(recent.contains))) {
             continue;
           }
+          final at = insertAt?.call() ?? queue.length;
           final previous = picked.isNotEmpty
               ? picked.last
-              : (queue.isNotEmpty ? queue.last : null);
+              : (at > 0 && at <= queue.length ? queue[at - 1] : null);
           if (!relaxed &&
               previous != null &&
               djPrimaryArtist(previous) == djPrimaryArtist(t)) {
@@ -377,7 +400,24 @@ class AppController extends ChangeNotifier {
       }
     }
 
-    take([for (final s in await _engineSuggestions()) s.track]);
+    final lead = priority == null
+        ? const <Track>[]
+        : await priority().catchError((Object _) => const <Track>[]);
+    final engine = await _engineSuggestions(
+      limit: min(30, max(12, 2 * need())),
+    );
+    // Intercala: prioritarias y motor, para no encadenar el mismo origen.
+    final mixed = <Track>[];
+    final picks = [for (final s in engine) s.track];
+    for (var i = 0; i < max(lead.length, picks.length); i++) {
+      if (i < picks.length) mixed.add(picks[i]);
+      if (i < lead.length) mixed.add(lead[i]);
+    }
+    take(mixed);
+    if (!fallbacks) {
+      await _commitFill(picked, before, allowed, insertAt);
+      return;
+    }
     take(tracks);
     final favorites = [
       for (final t in tracks)
@@ -393,9 +433,29 @@ class AppController extends ChangeNotifier {
         reuse: true,
       );
     }
-    if (picked.isEmpty || !_canAutoRefill) return;
-    queue.addAll(picked);
-    autoAddedIds.addAll(picked.map((t) => t.id));
+    await _commitFill(picked, before, allowed, insertAt);
+  }
+
+  Future<void> _commitFill(
+    List<Track> picked,
+    Set<String> before,
+    bool Function() allowed,
+    int Function()? insertAt,
+  ) async {
+    if (picked.isEmpty || !allowed()) return;
+    // Otro relleno pudo adelantarse durante las esperas: sin duplicados.
+    final fresh = [
+      for (final t in picked)
+        if (before.contains(t.id) ||
+            !queue.any((q) => recommendationTracksMatch(q, t)))
+          t,
+    ];
+    if (fresh.isEmpty) return;
+    queue.insertAll(
+      (insertAt?.call() ?? queue.length).clamp(0, queue.length),
+      fresh,
+    );
+    autoAddedIds.addAll(fresh.map((t) => t.id));
     await _saveQueue();
     _notify();
   }
@@ -1541,6 +1601,7 @@ class AppController extends ChangeNotifier {
     final seen = <String>{};
     queue = [];
     autoAddedIds.clear();
+    manualQueuedIds.clear();
     for (final candidate in context?.isNotEmpty == true ? context! : [track]) {
       final item = remembered[candidate.id] ?? candidate;
       if ((usesOfficialYouTubeMusic || usesYouTubeWebAudio) &&
@@ -1738,7 +1799,7 @@ class AppController extends ChangeNotifier {
         busy = _recovering && fromRecovery;
         _adoptWebTrackMetadata();
         _notify();
-        // Con menos de 5 por delante se deja lista la continuación (DJ y red).
+        // Con menos de $kQueueLookahead por delante se deja lista la continuación (DJ y red).
         if (_loadedTrackId == track.id && audio.isPlaying) {
           unawaited(_topUpQueue());
         }
@@ -2128,6 +2189,7 @@ class AppController extends ChangeNotifier {
     // Recheck after persistence: concurrent enqueue calls may finish together.
     if (queue.any((queued) => recommendationTracksMatch(queued, track))) return;
     queue.add(track);
+    manualQueuedIds.add(track.id);
     if (_personalDjActive) {
       _personalDjSeenKeys.addAll(recommendationTrackKeys(track));
     }
@@ -2181,6 +2243,7 @@ class AppController extends ChangeNotifier {
         ..addAll(shifted);
     }
     queue.insert(queueIndex + 1 + _playNextCount, moved);
+    manualQueuedIds.add(moved.id);
     _playNextCount++;
     if (_personalDjActive) {
       _personalDjSeenKeys.addAll(recommendationTrackKeys(moved));
@@ -2529,21 +2592,18 @@ class AppController extends ChangeNotifier {
   }
 
   /// Spotify supplies descriptions only; the selected match supplies audio.
-  Future<bool> importSpotifyMetadataMatch(
-    Track metadata,
-    Track match, {
-    bool play = false,
-  }) async {
+  /// Devuelve la pista a guardar, o null (y avisa) si el audio no es válido.
+  Track? _spotifyPlayable(Track metadata, Track match) {
     final uri = Uri.tryParse(match.pageUrl ?? '');
     final host = uri?.host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
     final hasAudioPage =
         uri?.scheme == 'https' &&
         const {'youtube.com', 'music.youtube.com', 'youtu.be'}.contains(host);
     if (match.isPendingSpotifyMatch || (!match.isLocal && !hasAudioPage)) {
-      _report(StateError('Selecciona una coincidencia de audio v\u00e1lida.'));
-      return false;
+      _report(StateError('Selecciona una coincidencia de audio válida.'));
+      return null;
     }
-    final track = Track(
+    return Track(
       id: match.id,
       title: metadata.title,
       artist: metadata.artist,
@@ -2557,17 +2617,148 @@ class AppController extends ChangeNotifier {
       pageUrl: match.pageUrl,
       localPath: match.localPath,
     );
+  }
+
+  /// [play] reproduce y rehace lo que viene a partir de esta pista
+  /// ([playSpotifySeed]); si no, se añade al final o ([next]) a continuación.
+  Future<bool> importSpotifyMetadataMatch(
+    Track metadata,
+    Track match, {
+    bool play = false,
+    bool next = false,
+  }) async {
+    if (play) return playSpotifySeed(metadata, match);
+    final track = _spotifyPlayable(metadata, match);
+    if (track == null) return false;
     try {
-      if (play) {
-        await _remember(track);
-        await playTrack(track);
-      } else {
-        await addToQueue(track);
-      }
+      next ? await playNext(track) : await addToQueue(track);
       return true;
     } catch (exception) {
       _report(exception);
       return false;
+    }
+  }
+
+  /// Toque en una canción de Spotify, como la radio de Spotify: suena ya y lo
+  /// que viene se reconstruye desde esta pista. Se conserva el historial (y la
+  /// pista que sonaba) y lo puesto a mano; se reemplaza lo sugerido y el resto
+  /// del contexto anterior. [context] aporta, en orden, lo que sigue del
+  /// álbum/playlist ya emparejado por tandas; [extras] más canciones del
+  /// artista. Cuando se agota el contexto entra la radio (motor local +
+  /// radio de YouTube + [extras]) hasta [kQueueLookahead] por delante.
+  Future<bool> playSpotifySeed(
+    Track metadata,
+    Track match, {
+    Stream<List<(Track, Track)>>? context,
+    Future<List<Track>> Function()? extras,
+  }) async {
+    if (_jamPlaybackActive) return false;
+    final playable = _spotifyPlayable(metadata, match);
+    if (playable == null) return false;
+    try {
+      await _remember(playable);
+    } catch (exception) {
+      _report(exception);
+      return false;
+    }
+    final selected =
+        tracks.where((item) => item.id == playable.id).firstOrNull ?? playable;
+    if (_routeToYouTubeMusic(selected)) return true;
+    final generation = ++_seedGeneration;
+    final head = queueIndex >= 0 && queueIndex < queue.length
+        ? queueIndex + 1
+        : 0;
+    final history = queue.take(head).toList();
+    final ahead = queue.skip(head).toList();
+    final keep = repeat == RepeatMode.one
+        ? ahead
+        : [
+            for (final t in ahead)
+              if (manualQueuedIds.contains(t.id)) t,
+          ];
+    keep.removeWhere((t) => recommendationTracksMatch(t, playable));
+    _playIntent = true;
+    _expiryRetries = 0;
+    queue = [...history, selected, ...keep];
+    queueIndex = history.length;
+    autoAddedIds.removeWhere((id) => !keep.any((t) => t.id == id));
+    _playNextAnchorId = null;
+    _playNextCount = 0;
+    _shuffleHistory.clear();
+    _shufflePlayed
+      ..clear()
+      ..add(queueIndex);
+    _resumePosition = Duration.zero;
+    final protectedIds = <String>{for (final t in keep) t.id};
+    bool stale() => generation != _seedGeneration || _disposed;
+    if (repeat != RepeatMode.one) {
+      // Se lanza antes de esperar al audio; _refillQueue comparte este futuro.
+      _refillFuture = _rebuildAfterSeed(
+        stale,
+        protectedIds,
+        context,
+        extras,
+      ).whenComplete(() => _refillFuture = null);
+    }
+    await _saveQueue();
+    _notify();
+    await _playCurrent();
+    return true;
+  }
+
+  Future<void> _rebuildAfterSeed(
+    bool Function() stale,
+    Set<String> protectedIds,
+    Stream<List<(Track, Track)>>? context,
+    Future<List<Track>> Function()? extras,
+  ) async {
+    // Primer índice tras lo protegido (puesto a mano + contexto ya añadido).
+    int tailStart() {
+      var i = queueIndex + 1;
+      while (i < queue.length && protectedIds.contains(queue[i].id)) {
+        i++;
+      }
+      return i;
+    }
+
+    try {
+      if (context != null) {
+        await for (final chunk in context) {
+          if (stale()) return;
+          final fresh = <Track>[];
+          for (final (spotify, yt) in chunk) {
+            final t = _spotifyPlayable(spotify, yt);
+            if (t != null &&
+                !queue.any((q) => recommendationTracksMatch(q, t)) &&
+                !fresh.any((q) => recommendationTracksMatch(q, t))) {
+              fresh.add(t);
+            }
+          }
+          if (fresh.isEmpty) continue;
+          for (final t in fresh) {
+            await _remember(t);
+          }
+          if (stale()) return;
+          queue.insertAll(tailStart(), fresh);
+          protectedIds.addAll(fresh.map((t) => t.id));
+          await _saveQueue();
+          _notify();
+        }
+      }
+      if (stale()) return;
+      if (queue.length - queueIndex - 1 >= kQueueLookahead) return;
+      await _fillQueue(
+        target: kQueueLookahead,
+        allowed: () => !stale() && !_jamPlaybackActive,
+        priority: extras == null
+            ? null
+            : () => extras().timeout(const Duration(seconds: 8)),
+        // Con «Rellenar la cola» apagado solo entra lo que ofrece la semilla.
+        fallbacks: _canAutoRefill,
+        insertAt: tailStart,
+      );
+    } catch (_) {
+      // La red de seguridad (_refillQueue) cubre lo que falte.
     }
   }
 

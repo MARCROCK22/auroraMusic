@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../app_controller.dart';
 import '../core/models.dart';
+import '../core/queue_policy.dart';
 import 'jam_models.dart';
 import 'jam_service.dart';
 import 'jam_suggestions.dart';
@@ -49,7 +50,8 @@ class JamController extends ChangeNotifier {
   bool _suggesting = false, _cancelAdd = false;
 
   /// Pistas por delante que el anfitrión mantiene siempre en la cola.
-  static const minAhead = 5;
+  static const minAhead = kQueueLookahead;
+  static const _maxFailSkips = 5;
   // _optOut: este invitado eligió no escuchar; _ended: la cola se agotó.
   bool _optOut = false, _ended = false, _toppingUp = false;
   bool _wasConnected = false, _listening = false;
@@ -315,7 +317,7 @@ class JamController extends ChangeNotifier {
       if (bridge.failedEntryId == entry.id) {
         // Sin audio para esta pista en el anfitrión: se pasa a la siguiente.
         _skipped.add(entry.id);
-        final upcoming = _failStreak++ < minAhead
+        final upcoming = _failStreak++ < _maxFailSkips
             ? _nextEntry(after: entry.id)
             : null;
         _hostLoading = false;
@@ -397,7 +399,7 @@ class JamController extends ChangeNotifier {
     return null;
   }
 
-  /// Autoplay: con menos de 3 pistas por delante, sube sugerencias a la cola.
+  /// Autoplay: con menos de [minAhead] pistas por delante, sube sugerencias.
   void _autoplay() {
     if (!service.isHost || !service.connected || !service.rules.autoplay) {
       return;
@@ -458,6 +460,7 @@ class JamController extends ChangeNotifier {
     final wait = _topUpBackoff?.difference(DateTime.now());
     if (wait != null && wait > Duration.zero) return;
     _toppingUp = true;
+    final start = service.upcomingQueued;
     int short() => minAhead - service.upcomingQueued;
     try {
       service.promoteSuggested(target: minAhead);
@@ -505,7 +508,11 @@ class JamController extends ChangeNotifier {
       _toppingUp = false;
     }
     // Sin nada que añadir (biblioteca vacía): se reintenta en unos segundos.
-    _topUpBackoff = service.upcomingQueued < minAhead
+    // Un repertorio más corto que [minAhead] no es fallo: solo se espera si
+    // no se añadió nada y la cola está de verdad corta.
+    _topUpBackoff =
+        service.upcomingQueued <= start &&
+            service.upcomingQueued < _maxFailSkips
         ? DateTime.now().add(const Duration(seconds: 10))
         : null;
   }

@@ -52,7 +52,7 @@ extension JamServiceAdd on JamService {
   /// por participante, sin duplicados ni artista seguido) hasta tener
   /// [target] pistas por delante. Solo anfitrión; respeta la aprobación porque
   /// las pendientes no se tocan. Devuelve cuántas subió.
-  int promoteSuggested({int target = 5}) {
+  int promoteSuggested({int target = kQueueLookahead}) {
     if (!isHost) return 0;
     final need = target - upcomingQueued;
     if (need <= 0) return 0;
@@ -73,7 +73,11 @@ extension JamServiceAdd on JamService {
   /// Autoplay del anfitrión: añade al final hasta [need] pistas en cola normal.
   /// Con [repeat] admite pistas que ya sonaron (último recurso para no quedar
   /// en silencio). Si la cola está llena, descarta las ya sonadas más antiguas.
-  int addAutoplay(List<JamTrack> tracks, {int need = 5, bool repeat = false}) {
+  int addAutoplay(
+    List<JamTrack> tracks, {
+    int need = kQueueLookahead,
+    bool repeat = false,
+  }) {
     if (!isHost || need <= 0) return 0;
     final cur = _currentIndex;
     final blocked = <String>{

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../core/models.dart';
 import '../jam/jam_controller.dart';
+import '../jam/jam_models.dart';
 import '../metadata/youtube_match.dart';
+import 'jam/jam_widgets.dart';
 
 typedef SpotifyManualMatch =
     Future<void> Function(Track spotify, {Track? replacing});
@@ -14,23 +16,40 @@ class SpotifyBatchProgress {
 }
 
 /// Spotify aporta los metadatos; esta clase encuentra sola la versión de
-/// YouTube (YoutubeMatcher), la añade a la cola/Jam y avisa con «Deshacer».
+/// YouTube (YoutubeMatcher). Un toque REPRODUCE (y la cola se rehace desde esa
+/// pista); «+» y ⋯ añaden a la cola/Jam con «Deshacer». En una Jam el toque
+/// pone la canción al final de la cola compartida.
 /// Sin [matcher] (fuente que no es InnerTube) delega en el diálogo manual.
 class SpotifyAutoAdder extends ChangeNotifier {
   SpotifyAutoAdder({
     this.matcher,
     required this.save,
+    required this.playSeed,
     required this.queueLength,
     required this.unqueue,
     required this.manual,
     required this.messenger,
     this.jam,
+    this.moreFromArtist,
   });
 
   final YoutubeMatcher? matcher;
 
-  /// Guarda/encola (o reproduce) la coincidencia: `importSpotifyMetadataMatch`.
-  final Future<bool> Function(Track spotify, Track match, {bool play}) save;
+  /// Encola la coincidencia (al final o, con [next], a continuación).
+  final Future<bool> Function(Track spotify, Track match, {bool next}) save;
+
+  /// Reproduce la coincidencia y rehace la cola desde ella
+  /// (`AppController.playSpotifySeed`).
+  final Future<bool> Function(
+    Track spotify,
+    Track match, {
+    Stream<List<(Track, Track)>>? context,
+    Future<List<Track>> Function()? extras,
+  })
+  playSeed;
+
+  /// Más canciones del artista de la semilla (metadatos de Spotify).
+  final Future<List<Track>> Function(Track seed)? moreFromArtist;
   final int Function() queueLength;
   final void Function(String id) unqueue;
   final SpotifyManualMatch manual;
@@ -39,6 +58,10 @@ class SpotifyAutoAdder extends ChangeNotifier {
 
   /// Tope de pistas por lote (límite de red; la Jam aplica además los suyos).
   static const maxBatch = 100;
+
+  /// Pistas del álbum/playlist que se empareja tras la que suena, por tandas.
+  static const maxContext = 40;
+  static const _chunk = 4;
 
   final _busy = <String>{};
   SpotifyBatchProgress? batch;
@@ -57,12 +80,26 @@ class SpotifyAutoAdder extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  void _say(String text, {String? label, VoidCallback? onTap, int secs = 4}) {
+  void _say(
+    String text, {
+    String? label,
+    VoidCallback? onTap,
+    int secs = 4,
+    String? who,
+  }) {
     final m = messenger();
     m?.hideCurrentSnackBar();
     m?.showSnackBar(
       SnackBar(
-        content: Text(text),
+        content: who == null
+            ? Text(text)
+            : Row(
+                children: [
+                  JamAvatar(name: who, size: 24),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(text)),
+                ],
+              ),
         duration: Duration(seconds: secs),
         action: label == null
             ? null
@@ -73,36 +110,116 @@ class SpotifyAutoAdder extends ChangeNotifier {
 
   static String _what(Track t) => '${t.title} · ${t.artist}';
 
-  /// Un toque: empareja, añade a la cola (o a la Jam / reproduce) y confirma.
-  Future<void> add(Track t, {bool play = false, bool toJam = false}) async {
+  void _noMatch(Track t) => _say(
+    'Sin coincidencia en YouTube para «${t.title}».',
+    label: 'Buscar a mano',
+    onTap: () => manual(t),
+    secs: 6,
+  );
+
+  void _offline(Track t) => _say(
+    'No se pudo buscar en YouTube. Revisa la conexión.',
+    label: 'Buscar a mano',
+    onTap: () => manual(t),
+  );
+
+  /// Toque en la fila. Sin Jam: empareja, suena ya y rehace la cola desde esta
+  /// pista ([context] = lo que sigue del álbum/playlist, en orden). Con Jam:
+  /// la pone al final de la cola compartida sin tocar lo que suena.
+  Future<void> play(Track t, {List<Track> context = const []}) async {
+    final m = matcher;
+    if (m == null) return manual(t);
+    if (jamAvailable) return add(t, toJam: true);
+    if (!_busy.add(t.id)) return;
+    _notify();
+    try {
+      final match = await m.match(t, lenient: true);
+      if (match == null) return _noMatch(t);
+      final y = match.track;
+      final rest = context.take(maxContext).toList();
+      final ok = await playSeed(
+        t,
+        y,
+        context: rest.isEmpty ? null : _contextChunks(m, rest),
+        extras: moreFromArtist == null ? null : () => _extras(m, t),
+      );
+      if (!ok) {
+        _say('No se pudo reproducir «${t.title}».');
+      } else if (match.confidence < m.threshold) {
+        _say(
+          'Coincidencia dudosa: ${_what(y)}',
+          label: 'Cambiar',
+          onTap: () => manual(t),
+          secs: 8,
+        );
+      }
+    } catch (_) {
+      _offline(t);
+    } finally {
+      _busy.remove(t.id);
+      _notify();
+    }
+  }
+
+  /// Empareja el resto del álbum/playlist por tandas de [_chunk]; la primera
+  /// tanda llega mientras la pista ya suena.
+  Stream<List<(Track, Track)>> _contextChunks(
+    YoutubeMatcher m,
+    List<Track> rest,
+  ) async* {
+    for (var i = 0; i < rest.length; i += _chunk) {
+      final part = rest.skip(i).take(_chunk).toList();
+      final found = await m.matchMany(part, concurrency: 3);
+      yield [
+        for (var k = 0; k < part.length; k++)
+          if (found[k] != null) (part[k], found[k]!.track),
+      ];
+    }
+  }
+
+  /// Más canciones del artista (top tracks de Spotify) ya emparejadas.
+  Future<List<Track>> _extras(YoutubeMatcher m, Track seed) async {
+    final top = (await moreFromArtist!(seed)).where((t) => t.id != seed.id);
+    final found = await m.matchMany(top.take(10).toList(), concurrency: 3);
+    return [
+      for (final f in found)
+        if (f != null) f.track,
+    ];
+  }
+
+  /// «+» y ⋯: empareja y añade a la cola ([next] = a continuación) o a la Jam,
+  /// sin reproducir, y confirma con «Deshacer».
+  Future<void> add(
+    Track t, {
+    bool next = false,
+    bool toJam = false,
+    JamAddMode jamMode = JamAddMode.end,
+  }) async {
     final m = matcher;
     if (m == null) return manual(t);
     if (!_busy.add(t.id)) return;
     _notify();
     try {
       final match = await m.match(t, lenient: true);
-      if (match == null) {
-        _say(
-          'Sin coincidencia en YouTube para «${t.title}».',
-          label: 'Buscar a mano',
-          onTap: () => manual(t),
-          secs: 6,
-        );
-        return;
-      }
+      if (match == null) return _noMatch(t);
       final doubtful = match.confidence < m.threshold;
       final y = match.track;
       if (toJam) {
-        final ok = jam?.call()?.addTracks([y]) ?? false;
+        final j = jam?.call();
+        final ok = j?.addTracks([y], mode: jamMode) ?? false;
+        final dudosa = doubtful ? ' (coincidencia dudosa)' : '';
         _say(
           ok
-              ? 'Añadida a la Jam: ${_what(y)}'
-              : (jam?.call()?.error ?? 'No se pudo añadir a la Jam.'),
+              ? 'Añadida a la Jam: ${_what(y)}$dudosa'
+              : (j?.error ?? 'No se pudo añadir a la Jam.'),
+          label: ok && doubtful ? 'Cambiar' : null,
+          onTap: () => manual(t),
+          who: ok ? j?.service.me?.name : null,
         );
         return;
       }
       final before = queueLength();
-      if (!await save(t, y, play: play)) {
+      if (!await save(t, y, next: next)) {
         _say('No se pudo añadir «${t.title}».');
         return;
       }
@@ -111,22 +228,20 @@ class SpotifyAutoAdder extends ChangeNotifier {
         _say(
           'Coincidencia dudosa: ${_what(y)}',
           label: 'Cambiar',
-          onTap: () => manual(t, replacing: play ? null : y),
+          onTap: () => manual(t, replacing: y),
           secs: 8,
         );
-      } else if (!play) {
+      } else {
         _say(
-          added ? 'Añadida: ${_what(y)}' : 'Ya estaba en la cola: ${_what(y)}',
+          added
+              ? '${next ? 'Sonará a continuación' : 'Añadida'}: ${_what(y)}'
+              : 'Ya estaba en la cola: ${_what(y)}',
           label: added ? 'Deshacer' : null,
           onTap: () => unqueue(y.id),
         );
       }
     } catch (_) {
-      _say(
-        'No se pudo buscar en YouTube. Revisa la conexión.',
-        label: 'Buscar a mano',
-        onTap: () => manual(t),
-      );
+      _offline(t);
     } finally {
       _busy.remove(t.id);
       _notify();
@@ -194,7 +309,7 @@ class SpotifyAutoAdder extends ChangeNotifier {
       }
       final before = queueLength();
       for (final p in pairs) {
-        await save(p.$1, p.$2, play: false);
+        await save(p.$1, p.$2);
       }
       final n = queueLength() - before;
       _say(
