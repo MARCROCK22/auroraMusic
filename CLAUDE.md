@@ -45,7 +45,12 @@ cola nativa), pero con la interfaz de Aurora. **No cambiar la estética.**
 - yt-dlp: solo descargas explícitas (audio y vídeo) e importación de listas.
 - DJ: `lib/dj/` — IA propia y local: base de datos vectorial (drift/SQLite) con
   embeddings de pistas y perfil de gustos del usuario; ranking por similitud +
-  diversidad (MMR). No usa recomendaciones de YouTube.
+  diversidad (MMR). **Permitido** (decisión del usuario, 17/10/2026): usar también
+  las recomendaciones de YouTube (radio/relacionadas de InnerTube `next`, sin API key
+  ni tokens PO) y metadatos de Spotify emparejados a YouTube como fuentes de
+  candidatos. El perfil local manda en el ranking; todo candidato pasa por el filtro
+  de coherencia de artista y la memoria anti-repetición, y si YouTube falla el DJ
+  sigue con lo local. La cola nunca termina y el DJ no se apaga solo.
 - Detalle: `docs/youtube_music_audio_engine.md`.
 
 ## Comandos (PowerShell, Windows)
