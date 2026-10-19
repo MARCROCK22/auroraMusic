@@ -14,9 +14,10 @@ enum JamRole { host, coHost, guest }
 /// las puestas en cola, ordenada por votos); pending: espera aprobación.
 enum JamEntryStatus { queued, suggested, pending }
 
-/// Alfabeto sin ambiguos (sin I, O, 0, 1): 32^6 ≈ 1.07e9 códigos.
+/// Alfabeto sin ambiguos (sin I, O, 0, 1). El servidor genera códigos de 8
+/// (32^8 ≈ 1.1e12); se siguen aceptando los de 6 de salas creadas antes.
 const jamCodeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-final _codePattern = RegExp(r'^[A-HJ-NP-Z2-9]{6}$');
+final _codePattern = RegExp(r'^[A-HJ-NP-Z2-9]{6}(?:[A-HJ-NP-Z2-9]{2})?$');
 
 /// Devuelve el código en mayúsculas o null si no es un código válido.
 String? jamNormalizeCode(String value) {
@@ -109,7 +110,7 @@ class JamInvite {
     required this.expiresAt,
   });
 
-  /// Invitación de una sala en línea: solo lleva el código de 6 caracteres.
+  /// Invitación de una sala en línea: solo lleva el código (8 caracteres; 6 en salas antiguas).
   JamInvite.remote({required String code, required this.expiresAt})
     : address = '',
       port = 0,
@@ -190,7 +191,7 @@ class JamInvite {
   }
 }
 
-/// Extrae el código de `aurora://jam/ABC123` o de un código suelto.
+/// Extrae el código de `aurora://jam/ABCD2345` o de un código suelto.
 String? jamRemoteCodeFrom(String input) {
   input = input.trim();
   if (input.length > 64) return null;

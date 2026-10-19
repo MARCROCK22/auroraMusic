@@ -4,6 +4,25 @@
 -- AVISO: este SQL NO se ha probado contra un proyecto real de Supabase. Antes
 -- de usarlo con gente, sigue docs/jam_supabase.md (casos de abuso a probar).
 --
+-- MIGRACIÓN (auditoría M3/M4: códigos de 8 caracteres, límite por IP, presencia
+-- y publicación solo del anfitrión). Sin probar; orden recomendado:
+--  1. Publicar primero la versión de la app que acepta códigos de 6 u 8
+--     caracteres, como anfitrión solo atiende `up` y como invitado no anuncia
+--     presencia. Con el SQL antiguo sigue funcionando todo.
+--  2. Ejecutar este archivo completo (es idempotente). Las salas con código de
+--     6 siguen válidas (el CHECK, jam_check_code y jam_rt_role aceptan 6 u 8);
+--     las nuevas nacen con 8. Si aún quedan apps antiguas en circulación, deja
+--     `code_len` de jam_gen_code en 6 y súbelo a 8 cuando se actualicen: una
+--     app antigua rechaza un código de 8 al crear o al unirse.
+--  3. Efectos sobre apps antiguas tras el paso 2: sus invitados ya no pueden
+--     escribir presencia (solo el anfitrión) y un coanfitrión ya no publica en
+--     `down`; el `handoff` lo publica ahora el servidor desde jam_transfer.
+--     Qué hace una app antigua cuando Realtime rechaza su `track` no está
+--     probado: si falla al unirse, deben actualizar la app.
+--  4. Opcional: programar jam_cleanup con pg_cron (sección 6).
+--  Reversión: volver a ejecutar la versión anterior de este archivo; los
+--  códigos de 8 ya creados dejarían de ser válidos con su CHECK antiguo.
+--
 -- Modelo de seguridad (mínimo privilegio):
 --  * El cliente solo tiene la clave anónima y una sesión de auth anónima.
 --  * Ninguna tabla es accesible: RLS activado, SIN políticas y REVOKE ALL.
@@ -12,7 +31,7 @@
 --    ni concatenación de texto del usuario dentro de sentencias SQL.
 --  * Los errores al cliente son solo `jam:<código>`; nunca texto interno.
 --  * Realtime: canales privados `jam:<CODIGO>:down|up` autorizados por RLS en
---    realtime.messages (solo anfitrión/coanfitrión publican en `down`; `up` lo
+--    realtime.messages (solo el anfitrión publica en `down`; `up` lo
 --    publica únicamente el servidor desde jam_cmd).
 
 ------------------------------------------------------------------------------
@@ -20,13 +39,17 @@
 ------------------------------------------------------------------------------
 create table if not exists public.jam_rooms (
   id            uuid primary key default gen_random_uuid(),
-  code          text not null unique check (code ~ '^[A-HJ-NP-Z2-9]{6}$'),
+  code          text not null unique check (code ~ '^[A-HJ-NP-Z2-9]{6}([A-HJ-NP-Z2-9]{2})?$'),
   host          uuid not null,
   is_open       boolean not null default true,
   max_guests    int not null default 15 check (max_guests between 1 and 15),
   created_at    timestamptz not null default now(),
   last_activity timestamptz not null default now()
 );
+-- Bases ya creadas: ampliar el CHECK de 6 a 6 u 8 (no-op en una base nueva).
+alter table public.jam_rooms drop constraint if exists jam_rooms_code_check;
+alter table public.jam_rooms add constraint jam_rooms_code_check
+  check (code ~ '^[A-HJ-NP-Z2-9]{6}([A-HJ-NP-Z2-9]{2})?$');
 create index if not exists jam_rooms_host_idx on public.jam_rooms (host);
 create index if not exists jam_rooms_activity_idx on public.jam_rooms (last_activity);
 
@@ -66,14 +89,25 @@ create table if not exists public.jam_lock (
   locked_until timestamptz
 );
 
+-- Fallos de código por IP (M4): el bloqueo por uid no basta porque las
+-- identidades anónimas son casi gratis. Acotada: jam_cleanup la limpia y
+-- jam_ip_fail no la deja pasar de 20000 filas.
+create table if not exists public.jam_ip_lock (
+  ip           text primary key check (char_length(ip) <= 50),
+  fails        int not null default 0,
+  window_start timestamptz not null default now(),
+  locked_until timestamptz
+);
+
 alter table public.jam_rooms   enable row level security;
 alter table public.jam_members enable row level security;
 alter table public.jam_bans    enable row level security;
 alter table public.jam_rate    enable row level security;
 alter table public.jam_lock    enable row level security;
+alter table public.jam_ip_lock enable row level security;
 -- Sin políticas a propósito: anon/authenticated no pueden leer ni escribir.
 revoke all on public.jam_rooms, public.jam_members, public.jam_bans,
-              public.jam_rate, public.jam_lock from public, anon, authenticated;
+              public.jam_rate, public.jam_lock, public.jam_ip_lock from public, anon, authenticated;
 
 ------------------------------------------------------------------------------
 -- 2. Ayudantes internos (no expuestos)
@@ -120,22 +154,88 @@ create or replace function public.jam_check_code(p_code text)
 returns text language plpgsql immutable set search_path = '' as $$
 declare c text := upper(coalesce(p_code, ''));
 begin
-  if c !~ '^[A-HJ-NP-Z2-9]{6}$' then perform public.jam_fail('invalid'); end if;
+  if c !~ '^[A-HJ-NP-Z2-9]{6}([A-HJ-NP-Z2-9]{2})?$' then perform public.jam_fail('invalid'); end if;
   return c;
 end $$;
 
--- Código de 6 caracteres sin ambiguos (sin I, O, 0, 1) desde 16 bytes aleatorios.
+-- Código sin ambiguos (sin I, O, 0, 1) desde 16 bytes aleatorios: 8 caracteres
+-- (32^8 ≈ 1.1e12). `code_len` = 6 solo mientras queden apps antiguas (ver
+-- MIGRACIÓN); jam_check_code acepta ambas longitudes.
 create or replace function public.jam_gen_code()
 returns text language plpgsql volatile set search_path = '' as $$
 declare
+  code_len constant int := 8;
   alphabet constant text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   raw bytea := decode(replace(gen_random_uuid()::text, '-', ''), 'hex');
   out text := '';
 begin
-  for i in 0..5 loop
+  for i in 0..code_len - 1 loop
     out := out || substr(alphabet, (get_byte(raw, i) % 32) + 1, 1);
   end loop;
   return out;
+end $$;
+
+-- IP del cliente para el límite por IP. Prefiere cf-connecting-ip (lo fija
+-- Cloudflare) y si no el primer salto de x-forwarded-for. Devuelve null si no
+-- hay cabecera o no es una IP (entonces solo rigen los límites por uid).
+-- IPv6 se agrupa por /64 (un cliente controla todo su prefijo).
+-- SIN PROBAR: verifica en tu proyecto qué cabeceras llegan realmente y si el
+-- primer salto de x-forwarded-for puede falsearlo el cliente.
+create or replace function public.jam_client_ip()
+returns text language plpgsql stable set search_path = '' as $$
+declare
+  h json;
+  raw text;
+  ip inet;
+begin
+  begin
+    h := nullif(current_setting('request.headers', true), '')::json;
+  exception when others then
+    return null;
+  end;
+  raw := coalesce(
+    nullif(btrim(h->>'cf-connecting-ip'), ''),
+    nullif(btrim(split_part(coalesce(h->>'x-forwarded-for', ''), ',', 1)), '')
+  );
+  if raw is null then return null; end if;
+  begin
+    ip := raw::inet;
+  exception when others then
+    return null;
+  end;
+  if family(ip) = 6 then return network(set_masklen(ip, 64))::text; end if;
+  return host(ip);
+end $$;
+
+-- Falla con jam:rate si la IP está bloqueada.
+create or replace function public.jam_ip_check(p_ip text)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if p_ip is not null and exists (
+    select 1 from public.jam_ip_lock where ip = p_ip and locked_until > now()
+  ) then
+    perform public.jam_fail('rate');
+  end if;
+end $$;
+
+-- Cuenta un código fallido de la IP: 10 en 10 min bloquean 30 min. A diferencia
+-- del bloqueo por uid, un acierto NO lo reinicia (si no, bastaría alternar con
+-- una sala propia). Tope de 20000 filas: lleno, no se registran IP nuevas
+-- (falla abierto; siguen los límites por uid).
+create or replace function public.jam_ip_fail(p_ip text)
+returns void language plpgsql security definer set search_path = '' as $$
+begin
+  if p_ip is null then return; end if;
+  if not exists (select 1 from public.jam_ip_lock where ip = p_ip)
+     and (select count(*) from public.jam_ip_lock) >= 20000 then
+    return;
+  end if;
+  insert into public.jam_ip_lock as l (ip, fails, window_start) values (p_ip, 1, now())
+  on conflict (ip) do update set
+    fails = case when l.window_start < now() - interval '10 minutes' then 1 else l.fails + 1 end,
+    window_start = case when l.window_start < now() - interval '10 minutes' then now() else l.window_start end,
+    locked_until = case when (case when l.window_start < now() - interval '10 minutes' then 1 else l.fails + 1 end) >= 10
+                        then now() + interval '30 minutes' else null end;
 end $$;
 
 -- Sala viva (no caducada) y rol del usuario; falla si no es miembro.
@@ -168,6 +268,7 @@ begin
   delete from public.jam_rooms where last_activity < now() - interval '12 hours';
   delete from public.jam_rate where bucket < now() - interval '3 hours';
   delete from public.jam_lock where coalesce(locked_until, window_start) < now() - interval '1 day';
+  delete from public.jam_ip_lock where coalesce(locked_until, window_start) < now() - interval '1 day';
 end $$;
 
 -- Validación de una pista (misma forma que JamTrack del cliente).
@@ -244,11 +345,14 @@ declare
   lk public.jam_lock;
   cnt int;
   mem public.jam_members;
+  ip text := public.jam_client_ip();
 begin
   if p_device is null or p_device not in ('android', 'windows', 'other') then
     perform public.jam_fail('payload');
   end if;
   perform public.jam_hit('join:' || u::text, 20, 600);      -- 20 intentos / 10 min
+  perform public.jam_ip_check(ip);                           -- bloqueo por IP (M4)
+  if random() < 0.02 then perform public.jam_cleanup(); end if;
   select * into lk from public.jam_lock where uid = u;
   if found and lk.locked_until is not null and lk.locked_until > now() then
     perform public.jam_fail('rate');
@@ -265,6 +369,7 @@ begin
       window_start = case when l.window_start < now() - interval '10 minutes' then now() else l.window_start end,
       locked_until = case when (case when l.window_start < now() - interval '10 minutes' then 1 else l.fails + 1 end) >= 5
                           then now() + interval '15 minutes' else null end;
+    perform public.jam_ip_fail(ip);
     -- Se devuelve (no se lanza) para que el contador de fallos se confirme.
     return jsonb_build_object('error', 'invalid');
   end;
@@ -580,6 +685,13 @@ begin
   update public.jam_members set role = 'cohost' where room_id = (x.r).id and uid = u;
   update public.jam_members set role = 'host', muted = false where room_id = (x.r).id and uid = p_uid;
   update public.jam_rooms set host = p_uid where id = (x.r).id;
+  -- El aviso lo publica el servidor (`f` = anfitrión saliente): los
+  -- coanfitriones ya no publican en `down` y el invitado solo acepta mensajes
+  -- con f = anfitrión. Que el cliente lo reenvíe además a mano es inocuo.
+  perform realtime.send(
+    jsonb_build_object('f', u::text, 't', '*', 'm',
+      jsonb_build_object('kind', 'handoff', 'to', p_uid::text, 'from', u::text)::text),
+    'm', 'jam:' || (x.r).code || ':down', true);
 exception when others then
   if sqlerrm ~ '^jam:[a-z]{3,12}$' then raise; end if;
   raise exception 'jam:unknown';
@@ -647,7 +759,7 @@ returns text language sql stable security definer set search_path = '' as $$
   select m.role
     from public.jam_rooms r
     join public.jam_members m on m.room_id = r.id and m.uid = auth.uid()
-   where p_topic ~ '^jam:[A-HJ-NP-Z2-9]{6}:(down|up)$'
+   where p_topic ~ '^jam:[A-HJ-NP-Z2-9]{6}([A-HJ-NP-Z2-9]{2})?:(down|up)$'
      and r.code = split_part(p_topic, ':', 2)
      and r.last_activity > now() - interval '12 hours'
 $$;
@@ -668,14 +780,25 @@ using (
   )
 );
 
+-- Solo el anfitrión escribe en `down`, broadcast y presencia (M3): ni
+-- coanfitriones ni invitados. LÍMITES (sin probar):
+--  * La política solo ve topic y extension: NO puede exigir que la clave de
+--    presencia sea el uid propio. Por eso los invitados no escriben presencia en
+--    absoluto, y el cliente tampoco se fía de ella (JamGuestPeer espera a que el
+--    anfitrión calle antes de darlo por caído).
+--  * Realtime evalúa el permiso de escritura al unirse al canal: quien ya estaba
+--    unido como anfitrión/coanfitrión lo conserva hasta reconectar.
+--  * El `f` de un mensaje en `down` lo escribe el publicador; es fiable solo
+--    porque únicamente el anfitrión (o el servidor con realtime.send) publica ahí.
+--  * Mensajes dirigidos (`t` = uid): `down` lo lee todo miembro, así que `t`
+--    enruta pero NO oculta. No llevan nada que un miembro no vea ya en el estado
+--    de la Jam; aislarlos exigiría un topic por usuario (no hecho).
 drop policy if exists jam_rt_write on realtime.messages;
 create policy jam_rt_write on realtime.messages for insert to authenticated
 with check (
   realtime.topic() like 'jam:%:down'
-  and (
-    (extension = 'broadcast' and public.jam_rt_role(realtime.topic()) in ('host', 'cohost'))
-    or (extension = 'presence' and public.jam_rt_role(realtime.topic()) is not null)
-  )
+  and extension in ('broadcast', 'presence')
+  and public.jam_rt_role(realtime.topic()) = 'host'
 );
 -- `jam:*:up` no tiene política de escritura: solo el servidor publica ahí
 -- (realtime.send dentro de jam_cmd, que corre como propietario).

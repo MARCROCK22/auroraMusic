@@ -178,9 +178,12 @@ class SupabaseJamTransport implements JamTransport {
       _SupabaseChannel(_c, code, asHost: asHost);
 }
 
-/// Canales privados `jam:<código>:down` (publican anfitrión/coanfitriones, lee
-/// todo miembro) y `jam:<código>:up` (publica solo el servidor; lee el
-/// anfitrión). Las políticas RLS de realtime.messages lo aplican.
+/// Canales privados `jam:<código>:down` (publica el anfitrión; el servidor
+/// también, para el `handoff`; lee todo miembro) y `jam:<código>:up` (publica
+/// solo el servidor; lee el anfitrión). Las políticas RLS de realtime.messages
+/// lo aplican. Límites: el `f` de `down` lo declara quien publica y la clave de
+/// presencia la elige el cliente; no son identidades verificadas, por eso el
+/// anfitrión solo lee `up` y el invitado solo `down` (ver JamGuestPeer).
 class _SupabaseChannel implements JamChannel {
   _SupabaseChannel(this._c, this._code, {required this.asHost});
   final SupabaseClient _c;
@@ -233,22 +236,22 @@ class _SupabaseChannel implements JamChannel {
         'jam:$_code:$suffix',
         opts: RealtimeChannelConfig(private: true, key: uid, enabled: true),
       );
-      _listen(channel);
+      // El anfitrión solo atiende `up` (el servidor fija `from`); en `down`
+      // cualquier publicador podría fingir ser un invitado.
+      if (asHost == (suffix == 'up')) _listen(channel);
       return channel;
     }
 
     final down = _down = build('down');
+    // La identidad es la clave de presencia, no el `uid` del payload (que
+    // cualquiera puede rellenar con el de otro).
     down.onPresenceLeave((p) {
-      for (final left in p.leftPresences) {
-        final id = left.payload['uid'];
-        if (id is String) _presence.add(JamPresenceEvent(id, joined: false));
-      }
+      if (p.key.isEmpty) return;
+      _presence.add(JamPresenceEvent(p.key, joined: false));
     });
     down.onPresenceJoin((p) {
-      for (final joined in p.newPresences) {
-        final id = joined.payload['uid'];
-        if (id is String) _presence.add(JamPresenceEvent(id, joined: true));
-      }
+      if (p.key.isEmpty) return;
+      _presence.add(JamPresenceEvent(p.key, joined: true));
     });
     final channels = [down];
     if (asHost) channels.add(_up = build('up'));
@@ -269,7 +272,9 @@ class _SupabaseChannel implements JamChannel {
       const Duration(seconds: 12),
       onTimeout: () => throw JamRemoteException('network'),
     );
-    await down.track({'uid': uid});
+    // Solo el anfitrión anuncia presencia (el SQL lo exige); los invitados la
+    // observan sin anunciarse.
+    if (asHost) await down.track({'uid': uid});
   }
 
   @override

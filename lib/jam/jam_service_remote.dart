@@ -153,7 +153,7 @@ extension JamServiceRemote on JamService {
     }
     final code = jamRemoteCodeFrom(input);
     if (code == null) {
-      throw const JamException('El código debe tener 6 letras o números.');
+      throw const JamException('El código debe tener 6 u 8 letras o números.');
     }
     final clean = jamCleanName(name);
     await close();
@@ -527,7 +527,9 @@ extension JamServiceRemote on JamService {
   }
 
   void _handoff(String to, String from) {
-    if (to != _uid || _transport == null || isHost) return;
+    // El aviso puede llegar dos veces (el del anfitrión y el del servidor).
+    if (to != _uid || _transport == null || isHost || _handingOff) return;
+    _handingOff = true;
     unawaited(() async {
       try {
         final claimed = await _transport!.claimHost(_room!.code);
@@ -535,6 +537,8 @@ extension JamServiceRemote on JamService {
       } catch (failure) {
         error = _remoteError(failure);
         _notify();
+      } finally {
+        _handingOff = false;
       }
     }());
   }
