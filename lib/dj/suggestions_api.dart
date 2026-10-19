@@ -120,6 +120,7 @@ const defaultRecMix = <RecBucket, double>{
   RecBucket.adjacent: 0.30,
   RecBucket.discovery: 0.15,
   RecBucket.classics: 0.05,
+  RecBucket.listenbrainz: 0.08, // cuota pequeña: el perfil local manda
 };
 
 /// Media ponderada de perfiles (cada vector ya está normalizado, así que nadie
@@ -584,6 +585,7 @@ class SuggestionsApi {
         RecBucket.discovery => 'Descubrimiento',
         RecBucket.classics => 'Un clásico imprescindible',
         RecBucket.radio => 'Radio de YouTube',
+        RecBucket.listenbrainz => 'Recomendado por ListenBrainz',
       };
     }
 

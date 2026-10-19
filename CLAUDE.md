@@ -51,6 +51,10 @@ cola nativa), pero con la interfaz de Aurora. **No cambiar la estética.**
   candidatos. El perfil local manda en el ranking; todo candidato pasa por el filtro
   de coherencia de artista y la memoria anti-repetición, y si YouTube falla el DJ
   sigue con lo local. La cola nunca termina y el DJ no se apaga solo.
+- ListenBrainz (`lib/listenbrainz/`): **permitido** (decisión del usuario, 2026-10-19)
+  como scrobbling opcional con el token del usuario (desactivado por defecto, token en
+  almacenamiento seguro, nunca en logs) y como fuente de candidatos del DJ
+  (recomendaciones y novedades, sin API key pública, con el token del usuario).
 - Detalle: `docs/youtube_music_audio_engine.md`.
 
 ## Comandos (PowerShell, Windows)

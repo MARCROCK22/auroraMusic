@@ -16,6 +16,8 @@ import 'audio/android_music_audio.dart';
 import 'audio/routed_music_audio.dart';
 import 'audio_web/web_music_audio.dart';
 import 'library/library_database.dart';
+import 'listenbrainz/listen_storage.dart';
+import 'listenbrainz/listenbrainz_service.dart';
 import 'sources/yt_dlp_source.dart';
 import 'sources/innertube_source.dart';
 import 'terms/terms_acceptance.dart';
@@ -70,7 +72,15 @@ class _AuroraBootstrapState extends State<AuroraBootstrap> {
     final directory = await getApplicationSupportDirectory();
     await directory.create(recursive: true);
     final database = await LibraryDatabase.open();
+    // Opcional y apagado por defecto: sin interruptor ni token no hace nada.
+    final listenBrainz = ListenBrainzService(
+      preferences: preferences,
+      tokenStore: SecureTokenStore(),
+      queueStore: FileListenQueueStore(directory),
+    );
+    await listenBrainz.init();
     final controller = AppController(
+      listenBrainz: listenBrainz,
       // YouTube plays in the official site (hidden WebView); local files natively.
       audio: RoutedMusicAudio(
         native: Platform.isAndroid ? AndroidMusicAudio() : MusicAudio(),

@@ -1,5 +1,6 @@
 import 'package:aurora_music/terms/terms_acceptance.dart';
 import 'package:aurora_music/terms/terms_screen.dart';
+import 'package:aurora_music/terms/terms_text.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -35,6 +36,62 @@ void main() {
       final prefs = await _prefs();
       TermsAcceptance(prefs); // rechazar = no llamar a accept()
       expect(prefs.getKeys(), isEmpty);
+    });
+  });
+
+  group('texto de los términos', () {
+    final all =
+        '$kTermsIntro ${kTermsSections.map((s) => '${s.title} ${s.body}').join(' ')}';
+
+    test('quien aceptó la versión anterior vuelve a verlos', () async {
+      final prefs = await _prefs({
+        TermsAcceptance.versionKey: '2026-10-19',
+        TermsAcceptance.dateKey: '2026-10-19T00:00:00.000Z',
+      });
+      expect(kTermsVersion, isNot('2026-10-19'));
+      expect(TermsAcceptance(prefs).isAccepted, isFalse);
+    });
+
+    test(
+      'explica ListenBrainz: qué se envía, opcional, privacidad y borrado',
+      () {
+        for (final fragment in [
+          'ListenBrainz',
+          'MetaBrainz Foundation',
+          'desactivado por defecto',
+          'tu propio token',
+          'artista, título',
+          'duración',
+          'hora de inicio',
+          'públicas en tu perfil',
+          'política de privacidad',
+          'cerrar sesión',
+          'no vende',
+          'recomendaciones',
+          'busca esas canciones en YouTube',
+          'Artistas que sigues',
+          'solo en tu dispositivo',
+        ]) {
+          expect(
+            all.toLowerCase(),
+            contains(fragment.toLowerCase()),
+            reason: fragment,
+          );
+        }
+      },
+    );
+
+    test('el texto nunca incluye un token', () {
+      expect(
+        all,
+        isNot(
+          matches(
+            RegExp(
+              r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
+            ),
+          ),
+        ),
+      );
     });
   });
 
