@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import '../core/audio_backend.dart';
+import '../audio/eq_model.dart';
 import '../core/models.dart';
 import '../youtube_music/youtube_music_ad_blocker.dart';
 import 'web_music_bridge.dart';
@@ -67,8 +68,6 @@ class WebMusicAudio extends AudioBackend {
   Duration get duration => _duration;
   @override
   double get volume => _volume;
-  @override
-  List<double> get eqFrequencies => const [];
   @override
   ValueListenable<List<double>> get spectrum => _spectrum;
   @override
@@ -392,7 +391,11 @@ class WebMusicAudio extends AudioBackend {
   }
 
   @override
-  void setEqualizer(bool enabled, List<double> gainsDb) {}
+  void setEqualizer(
+    bool enabled,
+    List<EqBand> bands, {
+    bool autoPreamp = true,
+  }) {}
   @override
   void setVisualizationEnabled(bool enabled) {}
 

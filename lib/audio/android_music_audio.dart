@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../core/audio_backend.dart';
 import '../core/models.dart';
 import 'audio_math.dart';
+import 'eq_model.dart';
 import 'stream_guard.dart';
 
 /// Android's service owns playback; the application controller owns the queue.
@@ -29,7 +30,6 @@ class AndroidMusicAudio extends AudioBackend {
   Duration _position = Duration.zero, _duration = Duration.zero;
   double _volume = 0.8;
   bool _supportsEqualizer = false;
-  List<double> _eqFrequencies = const [];
 
   // Native EQ availability depends on the device; FFT is not exposed.
   @override
@@ -52,7 +52,6 @@ class AndroidMusicAudio extends AudioBackend {
   @override
   double get volume => _volume;
   @override
-  List<double> get eqFrequencies => _eqFrequencies;
   @override
   ValueListenable<List<double>> get spectrum => _spectrum;
   @override
@@ -94,14 +93,6 @@ class AndroidMusicAudio extends AudioBackend {
       case 'state':
         if (raw['supportsEqualizer'] is bool) {
           _supportsEqualizer = raw['supportsEqualizer'] as bool;
-        }
-        final frequencies = raw['eqFrequencies'];
-        if (frequencies is List) {
-          _eqFrequencies = List.unmodifiable(
-            frequencies.whereType<num>().map(
-              (frequency) => frequency.toDouble(),
-            ),
-          );
         }
         _playing = raw['playing'] == true;
         _buffering = raw['buffering'] == true;
@@ -260,18 +251,22 @@ class AndroidMusicAudio extends AudioBackend {
   }
 
   @override
-  void setEqualizer(bool enabled, List<double> gainsDb) {
+  void setEqualizer(
+    bool enabled,
+    List<EqBand> bands, {
+    bool autoPreamp = true,
+  }) {
     if (_disposed || !_supportsEqualizer) return;
-    final gains = List<double>.generate(
-      8,
-      (index) => index < gainsDb.length && gainsDb[index].isFinite
-          ? gainsDb[index].clamp(-12, 12)
-          : 0,
-    );
+    // EqBand ya viene acotada y finita; siempre ocho bandas.
+    final fixed = [
+      for (var i = 0; i < eqBandCount; i++)
+        i < bands.length ? bands[i] : EqBand(eqDefaultFrequencies[i]),
+    ];
     unawaited(
       _invoke('equalizer', {
         'enabled': enabled,
-        'gainsDb': gains,
+        'autoPreamp': autoPreamp,
+        'bands': [for (final b in fixed) b.toJson()],
       }).catchError((Object _) {}),
     );
   }

@@ -10,6 +10,8 @@ import 'package:flutter_soloud/flutter_soloud.dart';
 import '../core/audio_backend.dart';
 import '../core/models.dart';
 import 'audio_math.dart';
+import 'eq_dsp.dart';
+import 'eq_model.dart';
 import 'stream_guard.dart';
 
 /// A single native mixer: playback, EQ and FFT all use the same output.
@@ -37,6 +39,13 @@ class MusicAudio extends AudioBackend {
   int _decodedFrames = 0;
   double _volume = 0.8;
   double _preamp = 1;
+  // EQ paramétrico en Dart sobre el PCM que alimenta el mixer; los archivos
+  // locales cargados en modo disco no pasan por Dart y usan el filtro nativo.
+  final _eq = ParametricEqualizer();
+  bool _eqEnabled = false, _eqAutoPreamp = true;
+  List<EqBand> _eqBands = eqFlatBands();
+  // Cuanto menos audio ya procesado espera en el búfer, antes se oye un cambio.
+  static const _bufferLimitBytes = 320000;
   @override
   String? lastError;
 
@@ -51,16 +60,15 @@ class MusicAudio extends AudioBackend {
   @override
   double get volume => _volume;
   // Native EqFilter's sqrt-bin interpolation anchors, at a 48 kHz mixer.
-  @override
-  List<double> get eqFrequencies => const [
-    375,
-    1500,
-    3375,
-    6000,
-    9375,
-    13500,
-    18375,
-    24000,
+  static const _nativeAnchors = [
+    375.0,
+    1500.0,
+    3375.0,
+    6000.0,
+    9375.0,
+    13500.0,
+    18375.0,
+    24000.0,
   ];
   @override
   ValueListenable<List<double>> get spectrum => _spectrum;
@@ -265,7 +273,10 @@ class MusicAudio extends AudioBackend {
             );
           }
         }
-        if (generation == _generation && !_disposed) notifyListeners();
+        if (generation == _generation && !_disposed) {
+          _syncNativeEq();
+          notifyListeners();
+        }
       } catch (error) {
         if (generation == _generation && !_disposed) {
           await _release();
@@ -288,7 +299,7 @@ class MusicAudio extends AudioBackend {
         // Backpressure includes the decoder pipe and prevents whole-track PCM accumulation.
         while (!_disposed &&
             generation == _generation &&
-            (!_playing || _engine.getBufferSize(sound) > 640000)) {
+            (!_playing || _engine.getBufferSize(sound) > _bufferLimitBytes)) {
           await Future<void>.delayed(const Duration(milliseconds: 30));
         }
         if (_disposed || generation != _generation) return;
@@ -310,11 +321,12 @@ class MusicAudio extends AudioBackend {
           ..setAll(0, remainder)
           ..setAll(remainder.length, bytes);
         final aligned = combined.length - combined.length % 8;
+        _eq.process(Float32List.view(combined.buffer, 0, aligned ~/ 4));
         // Some process streams deliver large chunks; feed bounded pieces.
         for (var offset = 0; offset < aligned; offset += 65536) {
           while (!_disposed &&
               generation == _generation &&
-              (!_playing || _engine.getBufferSize(sound) > 640000)) {
+              (!_playing || _engine.getBufferSize(sound) > _bufferLimitBytes)) {
             await Future<void>.delayed(const Duration(milliseconds: 30));
           }
           if (_disposed || generation != _generation) return;
@@ -504,16 +516,31 @@ class MusicAudio extends AudioBackend {
   }
 
   @override
-  void setEqualizer(bool enabled, List<double> gainsDb) {
+  void setEqualizer(
+    bool enabled,
+    List<EqBand> bands, {
+    bool autoPreamp = true,
+  }) {
+    _eqEnabled = enabled;
+    _eqBands = bands;
+    _eqAutoPreamp = autoPreamp;
+    _eq.configure(enabled: enabled, bands: bands, autoPreamp: autoPreamp);
+    _syncNativeEq();
+  }
+
+  /// Respaldo para archivos locales en modo disco: el filtro nativo tiene
+  /// ocho bandas fijas, así que se muestrea la curva en sus anclas.
+  void _syncNativeEq() {
     if (!_engine.isInitialized) return;
     final eq = _engine.filters.equalizerFilter;
-    if (!enabled) {
+    if (_streaming || !_eqEnabled || _sound == null) {
       if (eq.isActive) eq.deactivate();
       _preamp = 1;
       if (_handle != null) _engine.setVolume(_handle!, _volume);
       return;
     }
-    final targetPreamp = equalizerPreamp(gainsDb);
+    final gains = [for (final f in _nativeAnchors) eqResponseDb(_eqBands, f)];
+    final targetPreamp = _eqAutoPreamp ? equalizerPreamp(gains) : 1.0;
     // Lower first when adding boost or activating boosted bands.
     _preamp = math.min(_preamp, targetPreamp);
     if (_handle != null) _engine.setVolume(_handle!, _volume * _preamp);
@@ -529,7 +556,7 @@ class MusicAudio extends AudioBackend {
       eq.band8,
     ];
     for (var i = 0; i < bands.length; i++) {
-      bands[i].value = equalizerGain(i < gainsDb.length ? gainsDb[i] : 0);
+      bands[i].value = equalizerGain(gains[i]);
     }
     _preamp = targetPreamp;
     if (_handle != null) _engine.setVolume(_handle!, _volume * _preamp);

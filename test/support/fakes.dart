@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:aurora_music/app_controller.dart';
+import 'package:aurora_music/audio/eq_model.dart';
 import 'package:aurora_music/audio_web/web_music_audio.dart';
 import 'package:aurora_music/core/audio_backend.dart';
 import 'package:aurora_music/core/models.dart';
@@ -28,17 +29,12 @@ class FakeAudio extends AudioBackend {
   final ValueNotifier<List<double>> spectrum = ValueNotifier<List<double>>(
     List.filled(32, 0),
   );
+
+  /// Llamadas a setEqualizer (activo, bandas) para comprobar el EQ.
+  bool eqSupported = true;
   @override
-  List<double> get eqFrequencies => [
-    375,
-    1500,
-    3375,
-    6000,
-    9375,
-    13500,
-    18375,
-    24000,
-  ];
+  bool get supportsEqualizer => eqSupported;
+  final eqCalls = <(bool, List<EqBand>)>[];
   final completions = StreamController<void>.broadcast();
   @override
   Stream<void> get completed => completions.stream;
@@ -91,7 +87,14 @@ class FakeAudio extends AudioBackend {
   }
 
   @override
-  void setEqualizer(bool enabled, List<double> gainsDb) {}
+  void setEqualizer(
+    bool enabled,
+    List<EqBand> bands, {
+    bool autoPreamp = true,
+  }) {
+    eqCalls.add((enabled, bands));
+  }
+
   @override
   void setVisualizationEnabled(bool enabled) {}
   @override

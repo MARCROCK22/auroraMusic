@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:aurora_music/audio/eq_model.dart';
 import 'package:aurora_music/audio/music_audio.dart';
 import 'package:aurora_music/core/models.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -25,8 +26,8 @@ void main() {
       try {
         await audio.initialize();
         // The default disabled EQ must be safe even before a filter exists.
-        audio.setEqualizer(false, List.filled(8, 0));
-        audio.setEqualizer(false, List.filled(8, 0));
+        audio.setEqualizer(false, eqFlatBands());
+        audio.setEqualizer(false, eqFlatBands());
         expect(SoLoud.instance.filters.equalizerFilter.isActive, isFalse);
         // A quiet test tone: FFT still samples genuine native mixer output.
         audio.setVolume(0.02);
@@ -57,8 +58,12 @@ void main() {
           audio: audio,
         );
         // All bands cut equally: an actual DSP effect rather than a UI toggle.
-        audio.setEqualizer(true, List.filled(8, -12));
-        audio.setEqualizer(true, List.filled(8, -12));
+        audio.setEqualizer(true, [
+          for (final f in eqDefaultFrequencies) EqBand(f, -12),
+        ]);
+        audio.setEqualizer(true, [
+          for (final f in eqDefaultFrequencies) EqBand(f, -12),
+        ]);
         await Future<void>.delayed(const Duration(milliseconds: 250));
         final attenuated = await _nativeRms();
         expect(

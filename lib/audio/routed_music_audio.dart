@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/audio_backend.dart';
 import '../core/models.dart';
+import 'eq_model.dart';
 import 'stream_guard.dart';
 
 /// Aurora owns one queue; [ResolvedAudio.engine] selects the engine. The
@@ -66,8 +67,6 @@ class RoutedMusicAudio extends AudioBackend {
   Duration get duration => _active.duration;
   @override
   double get volume => _volume;
-  @override
-  List<double> get eqFrequencies => _active.eqFrequencies;
   @override
   ValueListenable<List<double>> get spectrum => _active.spectrum;
   @override
@@ -142,8 +141,11 @@ class RoutedMusicAudio extends AudioBackend {
   }
 
   @override
-  void setEqualizer(bool enabled, List<double> gainsDb) =>
-      native.setEqualizer(enabled, gainsDb);
+  void setEqualizer(
+    bool enabled,
+    List<EqBand> bands, {
+    bool autoPreamp = true,
+  }) => native.setEqualizer(enabled, bands, autoPreamp: autoPreamp);
   @override
   void setVisualizationEnabled(bool enabled) =>
       native.setVisualizationEnabled(enabled && !usingWeb);
