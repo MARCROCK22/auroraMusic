@@ -334,15 +334,15 @@ void main() {
       final currentId = controller.currentTrack?.id;
       final audioLoads = audio.loadCount;
       await mount(tester, const Size(800, 900));
-      await reveal(tester, find.text('Personalizar el DJ'));
-      await tester.tap(find.text('Iniciar DJ personal · sin voz'));
+      await reveal(tester, find.text('Iniciar DJ'));
+      await tester.tap(find.text('Iniciar DJ'));
       await tester.pumpAndSettle();
 
       expect(controller.personalDjActive, isTrue);
       expect(controller.audio.isPlaying, isTrue);
       expect(controller.currentTrack?.id, currentId);
       expect(audio.loadCount, audioLoads);
-      await tester.tap(find.text('Detener DJ personal · sin voz'));
+      await tester.tap(find.text('Detener DJ'));
       await tester.pumpAndSettle();
 
       expect(controller.personalDjActive, isFalse);

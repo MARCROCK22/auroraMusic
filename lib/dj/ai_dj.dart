@@ -327,6 +327,11 @@ class DjCandidate {
   final double prior;
 }
 
+/// Reparto determinista de la cuota: true cuando el siguiente puesto debe ser
+/// una pista ya oída (la tanda empieza por una nueva y alterna hasta [share]).
+bool djWantHeard(int heardSoFar, int chosenSoFar, double share) =>
+    heardSoFar < (share * (chosenSoFar + 1)).round();
+
 /// Ranks candidates by taste, continuity and source prior, minus penalties,
 /// then picks greedily with MMR (λ = [lambda]) under an artist cooldown:
 /// never the same artist back-to-back and at most two per ten tracks.
@@ -342,6 +347,8 @@ List<TrackRecommendation> rankDjCandidates({
   DjFilters filters = const DjFilters(),
   double lambda = djMmrLambda,
   double Function(Track track)? adjust, // sesgo de modo (dj_modes.dart)
+  Set<String> heardKeys = const {}, // claves de lo ya oído (biblioteca)
+  double? heardShare, // cuota de ya oídas por tanda; null = sin cuota
 }) {
   if (limit <= 0) return const [];
   final currentVector = current == null ? null : embedDjTrack(current);
@@ -387,6 +394,9 @@ List<TrackRecommendation> rankDjCandidates({
     return window.where((a) => a == artist).length < 2;
   }
 
+  bool heardOf(DjCandidate c) =>
+      recommendationTrackKeys(c.track).any(heardKeys.contains);
+  var heardPicked = 0;
   final picked = <({DjCandidate candidate, Float32List vector})>[];
   while (picked.length < limit && pool.isNotEmpty) {
     // One relaxed pick per batch when every artist is cooling down, so
@@ -394,27 +404,36 @@ List<TrackRecommendation> rankDjCandidates({
     final relaxed =
         picked.isEmpty &&
         !pool.any((c) => allowed(djPrimaryArtist(c.candidate.track)));
+    // Con cuota se busca primero en la clase que toca; si no hay, en cualquiera.
+    final wantHeard = heardShare == null
+        ? null
+        : djWantHeard(heardPicked, picked.length, heardShare);
     var bestIndex = -1;
-    var bestScore = double.negativeInfinity;
-    for (var i = 0; i < pool.length; i++) {
-      if (!relaxed && !allowed(djPrimaryArtist(pool[i].candidate.track))) {
-        continue;
+    for (final only in [?wantHeard, null]) {
+      var bestScore = double.negativeInfinity;
+      for (var i = 0; i < pool.length; i++) {
+        if (!relaxed && !allowed(djPrimaryArtist(pool[i].candidate.track))) {
+          continue;
+        }
+        if (only != null && heardOf(pool[i].candidate) != only) continue;
+        var redundancy = 0.0;
+        for (final chosen in picked) {
+          redundancy = math.max(
+            redundancy,
+            djCosine(pool[i].vector, chosen.vector),
+          );
+        }
+        final score = lambda * pool[i].relevance - (1 - lambda) * redundancy;
+        if (score > bestScore) {
+          bestScore = score;
+          bestIndex = i;
+        }
       }
-      var redundancy = 0.0;
-      for (final chosen in picked) {
-        redundancy = math.max(
-          redundancy,
-          djCosine(pool[i].vector, chosen.vector),
-        );
-      }
-      final score = lambda * pool[i].relevance - (1 - lambda) * redundancy;
-      if (score > bestScore) {
-        bestScore = score;
-        bestIndex = i;
-      }
+      if (bestIndex >= 0) break;
     }
     if (bestIndex < 0) break;
     final best = pool.removeAt(bestIndex);
+    if (heardOf(best.candidate)) heardPicked++;
     picked.add((candidate: best.candidate, vector: best.vector));
     artistsSoFar.add(djPrimaryArtist(best.candidate.track));
   }

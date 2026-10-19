@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../app_controller.dart';
+import '../dj/dj_modes.dart';
 import 'artwork.dart';
 import 'track_actions.dart';
 import 'dj_filters_panel.dart';
@@ -54,6 +55,7 @@ class DjPanel extends StatelessWidget {
             ),
           ],
         ),
+        DjSessionCard(controller: c),
         DjFiltersPanel(controller: c),
 
         if (showRecommendations && recommendations.isEmpty)
@@ -111,54 +113,6 @@ class DjPanel extends StatelessWidget {
                   ],
                 ),
               ),
-            ),
-          ),
-        SwitchListTile.adaptive(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-          title: const Text('Incluir novedades de YouTube'),
-          subtitle: const Text(
-            'Hasta 2 búsquedas por recarga, guiadas por tu perfil.',
-          ),
-          value: c.personalDjIncludeDiscovery,
-          onChanged: c.setPersonalDjIncludeDiscovery,
-        ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: FilledButton.icon(
-            onPressed: c.personalDjActive
-                ? c.stopPersonalDj
-                : c.canStartPersonalDj
-                ? () => c.startPersonalDj(
-                    includeDiscovery: c.personalDjIncludeDiscovery,
-                  )
-                : null,
-            icon: Icon(
-              c.personalDjActive
-                  ? Icons.stop_circle_outlined
-                  : Icons.play_circle,
-            ),
-            label: Text(
-              c.personalDjActive
-                  ? 'Detener DJ personal · sin voz'
-                  : 'Iniciar DJ personal · sin voz',
-            ),
-          ),
-        ),
-        if (c.personalDjActive)
-          Padding(
-            padding: const EdgeInsets.only(top: 6, left: 8),
-            child: Text(
-              c.personalDjNextReason == null
-                  ? 'El tema actual seguirá hasta terminar.'
-                  : 'A continuación: ${c.personalDjNextReason}',
-            ),
-          ),
-        if (c.personalDjError != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              'El DJ seguirá con tu biblioteca: ${c.personalDjError}',
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ),
         Align(
@@ -302,5 +256,160 @@ class DjPanel extends StatelessWidget {
         ),
       ),
     ),
+  );
+}
+
+/// Entrada única del DJ: estado «DJ activo», modo, iniciar y detener. Todo el
+/// trabajo (cola infinita, perfil, coherencia, YouTube) es del controlador.
+class DjSessionCard extends StatefulWidget {
+  const DjSessionCard({super.key, required this.controller});
+  final AppController controller;
+
+  @override
+  State<DjSessionCard> createState() => _DjSessionCardState();
+}
+
+class _DjSessionCardState extends State<DjSessionCard> {
+  bool _starting = false;
+  bool _failed = false;
+
+  Future<void> _start() async {
+    setState(() {
+      _starting = true;
+      _failed = false;
+    });
+    final c = widget.controller;
+    final ok = await c.startDjSession(
+      includeDiscovery: c.personalDjIncludeDiscovery,
+    );
+    if (mounted) {
+      setState(() {
+        _starting = false;
+        _failed = !ok;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.controller,
+    builder: (context, _) {
+      final c = widget.controller;
+      final theme = Theme.of(context);
+      final active = c.personalDjActive;
+      final jam = c.jamPlaybackActive;
+      final next = c.personalDjNextReason;
+      final note = jam
+          ? 'Hay una Jam en curso: el DJ queda en pausa hasta que termine.'
+          : _failed && !active
+          ? 'No hay con qué empezar: añade música a tu biblioteca, busca una canción o revisa tu conexión.'
+          : null;
+      return Card(
+        key: const ValueKey('dj-session-card'),
+        margin: const EdgeInsets.symmetric(vertical: 12),
+        color: theme.colorScheme.surfaceContainerLow,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Semantics(
+                liveRegion: true,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      active ? Icons.graphic_eq : Icons.auto_awesome_outlined,
+                      color: theme.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        active
+                            ? 'DJ activo · ${c.djMode.label}'
+                            : 'DJ detenido',
+                        key: const ValueKey('dj-status'),
+                        style: theme.textTheme.titleMedium,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                active
+                    ? (next == null
+                          ? 'La cola no termina: el DJ sigue sumando canciones.'
+                          : 'A continuación: $next')
+                    : 'Empieza una sesión sin fin con tu perfil, tus favoritos y recomendaciones de YouTube.',
+                style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final mode in DjMode.values)
+                    ChoiceChip(
+                      label: Text(mode.label),
+                      selected: c.djMode == mode,
+                      onSelected: (_) => c.setDjMode(mode),
+                    ),
+                ],
+              ),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Incluir novedades de YouTube'),
+                subtitle: const Text(
+                  'Hasta 2 búsquedas por recarga, guiadas por tu perfil.',
+                ),
+                value: c.personalDjIncludeDiscovery,
+                onChanged: c.setPersonalDjIncludeDiscovery,
+              ),
+              FilledButton.icon(
+                key: const ValueKey('dj-toggle'),
+                onPressed: _starting || jam
+                    ? null
+                    : active
+                    ? c.stopPersonalDj
+                    : _start,
+                icon: _starting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(
+                        active ? Icons.stop_circle_outlined : Icons.play_circle,
+                      ),
+                label: Text(
+                  _starting
+                      ? 'Preparando el DJ…'
+                      : active
+                      ? 'Detener DJ'
+                      : 'Iniciar DJ',
+                ),
+              ),
+              if (note != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    note,
+                    style: TextStyle(color: theme.colorScheme.error),
+                  ),
+                ),
+              if (active && c.personalDjError != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    'El DJ seguirá con tu biblioteca: ${c.personalDjError}',
+                    style: TextStyle(color: theme.colorScheme.error),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    },
   );
 }

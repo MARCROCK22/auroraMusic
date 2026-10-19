@@ -92,6 +92,10 @@ void main() {
       expect(find.text(a.album!), findsOneWidget);
       expect(find.text('Jazz · 3:15'), findsOneWidget);
       expect(find.text('De tu biblioteca'), findsOneWidget);
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('dj-discovery-add')),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('dj-discovery-add')));
       await tester.pumpAndSettle();
       expect(app.queue.map((track) => track.id), ['a']);
@@ -99,6 +103,10 @@ void main() {
       expect(app.audio.isPlaying, isFalse);
       expect(find.text(b.title), findsOneWidget);
       expect(find.text(a.album!), findsNothing);
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('dj-discovery-skip')),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('dj-discovery-skip')));
       await tester.pumpAndSettle();
       expect(find.text(c.title), findsOneWidget);

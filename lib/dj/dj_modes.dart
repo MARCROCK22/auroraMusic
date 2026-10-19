@@ -73,6 +73,21 @@ double djEnergyEstimate(Track track) {
   return ((up - down) / math.max(1, up + down)).clamp(-1.0, 1.0).toDouble();
 }
 
+/// Cuota de pistas YA oídas (biblioteca: historial, favoritos, listas) en cada
+/// tanda del DJ; el resto son pistas nuevas. Descubrir apuesta por lo nuevo,
+/// Relax por lo conocido.
+double djHeardShare(DjMode mode) => switch (mode) {
+  DjMode.discover => 0.30,
+  DjMode.energy => 0.35,
+  DjMode.mood => 0.35,
+  DjMode.relax => 0.40,
+};
+
+/// Una pista ya oída puede volver pasado este tiempo desde que sonó (además
+/// de la memoria de las últimas 20 reproducciones); las nuevas siguen con la
+/// ventana larga de la memoria anti-repetición (7 días).
+const djHeardCooldown = Duration(hours: 3);
+
 /// Energía objetivo según la hora local: noche calma, tarde alta.
 double djTargetEnergyForHour(int hour) {
   if (hour >= 22 || hour < 6) return -0.7;
