@@ -18,11 +18,34 @@ import 'audio_web/web_music_audio.dart';
 import 'library/library_database.dart';
 import 'sources/yt_dlp_source.dart';
 import 'sources/innertube_source.dart';
+import 'terms/terms_acceptance.dart';
+import 'terms/terms_screen.dart';
 import 'ui/aurora_shell.dart';
 
-void main(List<String> args) {
+Future<void> main(List<String> args) async {
   WindowControls.launchArguments = args;
   WidgetsFlutterBinding.ensureInitialized();
+  // Puerta de términos: sin aceptar no arranca protocolo, audio, proxy ni red.
+  final terms = TermsAcceptance(await SharedPreferences.getInstance());
+  if (terms.isAccepted) {
+    _start();
+    return;
+  }
+  runApp(
+    MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: auroraTheme(Brightness.dark, const Color(0xffe86927)),
+      home: TermsScreen(
+        onAccept: () async {
+          await terms.accept();
+          _start();
+        },
+      ),
+    ),
+  );
+}
+
+void _start() {
   unawaited(registerAuroraProtocol()); // aurora://jam/CODIGO (HKCU)
   runApp(const AuroraBootstrap());
 }
