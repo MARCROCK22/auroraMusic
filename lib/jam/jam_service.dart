@@ -56,6 +56,7 @@ class JamService extends ChangeNotifier {
   final Map<String, List<JamSuggestion>> _suggestions = {};
   final Map<String, DateTime> _lastSuggest = {};
   String? _lastCode;
+  bool _handingOff = false;
   final Set<String> _skipVotes = {};
   Future<void> Function(bool play)? onPlayPause;
   bool get isRemote => _transport != null;

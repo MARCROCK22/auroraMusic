@@ -134,11 +134,22 @@ class JamGuestPeer implements JamPeer {
     required this.uid,
     required this.hostUid,
     this.silence = const Duration(seconds: 25),
+    this.hostGrace = const Duration(seconds: 12),
   });
   final JamTransport transport;
   final JamChannel channel;
-  final String code, uid, hostUid;
+  final String code, uid;
+
+  /// Único emisor aceptado en `down`. Cambia solo con un `handoff` del propio
+  /// anfitrión actual.
+  String hostUid;
   final Duration silence;
+
+  /// Tiempo que se espera tras ver salir al anfitrión de la presencia antes de
+  /// darlo por caído: la presencia no es una identidad verificada, así que solo
+  /// cuenta si además calla (cualquier mensaje suyo la desmiente).
+  final Duration hostGrace;
+  Timer? _graceTimer;
   bool _open = true;
   final _inbox = StreamController<Object?>();
   final _subs = <StreamSubscription<Object?>>[];
@@ -152,14 +163,26 @@ class JamGuestPeer implements JamPeer {
   Future<void> start() async {
     _subs.add(
       channel.incoming.listen((e) {
+        // `f` en `down` lo declara quien publica (los coanfitriones también
+        // pueden): solo se acepta lo que dice venir del anfitrión.
+        if (e.from != hostUid) return;
         if (e.to != uid && e.to != '*') return;
+        _graceTimer?.cancel();
+        _graceTimer = null;
         _rearm();
+        _followHandoff(e.text);
         if (!_inbox.isClosed) _inbox.add(e.text);
       }),
     );
     _subs.add(
       channel.presence.listen((p) {
-        if (!p.joined && p.uid == hostUid) _drop('host');
+        if (p.uid != hostUid) return;
+        if (p.joined) {
+          _graceTimer?.cancel();
+          _graceTimer = null;
+        } else {
+          _graceTimer ??= Timer(hostGrace, () => _drop('host'));
+        }
       }),
     );
     _subs.add(
@@ -170,6 +193,18 @@ class JamGuestPeer implements JamPeer {
     await channel.track();
     _rearm();
     await transport.command(code, 'hello', const {});
+  }
+
+  /// Tras un `handoff` legítimo los mensajes pasan a venir del nuevo anfitrión.
+  void _followHandoff(String text) {
+    if (text.length > 256 || !text.contains('"handoff"')) return;
+    try {
+      final m = jsonDecode(text);
+      if (m is Map && m['kind'] == 'handoff' && m['to'] is String) {
+        final next = m['to'] as String;
+        if (RegExp(r'^[a-zA-Z0-9_-]{1,64}$').hasMatch(next)) hostUid = next;
+      }
+    } catch (_) {}
   }
 
   void _rearm() {
@@ -227,6 +262,7 @@ class JamGuestPeer implements JamPeer {
     if (!_open) return;
     _open = false;
     _watchdog?.cancel();
+    _graceTimer?.cancel();
     for (final sub in _subs) {
       await sub.cancel();
     }

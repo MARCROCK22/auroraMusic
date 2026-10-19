@@ -392,6 +392,14 @@ void main() {
       expect(jamNormalizeCode('abcd23'), 'ABCD23');
       expect(jamNormalizeCode('ABCD0I'), isNull);
       expect(jamRemoteCodeFrom('aurora://jam/abcd23'), 'ABCD23');
+      // 8 caracteres (nuevo) y 6 (salas antiguas); cualquier otra longitud no.
+      expect(jamNormalizeCode('abcd2345'), 'ABCD2345');
+      expect(jamNormalizeCode('abcd-2345'), 'ABCD2345');
+      expect(jamRemoteCodeFrom('aurora://jam/ABCD2345'), 'ABCD2345');
+      expect(jamNormalizeCode('ABCD234'), isNull);
+      expect(jamNormalizeCode('ABCD23456'), isNull);
+      expect(jamNormalizeCode('ABCD23I5'), isNull);
+      expect(jamNormalizeCode('ABCD'), isNull);
       expect(jamRemoteCodeFrom('aurora://jam/abcd23/extra'), isNull);
       expect(jamRemoteCodeFrom('aurora://evil/ABCD23'), isNull);
       expect(jamRemoteCodeFrom('https://jam/ABCD23'), isNull);

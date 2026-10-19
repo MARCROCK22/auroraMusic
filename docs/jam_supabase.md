@@ -75,14 +75,21 @@ diseño; la seguridad la dan RLS y las RPC).
 - Crear/unirse/añadir/votar/expulsar/permisos/transferir: **solo RPC**
   `SECURITY DEFINER` con `search_path = ''`, parámetros tipados y errores
   `jam:<código>` (nunca texto interno de Postgres).
-- Canales Realtime privados `jam:<CÓDIGO>:down` (publican solo anfitrión y
-  coanfitriones; todos los miembros leen y anuncian presencia) y
+- Canales Realtime privados `jam:<CÓDIGO>:down` (publica solo el anfitrión, y
+  el servidor para el `handoff`; todos los miembros leen; solo el anfitrión
+  anuncia presencia. El invitado acepta únicamente mensajes con `f` = anfitrión
+  y no da por caído al anfitrión solo por la presencia: espera a que además
+  calle. La clave de presencia la elige el cliente y las políticas RLS no la
+  ven, así que no se trata como identidad. Los mensajes dirigidos `t=uid`
+  los lee todo miembro: enrutan, no ocultan) y
   `jam:<CÓDIGO>:up` (lo publica únicamente el servidor desde `jam_cmd`, con
   `from` verificado; solo el anfitrión lo lee).
 - El anfitrión es la fuente de verdad de cola y reproducción; los invitados en
   modo *Escuchar* corrigen deriva ±1 s con el desfase estimado por ping/pong.
-- Códigos de 6 caracteres sin ambiguos (`ABCDEFGHJKLMNPQRSTUVWXYZ23456789`),
-  aleatorios en servidor. 5 fallos en 10 min → bloqueo 15 min. El anfitrión
+- Códigos de 8 caracteres sin ambiguos (`ABCDEFGHJKLMNPQRSTUVWXYZ23456789`,
+  ≈ 1.1e12), aleatorios en servidor; los de 6 de salas antiguas siguen
+  valiendo. 5 fallos en 10 min por usuario → bloqueo 15 min; 10 fallos en
+  10 min por IP → bloqueo 30 min (sin probar: ver notas en el SQL). El anfitrión
   puede rotar el código, cerrar el acceso o bloquear reingresos.
 - Sugerencias: cada dispositivo calcula **las suyas** con su propio perfil
   (radio de YouTube vía InnerTube `next` + ranking local) y publica solo 5
@@ -98,12 +105,12 @@ diseño; la seguridad la dan RLS y las RPC).
 | Invitados por sala | 1–15 (+ anfitrión) |
 | Salas activas por usuario | 1 como anfitrión; 3 como miembro |
 | Crear salas | 3 por hora y usuario; 5000 salas en total |
-| Unirse | 20 intentos / 10 min; 5 fallos de código → bloqueo 15 min |
+| Unirse | 20 intentos / 10 min; 5 fallos de código → bloqueo 15 min; 10 fallos por IP → bloqueo 30 min |
 | Comandos | 120/min por usuario, 600/min por sala; añadir 20/min; sugerir 1/min |
 | Pistas añadidas por invitado | 200 por sala (el anfitrión fija el tope práctico) |
 | Payload de comando | 6000 bytes; campos inesperados rechazados |
 | Texto | nombre ≤ 32, título/artista ≤ 256, razón ≤ 60; sin caracteres de control ni marcas bidireccionales |
-| ID de vídeo | `^[A-Za-z0-9_-]{11}$`; códigos `^[A-HJ-NP-Z2-9]{6}$` |
+| ID de vídeo | `^[A-Za-z0-9_-]{11}$`; códigos `^[A-HJ-NP-Z2-9]{6}([A-HJ-NP-Z2-9]{2})?$` |
 | Caducidad | 12 h sin actividad |
 
 ### Anti inyección SQL
@@ -172,7 +179,7 @@ Prueba con dos sesiones anónimas distintas (usa `as_level`/clientes separados):
   proceso lanzado por el protocolo recibe `aurora://jam/CODIGO` como argumento;
   el hook de instancia única debe reenviarlo a la instancia viva y esta llamar
   a `JamController.joinFromLink`. `jamCodeFromLaunchArgument(arg)` valida el
-  argumento. El enlace solo lleva el código de 6 caracteres: ni claves ni URL.
+  argumento. El enlace solo lleva el código (8 caracteres, o 6 en salas antiguas): ni claves ni URL.
 
 ## 7. Red local en Android
 
