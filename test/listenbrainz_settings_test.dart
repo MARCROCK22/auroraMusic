@@ -1,3 +1,4 @@
+import 'package:aurora_music/listenbrainz/listen.dart';
 import 'package:aurora_music/listenbrainz/listen_storage.dart';
 import 'package:aurora_music/listenbrainz/listenbrainz_client.dart';
 import 'package:aurora_music/listenbrainz/listenbrainz_service.dart';
@@ -222,5 +223,76 @@ void main() {
         });
       }
     }
+  });
+
+  group('causas de «no llega nada»', () {
+    test(
+      'validar guarda el token pero deja el interruptor apagado y avisa',
+      () async {
+        final (s, _) = await _service();
+        await s.validateAndSave(secret);
+        expect(s.hasToken, isTrue);
+        expect(s.enabled, isFalse);
+        expect(s.needsEnable, isTrue);
+        expect(s.message, contains('Activa'));
+        expect(s.scrobbler.enabled, isFalse);
+        await s.setEnabled(true);
+        expect(s.needsEnable, isFalse);
+        expect(s.scrobbler.enabled, isTrue);
+      },
+    );
+
+    test(
+      'Probar conexión: token rechazado se refleja sin mostrar el token',
+      () async {
+        final (s, store) = await _service(
+          response: const LbResponse(401, '{"code":401}'),
+        );
+        store.value = secret;
+        await s.init();
+        await s.testConnection();
+        expect(s.status, LbStatus.invalid);
+        expect(s.message, contains('rechaz'));
+        expect(s.message, isNot(contains(secret)));
+      },
+    );
+
+    test(
+      'Probar conexión correcta avisa si el interruptor está apagado',
+      () async {
+        final (s, store) = await _service();
+        store.value = secret;
+        await s.init();
+        await s.testConnection();
+        expect(s.status, LbStatus.ok);
+        expect(s.message, contains('apagado'));
+      },
+    );
+
+    test('fallo al leer el token en el envío avisa en vez de callar', () async {
+      SharedPreferences.setMockInitialValues({
+        'listenbrainz.enabled': true,
+        'listenbrainz.user': 'ana',
+      });
+      final store = FakeTokenStore()..value = secret;
+      final s = ListenBrainzService(
+        preferences: await SharedPreferences.getInstance(),
+        tokenStore: store,
+        queueStore: MemoryListenQueueStore()
+          ..saved = [
+            const Listen(artist: 'A', title: 'T', listenedAt: 1700000000),
+          ],
+        client: ListenBrainzClient(
+          transport: (_) async => const LbResponse(500, '{}'),
+        ),
+      );
+      await s.init();
+      await pumpEventQueue();
+      expect(s.scrobbler.pending, 1);
+      store.broken = true;
+      await s.scrobbler.flush();
+      expect(s.secureUnavailable, isTrue);
+      expect(s.status, LbStatus.error);
+    });
   });
 }

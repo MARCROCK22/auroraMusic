@@ -70,7 +70,55 @@ class ListenBrainzService extends ChangeNotifier {
     try {
       return await tokenStore.read();
     } on Object {
+      // Antes fallaba en silencio y no se enviaba nada: ahora se avisa en el panel.
+      if (!_secureUnavailable && !_disposed) {
+        _secureUnavailable = true;
+        _set(LbStatus.error, 'No se pudo leer el token del almacén seguro.');
+      }
       return null;
+    }
+  }
+
+  /// Token guardado y usuario válidos pero el interruptor está apagado: no se
+  /// publica nada hasta que el usuario lo encienda.
+  bool get needsEnable => _hasToken && username != null && !enabled;
+
+  /// «Probar conexión»: valida el token guardado contra ListenBrainz.
+  Future<void> testConnection() async {
+    final String? token;
+    try {
+      token = await tokenStore.read();
+    } on Object {
+      _secureUnavailable = true;
+      _set(LbStatus.error, 'No se pudo leer el token del almacén seguro.');
+      return;
+    }
+    if (token == null) {
+      _hasToken = false;
+      _set(LbStatus.invalid, 'No hay token guardado. Valida uno primero.');
+      return;
+    }
+    _set(LbStatus.working);
+    try {
+      final user = await client.validateToken(token);
+      if (user == null) {
+        _set(
+          LbStatus.invalid,
+          'ListenBrainz rechazó el token (autenticación fallida).',
+        );
+        return;
+      }
+      await scrobbler.clearAuthFailure();
+      _set(
+        LbStatus.ok,
+        enabled
+            ? 'Conexión correcta como $user.'
+            : 'Conexión correcta como $user, pero el interruptor está apagado: no se envía nada.',
+      );
+    } on ListenBrainzException catch (e) {
+      _set(LbStatus.error, e.message);
+    } on Object {
+      _set(LbStatus.error, 'No se pudo comprobar la conexión.');
     }
   }
 
@@ -155,7 +203,10 @@ class ListenBrainzService extends ChangeNotifier {
       await preferences.setString(userKey, user);
       scrobbler.enabled = active;
       scrobbler.tokenReplaced();
-      _set(LbStatus.ok, 'Conectado como $user.');
+      _set(
+        LbStatus.ok,
+        'Conectado como $user. Activa «Enviar mi historial» para empezar a publicar.',
+      );
     } on ListenBrainzException catch (e) {
       _set(LbStatus.error, e.message);
     } on Object {

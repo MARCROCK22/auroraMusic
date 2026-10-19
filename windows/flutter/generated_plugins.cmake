@@ -5,6 +5,7 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   audio_service_win
   flutter_inappwebview_windows
+  flutter_secure_storage_windows
   url_launcher_windows
 )
 

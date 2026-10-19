@@ -457,6 +457,10 @@ class JamController extends ChangeNotifier with WidgetsBindingObserver {
           : Future.value(const []);
     },
     seeds: () => app.recentTracks,
+    favorites: () => [
+      for (final t in app.tracks)
+        if (app.favoriteIds.contains(t.id)) t,
+    ],
     local: () => app.queue,
     rank: app.rankForJam,
   );

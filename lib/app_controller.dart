@@ -534,7 +534,7 @@ class AppController extends ChangeNotifier {
   int _recommendationDiscoveryGeneration = 0;
   int _personalDjGeneration = 0;
   bool _personalDjActive = false;
-  bool _personalDjIncludeDiscovery = false;
+  bool _personalDjIncludeDiscovery = true;
   Set<String> _personalDjSeenKeys = {};
   Future<void>? _personalDjRefillTask;
   List<DjEvent> _djEvents = [];

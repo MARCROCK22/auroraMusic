@@ -54,9 +54,12 @@ class ListenBrainzException implements Exception {
 enum LbSubmitStatus { ok, rateLimited, unauthorized, rejected, retry }
 
 class LbSubmitResult {
-  const LbSubmitResult(this.status, [this.retryAfter]);
+  const LbSubmitResult(this.status, [this.retryAfter, this.detail]);
   final LbSubmitStatus status;
   final Duration? retryAfter;
+
+  /// Motivo legible (ya sin token) cuando el envío no fue `ok`.
+  final String? detail;
 }
 
 /// Novedad devuelta por `fresh_releases`.
@@ -94,7 +97,12 @@ class ListenBrainzClient {
     try {
       final request = await client.openUrl(r.method, r.uri).timeout(_timeout);
       r.headers.forEach(request.headers.set);
-      if (r.body != null) request.add(utf8.encode(r.body!));
+      if (r.body != null) {
+        // Con Content-Length explícito: en chunked ListenBrainz ve un cuerpo vacío (HTTP 400).
+        final bytes = utf8.encode(r.body!);
+        request.contentLength = bytes.length;
+        request.add(bytes);
+      }
       final response = await request.close().timeout(_timeout);
       final body = await utf8.decodeStream(response).timeout(_timeout);
       final headers = <String, String>{};
@@ -175,16 +183,27 @@ class ListenBrainzClient {
     final LbResponse r;
     try {
       r = await _send('POST', '/1/submit-listens', token, body: body);
-    } on ListenBrainzException {
-      return const LbSubmitResult(LbSubmitStatus.retry);
+    } on ListenBrainzException catch (e) {
+      return LbSubmitResult(LbSubmitStatus.retry, null, e.message);
     }
+    final why = 'HTTP ${r.status}: ${_reason(r, token)}';
     return switch (r.status) {
       200 => const LbSubmitResult(LbSubmitStatus.ok),
-      429 => LbSubmitResult(LbSubmitStatus.rateLimited, _retryAfter(r)),
-      401 => const LbSubmitResult(LbSubmitStatus.unauthorized),
-      400 => const LbSubmitResult(LbSubmitStatus.rejected),
-      _ => LbSubmitResult(LbSubmitStatus.retry, _retryAfter(r)),
+      429 => LbSubmitResult(LbSubmitStatus.rateLimited, _retryAfter(r), why),
+      401 => LbSubmitResult(LbSubmitStatus.unauthorized, null, why),
+      400 => LbSubmitResult(LbSubmitStatus.rejected, null, why),
+      _ => LbSubmitResult(LbSubmitStatus.retry, _retryAfter(r), why),
     };
+  }
+
+  /// Campo `error` del JSON de ListenBrainz (o el inicio del cuerpo), sin token.
+  String _reason(LbResponse r, String token) {
+    final json = _json(r);
+    final text = json is Map && json['error'] is String
+        ? json['error'] as String
+        : r.body;
+    final clean = redactToken(text, token).trim();
+    return clean.length > 160 ? clean.substring(0, 160) : clean;
   }
 
   /// Respeta `X-RateLimit-Reset-In` (segundos); 5 s si no viene.

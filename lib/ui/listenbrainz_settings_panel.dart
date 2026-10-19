@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../listenbrainz/listenbrainz_service.dart';
+import '../listenbrainz/scrobbler.dart';
 
 /// Ajustes de ListenBrainz: opcional, apagado por defecto. El token se pega en
 /// un campo oculto, se valida (solo se muestra el usuario) y se guarda en el
@@ -19,6 +20,23 @@ class _State extends State<ListenBrainzSettingsPanel> {
   void dispose() {
     _token.dispose();
     super.dispose();
+  }
+
+  static String _tracking(Scrobbler sc) {
+    final t = sc.tracking;
+    if (t == null) return 'Ahora mismo no se sigue ninguna pista.';
+    final need = sc.trackingThreshold;
+    final state = sc.trackingCounted
+        ? 'contada'
+        : need == null
+        ? 'demasiado corta para contar'
+        : 'contará tras ${need.inSeconds} s escuchados';
+    return 'Siguiendo: ${t.title} — ${t.artist} ($state).';
+  }
+
+  static String _ago(DateTime at) {
+    final d = DateTime.now().difference(at);
+    return d.inMinutes < 1 ? 'hace unos segundos' : 'hace ${d.inMinutes} min';
   }
 
   Future<void> _validate() async {
@@ -49,6 +67,20 @@ class _State extends State<ListenBrainzSettingsPanel> {
             const Text(
               'Este sistema no ofrece almacenamiento seguro para el token: '
               'ListenBrainz no está disponible.',
+            ),
+          ],
+          if (s.needsEnable) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'Token guardado, pero el interruptor está apagado: no se envía '
+              'ninguna escucha. Actívalo para empezar a publicar.',
+            ),
+          ],
+          if (s.scrobbler.authFailed) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'Autenticación fallida: ListenBrainz rechazó el token. '
+              'Pulsa «Probar conexión» o cierra sesión y valida otro.',
             ),
           ],
           SwitchListTile(
@@ -91,6 +123,12 @@ class _State extends State<ListenBrainzSettingsPanel> {
                   icon: const Icon(Icons.verified_outlined),
                   label: Text(working ? 'Validando…' : 'Validar'),
                 ),
+              if (s.hasToken)
+                OutlinedButton.icon(
+                  onPressed: working ? null : s.testConnection,
+                  icon: const Icon(Icons.wifi_tethering),
+                  label: const Text('Probar conexión'),
+                ),
               if (s.hasToken || s.pending > 0)
                 OutlinedButton.icon(
                   onPressed: working ? null : s.signOut,
@@ -102,6 +140,27 @@ class _State extends State<ListenBrainzSettingsPanel> {
           if (s.message != null) ...[
             const SizedBox(height: 8),
             Text(s.message!),
+          ],
+          if (s.active) ...[
+            const SizedBox(height: 12),
+            Text(_tracking(s.scrobbler)),
+            const SizedBox(height: 4),
+            Text(
+              s.scrobbler.lastSentAt == null
+                  ? 'Aún no se ha enviado ninguna escucha en esta sesión.'
+                  : 'Enviadas esta sesión: ${s.scrobbler.sentCount}. '
+                        'Último envío: ${_ago(s.scrobbler.lastSentAt!)}.',
+            ),
+            if (s.scrobbler.lastError != null) ...[
+              const SizedBox(height: 4),
+              Text('Último error: ${s.scrobbler.lastError}'),
+            ],
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: working ? null : s.scrobbler.flush,
+              icon: const Icon(Icons.sync),
+              label: const Text('Enviar pendientes ahora'),
+            ),
           ],
           if (s.pending > 0) ...[
             const SizedBox(height: 8),

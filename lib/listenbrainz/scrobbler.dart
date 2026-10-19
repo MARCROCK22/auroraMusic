@@ -80,6 +80,31 @@ class Scrobbler {
   int get pending => _queue.length;
   bool get authFailed => _authFailed;
 
+  /// Diagnóstico para el panel: qué pista se sigue y qué pasó en el último envío.
+  Track? get tracking => _session?.track;
+  Duration get listenedSoFar => _session?.listened ?? Duration.zero;
+  bool get trackingCounted => _session?.counted ?? false;
+  Duration? get trackingThreshold {
+    final s = _session;
+    return s == null ? null : scrobbleThreshold(s.track.duration);
+  }
+
+  DateTime? lastSentAt;
+  String? lastError;
+  int sentCount = 0;
+
+  void _failed(LbSubmitResult r) {
+    lastError = r.detail ?? r.status.name;
+    onChanged?.call();
+  }
+
+  Future<void> clearAuthFailure() async {
+    _authFailed = false;
+    lastError = null;
+    onChanged?.call();
+    await flush();
+  }
+
   Future<void> loadQueue() async {
     _queue = (await store.load()).take(maxQueue).toList();
     onChanged?.call();
@@ -112,7 +137,10 @@ class Scrobbler {
     required Duration duration,
   }) {
     if (!enabled || track == null) {
-      _session = null;
+      if (_session != null) {
+        _session = null;
+        onChanged?.call();
+      }
       return;
     }
     final now = _now();
@@ -158,8 +186,14 @@ class Scrobbler {
     );
     if (!s.counted && threshold != null && s.listened >= threshold) {
       s.counted = true;
+      onChanged?.call();
       final listen = buildListen(track, s.startedAt, duration: duration);
-      if (listen != null && _enqueue(listen)) unawaited(flush());
+      if (listen == null) {
+        lastError =
+            'No se pudo publicar «${track.title}»: falta artista o título fiable.';
+      } else if (_enqueue(listen)) {
+        unawaited(flush());
+      }
     }
   }
 
@@ -171,6 +205,7 @@ class Scrobbler {
     final r = await client.submit(token, 'playing_now', [listen]);
     if (r.status == LbSubmitStatus.rateLimited) _block(r.retryAfter);
     if (r.status == LbSubmitStatus.unauthorized) _failAuth();
+    if (r.status != LbSubmitStatus.ok) _failed(r);
     // Si falla, se ignora: es solo informativo y se rehace con la siguiente pista.
   }
 
@@ -213,7 +248,11 @@ class Scrobbler {
     _flushing = true;
     try {
       final token = await readToken();
-      if (token == null) return;
+      if (token == null) {
+        lastError = 'No se pudo leer el token guardado.';
+        onChanged?.call();
+        return;
+      }
       while (_queue.isNotEmpty) {
         if (_blocked) {
           _schedule(
@@ -233,15 +272,21 @@ class Scrobbler {
         switch (r.status) {
           case LbSubmitStatus.ok:
             _failures = 0;
+            lastError = null;
+            lastSentAt = _now();
+            sentCount += batch.length;
             await _drop(batch.length);
             if (_queue.isNotEmpty) await _delay(const Duration(seconds: 1));
           case LbSubmitStatus.rateLimited:
+            _failed(r);
             _block(r.retryAfter);
             return;
           case LbSubmitStatus.unauthorized:
+            _failed(r);
             _failAuth();
             return;
           case LbSubmitStatus.rejected:
+            _failed(r);
             // Un lote rechazado se parte; un listen suelto rechazado se descarta.
             if (batch.length > 1) {
               _singleMode = true;
@@ -249,6 +294,7 @@ class Scrobbler {
               await _drop(1);
             }
           case LbSubmitStatus.retry:
+            _failed(r);
             _failures++;
             final wait = r.retryAfter ?? _backoff(_failures);
             _schedule(wait, () => unawaited(flush()));
