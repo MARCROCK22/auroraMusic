@@ -540,11 +540,17 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                       if (rail || WindowControls.supported)
                         StudioTitleBar(
                           onNavigate: _navigate,
-                          sessionText: _jam?.service.connected == true
+                          sessionText:
+                              (_jam?.service.connected == true ||
+                                  _jam?.service.reconnecting == true)
                               ? 'JAM · ${_jam!.peopleCount} ${_jam!.peopleCount == 1 ? 'PERSONA' : 'PERSONAS'} · ${_jam!.roleLabel.toUpperCase()}'
                               : 'INICIAR UNA JAM',
-                          activeSession: _jam?.service.connected == true,
-                          onSession: _jam?.service.connected == true
+                          activeSession:
+                              (_jam?.service.connected == true ||
+                              _jam?.service.reconnecting == true),
+                          onSession:
+                              (_jam?.service.connected == true ||
+                                  _jam?.service.reconnecting == true)
                               ? _openJamPanel
                               : _startJam,
                         ),
@@ -583,7 +589,10 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                                 onStartJam: _startJam,
                                 onJam: () => _navigate(9),
                                 onQueue: () => _navigate(
-                                  _jam?.service.connected == true ? 9 : 5,
+                                  (_jam?.service.connected == true ||
+                                          _jam?.service.reconnecting == true)
+                                      ? 9
+                                      : 5,
                                 ),
                               ),
                           ],
