@@ -148,3 +148,40 @@ título y sin género común) mientras quede alguno; nunca vacía. `SuggestionsA
 la aplica a todo (cola, DJ, Jam): `djCoherenceWeight` en la relevancia y
 `Suggestion.coherence`/`coherenceReason`; el rechazo duro solo actúa si quedan
 ≥ `limit` candidatos limpios.
+
+## Escalera de relajación y diagnóstico (2026-10-19)
+
+`SuggestionsApi.getSuggestions` nunca devuelve menos de lo posible. Escalones, en
+orden: (1) memoria anti-repetición por tramos 1, 1/2, 1/4, 0 de la ventana;
+(2) coherencia: el rechazo duro solo actúa si quedan ≥ `limit` candidatos
+limpios (si no, `coherenceRelaxed`); (3) si faltan pistas, se vuelven a pedir
+las fuentes con `want` x3 (`ladder: fuentes x3`); (4) se añade TODA la
+biblioteca (`ladder: biblioteca completa`). Repetir lo ya sonado es el tramo 0
+de memoria. `api.lastDiagnostics` (`SuggestionsDiagnostics`) cuenta candidatos
+tras cada etapa (reunidos por cubo, filtros, coherencia, memoria, elegidos por
+cubo) y en debug se loguea (`aurora.recs`). `defaultRecMix` incluye ahora
+`radio: 0.20`: antes la radio de YouTube tenía cuota 0 y el MMR la penalizaba.
+
+`JamSuggestionAdapter`: semillas = actual + 4 recientes + 3 favoritas
+(opcional `favorites`), sin repetir y en paralelo; si ninguna radio responde ya
+no se inyecta lo local como candidatos extra, de modo que `api.sources`
+(Spotify, ListenBrainz) mandan antes de caer a la biblioteca.
+
+## Alternativas gratuitas (investigado 2026-10-19)
+
+Fuentes: documentación oficial de ListenBrainz, Troi, MusicBrainz y Last.fm; lo
+demás por búsqueda. Solo se investiga, no hay código ni dependencias nuevas.
+
+| Fuente | Requiere clave | Límite | ¿Encaja con CLAUDE.md? | Veredicto |
+|---|---|---|---|---|
+| ListenBrainz LB Radio (`GET /1/explore/lb-radio?prompt=&mode=`, JSPF con MBIDs; artista incluye similares) | Docs no lo dicen (sin verificar); el token del usuario da más cupo | 1 llamada/s por cliente, 429 si se excede; User-Agent obligatorio | Sí: ya permitido con el token del usuario en almacenamiento seguro | Candidato bueno; devuelve MBIDs, hay que emparejar a YouTube |
+| ListenBrainz labs (`labs.api.listenbrainz.org`: similar-artists / similar-recordings) | Sin verificar (no aparece en la documentación oficial consultada) | Sin verificar | Probablemente sí (sin clave), sin verificar | No usar hasta confirmar contrato y estabilidad |
+| MusicBrainz API (tags/géneros) | No | ~1 req/s por IP, User-Agent con contacto obligatorio; 503 si se excede | Sí | Útil solo para enriquecer géneros con caché; lento para lotes |
+| Last.fm `track.getSimilar` | Sí (`api_key`) | Fijado por Last.fm; error 29 al excederlo | No: exige clave en la app; términos: solo uso no comercial, caché máx. 100 MB, atribución | Descartar |
+| ReccoBeats (`api.reccobeats.com/v1`, recomendación por semillas) | Según directorios de terceros, no (sin verificar; no pude abrir la doc oficial) | Sin verificar | Sin verificar | Interesante, verificar antes de plantearlo |
+| AcousticBrainz | No | Proyecto terminado en 2022; web/API seguían online «por ahora» | Sí (datos CC0) pero sin datos nuevos | Descartar (archivado) |
+| Deezer API pública (artistas relacionados, radio) | Endpoints públicos sin clave (sin verificar: no pude abrir la doc oficial) | ~50 peticiones/5 s por IP según un tercero (sin verificar) | Probablemente sí; términos sin verificar | Alternativa gratuita a probar; emparejar a YouTube |
+
+Conclusión: lo ya permitido (radio/relacionadas de InnerTube, ListenBrainz con
+token, Spotify emparejado) cubre el caso; la mejor ampliación sin clave es LB
+Radio por artista semilla (1 req/s) y, si se verifica, Deezer relacionados.

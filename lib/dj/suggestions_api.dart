@@ -24,6 +24,7 @@
 // década) + exploración (ε-greedy con muestreo ponderado). Si el pool se agota
 // la ventana de repetición se relaja por tramos en vez de quedarse vacío.
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -121,6 +122,8 @@ const defaultRecMix = <RecBucket, double>{
   RecBucket.discovery: 0.15,
   RecBucket.classics: 0.05,
   RecBucket.listenbrainz: 0.08, // cuota pequeña: el perfil local manda
+  RecBucket.radio:
+      0.20, // radio de YouTube del llamador: sin cuota se penalizaba
 };
 
 /// Media ponderada de perfiles (cada vector ya está normalizado, así que nadie
@@ -201,6 +204,25 @@ class _Item {
   Track get track => candidate.track;
 }
 
+/// Cuántos candidatos sobreviven a cada etapa del último `getSuggestions`.
+/// `ladder` anota los escalones de relajación usados (vacío = no hizo falta).
+class SuggestionsDiagnostics {
+  int gathered = 0, afterFilters = 0, afterCoherence = 0, afterMemory = 0;
+  int picked = 0;
+  double memoryTier = 1; // 1 = ventana completa, 0 = sin filtro de memoria
+  bool coherenceRelaxed = false;
+  Map<RecBucket, int> gatheredByBucket = {};
+  Map<RecBucket, int> pickedByBucket = {};
+  final ladder = <String>[];
+
+  @override
+  String toString() =>
+      'recs gathered=$gathered(${gatheredByBucket.entries.map((e) => '${e.key.name}:${e.value}').join(',')}) '
+      'filters=$afterFilters coherence=$afterCoherence'
+      '${coherenceRelaxed ? '(relajada)' : ''} memory=$afterMemory@$memoryTier '
+      'picked=$picked ladder=$ladder';
+}
+
 class SuggestionsApi {
   SuggestionsApi({
     this.fetchCandidates,
@@ -225,11 +247,14 @@ class SuggestionsApi {
   final math.Random _random;
   final _cache = <String, List<DjCandidate>>{};
 
+  /// Contadores del último `getSuggestions` (para depurar «se queda sin recos»).
+  SuggestionsDiagnostics lastDiagnostics = SuggestionsDiagnostics();
+
   static String _key(SessionContext c) =>
       '${c.mode.name}|${(c.participants.map((p) => p.id).toList()..sort()).join(',')}';
 
-  Future<List<DjCandidate>> _gather(SessionContext ctx) async {
-    final want = math.max(ctx.limit, 10);
+  Future<List<DjCandidate>> _gather(SessionContext ctx, {int boost = 1}) async {
+    final want = math.max(ctx.limit, 10) * boost;
     Future<List<DjCandidate>> run(
       RecBucket bucket,
       Future<List<DjCandidate>> Function() call,
@@ -273,22 +298,23 @@ class SuggestionsApi {
       candidates = _cache[key] ?? const [];
     }
     final heardOn = (ctx.heardShare ?? 0) > 0;
-    final lowSupply = candidates.length < ctx.limit * 2;
-    if (lowSupply || heardOn) {
-      // Poca oferta: la biblioteca completa el pool (y es el único respaldo).
-      // Con cuota de ya oídas entra siempre, una muestra para no embeber todo.
-      final inKnown = {for (final c in candidates) c.track.id};
+    // Biblioteca como relleno: `all` la mete completa (último recurso); si no,
+    // solo con poca oferta o cuota de oídas (entonces una muestra).
+    List<DjCandidate> withLibrary(List<DjCandidate> base, {bool all = false}) {
+      final lowSupply = base.length < ctx.limit * 2;
+      if (!all && !lowSupply && !heardOn) return base;
+      final inKnown = {for (final c in base) c.track.id};
       var fromLibrary = [
         for (final t in ctx.library)
           if (!inKnown.contains(t.id)) t,
       ];
-      if (!lowSupply) {
+      if (!all && !lowSupply) {
         fromLibrary = (fromLibrary..shuffle(rnd))
             .take(math.max(30, ctx.limit * 3))
             .toList();
       }
-      candidates = [
-        ...candidates,
+      return [
+        ...base,
         for (final t in fromLibrary)
           DjCandidate(
             t,
@@ -300,7 +326,31 @@ class SuggestionsApi {
           ),
       ];
     }
-    final picks = _rank(ctx, candidates, now, rnd);
+
+    // Escalera: memoria y coherencia ya se relajan dentro de _rank; si aun así
+    // faltan pistas se amplían las fuentes (x3) y luego entra toda la biblioteca.
+    final diag = SuggestionsDiagnostics();
+    candidates = withLibrary(candidates);
+    var picks = _rank(ctx, candidates, now, rnd, diag);
+    if (picks.length < ctx.limit) {
+      diag.ladder.add('fuentes x3');
+      final more = await _gather(ctx, boost: 3);
+      if (more.isNotEmpty) {
+        _cache[key] = more;
+        candidates = [...candidates, ...more];
+        picks = _rank(ctx, candidates, now, rnd, diag);
+      }
+    }
+    if (picks.length < ctx.limit) {
+      diag.ladder.add('biblioteca completa');
+      candidates = withLibrary(candidates, all: true);
+      picks = _rank(ctx, candidates, now, rnd, diag);
+    }
+    lastDiagnostics = diag;
+    assert(() {
+      developer.log('$diag', name: 'aurora.recs');
+      return true;
+    }());
     if (ctx.remember) unawaited(memory.record(picks.map((p) => p.track), now));
     Track? prev = ctx.queueTail.isNotEmpty ? ctx.queueTail.last : ctx.current;
     return [
@@ -342,7 +392,16 @@ class SuggestionsApi {
     List<DjCandidate> candidates,
     DateTime now,
     math.Random rnd,
+    SuggestionsDiagnostics diag,
   ) {
+    diag
+      ..gathered = candidates.length
+      ..gatheredByBucket = {}
+      ..coherenceRelaxed = false
+      ..memoryTier = 1;
+    for (final c in candidates) {
+      diag.gatheredByBucket.update(c.bucket, (n) => n + 1, ifAbsent: () => 1);
+    }
     if (ctx.limit <= 0) return const [];
     final parts = [
       for (final p in ctx.participants)
@@ -385,6 +444,8 @@ class SuggestionsApi {
       items.add(_Item(c, embedDjTrack(t)));
     }
 
+    diag.afterFilters = items.length;
+
     // Coherencia de ARTISTA con la semilla (nunca por título): baja la
     // puntuación; el rechazo duro solo si quedan suficientes alternativas.
     final seedArtists = <String>{
@@ -405,7 +466,12 @@ class SuggestionsApi {
       for (final i in items)
         if (!cohOf[i]!.hardReject) i,
     ];
-    if (soft.length >= ctx.limit) items.retainWhere(soft.contains);
+    if (soft.length >= ctx.limit) {
+      items.retainWhere(soft.contains);
+    } else if (soft.length < items.length) {
+      diag.coherenceRelaxed = true; // pocas alternativas: no se rechaza nada
+    }
+    diag.afterCoherence = items.length;
 
     // Con cuota, lo que ya está en la biblioteca cuenta como «ya oído» y se
     // enfría con una ventana corta (djHeardCooldown) en vez de la de 7 días.
@@ -432,8 +498,10 @@ class SuggestionsApi {
     var pool = const <_Item>[];
     for (final tier in const [1.0, 0.5, 0.25, 0.0]) {
       pool = eligible(tier);
+      diag.memoryTier = tier;
       if (pool.length >= ctx.limit) break;
     }
+    diag.afterMemory = pool.length;
 
     for (final i in pool) {
       final age = memory.ageOf(i.track, now);
@@ -589,6 +657,9 @@ class SuggestionsApi {
       };
     }
 
+    diag
+      ..picked = chosen.length
+      ..pickedByBucket = byBucket;
     return [
       for (var k = 0; k < chosen.length; k++)
         (

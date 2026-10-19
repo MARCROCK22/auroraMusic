@@ -153,15 +153,21 @@ List<RecSource> spotifyRecSources({
       final rnd = rndOf(ctx);
       final artists = tasteTop(profileOf(ctx), 'a:', 6)..shuffle(rnd);
       if (artists.isEmpty) return const [];
-      final artist = artists.first;
-      return resolve(
-        await catalog.artistTopTracks(artist),
-        const {},
-        RecBucket.similar,
-        'Porque escuchas ${_cap(artist)}',
-        math.min(want, maxMatches),
-        rnd,
-      );
+      // Con lotes grandes (escalera de relajación) se usan dos artistas.
+      final out = <DjCandidate>[];
+      for (final artist in artists.take(want > maxMatches ? 2 : 1)) {
+        out.addAll(
+          await resolve(
+            await catalog.artistTopTracks(artist),
+            const {},
+            RecBucket.similar,
+            'Porque escuchas ${_cap(artist)}',
+            math.min(want, maxMatches),
+            rnd,
+          ),
+        );
+      }
+      return out;
     }),
     RecSource(RecBucket.adjacent, (ctx, want) async {
       final rnd = rndOf(ctx);

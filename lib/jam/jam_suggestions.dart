@@ -47,6 +47,7 @@ class JamSuggestionAdapter {
     required this.seeds,
     required this.local,
     this.rank,
+    this.favorites,
     this.api,
     this.taste,
     this.mode = DjMode.discover,
@@ -59,6 +60,9 @@ class JamSuggestionAdapter {
   final Future<List<Track>> Function(Track seed) related;
   final List<Track> Function() seeds;
   final List<Track> Function() local;
+
+  /// Favoritas (opcional): semillas extra de la radio.
+  final List<Track> Function()? favorites;
   final Future<List<Track>> Function(List<Track> candidates, Track? current)?
   rank;
 
@@ -66,15 +70,26 @@ class JamSuggestionAdapter {
     final seen = <String>{};
     var candidates = <Track>[];
     var online = false;
-    final starts = [?current, ...seeds().take(2)];
-    for (final seed in starts) {
-      try {
-        for (final t in await related(seed)) {
-          if (seen.add(t.id)) candidates.add(t);
-        }
-        online = true;
-      } catch (_) {
-        // YouTube falló o no hay red: se prueba la siguiente semilla o lo local.
+    // Semillas: actual + recientes + favoritas, sin repetir; en paralelo y
+    // tolerando fallos sueltos (una radio caída no tumba a las demás).
+    final starts = <Track>[];
+    final startIds = <String>{};
+    for (final t in [
+      ?current,
+      ...seeds().take(4),
+      ...?favorites?.call().take(3),
+    ]) {
+      if (startIds.add(t.id)) starts.add(t);
+    }
+    final radios = await Future.wait([
+      for (final seed in starts)
+        related(seed).then<List<Track>?>((l) => l).catchError((_) => null),
+    ]);
+    for (final list in radios) {
+      if (list == null) continue;
+      online = true;
+      for (final t in list) {
+        if (seen.add(t.id)) candidates.add(t);
       }
     }
     if (candidates.isEmpty) {
@@ -99,13 +114,15 @@ class JamSuggestionAdapter {
             mode: mode,
             current: current,
             library: local(),
+            // Sin radio de YouTube no se mete lo local como extra: las demás
+            // fuentes de api.sources mandan y la biblioteca ya entra como relleno.
             extraCandidates: [
-              for (var i = 0; i < candidates.length; i++)
+              for (var i = 0; online && i < candidates.length; i++)
                 DjCandidate(
                   candidates[i],
-                  online ? 'Radio de YouTube' : 'De tu biblioteca',
+                  'Radio de YouTube',
                   prior: 0.5 / (1 + i / 5),
-                  bucket: online ? RecBucket.radio : RecBucket.similar,
+                  bucket: RecBucket.radio,
                 ),
             ],
             limit: count * 2, // margen por si algún dato no es válido
