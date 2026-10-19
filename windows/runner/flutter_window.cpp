@@ -143,22 +143,23 @@ bool FlutterWindow::OnCreate() {
   // window is shown. It is a no-op if the first frame hasn't completed yet.
   flutter_controller_->ForceRedraw();
 
+  created_ = true;
   return true;
 }
 
 // Red de seguridad del actualizador: si 3 s despues el proceso sigue vivo
 // (Dart colgado, guardia de cierre activa, WebView2 sin soltar), lo termina.
 // Hilo nativo independiente de Dart y de close_guard_enabled_.
-void FlutterWindow::ArmExitWatchdog() {
+void FlutterWindow::ArmExitWatchdog(bool save_geometry) {
   if (watchdog_armed_) return;
   watchdog_armed_ = true;
   const HWND host = GetHandle();
   const NOTIFYICONDATAW tray = tray_;
   const RECT rect = normal_rect_;
   const bool maximized = IsZoomed(host) != FALSE;
-  std::thread([tray, rect, maximized]() {
+  std::thread([tray, rect, maximized, save_geometry]() {
     Sleep(3000);
-    SaveGeometry(rect, maximized);
+    if (save_geometry) SaveGeometry(rect, maximized);
     NOTIFYICONDATAW t = tray;
     Shell_NotifyIconW(NIM_DELETE, &t);
     ReleaseInstanceMutex();
@@ -172,6 +173,16 @@ void FlutterWindow::ArmExitWatchdog() {
 }
 
 void FlutterWindow::OnDestroy() {
+  // Sin ventana ya no hay a quien avisar: libera el mutex para que un nuevo
+  // lanzamiento arranque limpio, y garantiza que el proceso muera aunque el
+  // motor de audio/WebView2 se cuelgue al cerrar (antes quedaba zombi sin ventana).
+  // OnDestroy tambien se llama desde Create() y el destructor: solo la primera
+  // vez tras una creacion real.
+  if (created_) {
+    created_ = false;
+    ReleaseInstanceMutex();
+    ArmExitWatchdog(false);
+  }
   RemoveTray();
   window_channel_ = nullptr;
   if (flutter_controller_) {
@@ -231,7 +242,11 @@ void FlutterWindow::RemoveTray() {
 void FlutterWindow::RestoreFromTray() {
   const HWND host = GetHandle();
   ShowWindow(host, IsIconic(host) ? SW_RESTORE : SW_SHOW);
-  SetForegroundWindow(host);
+  if (!SetForegroundWindow(host)) {
+    // Windows puede negar el foco: alternar TOPMOST sube la ventana igualmente.
+    SetWindowPos(host, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    SetWindowPos(host, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+  }
 }
 
 void FlutterWindow::HideToTray() {
