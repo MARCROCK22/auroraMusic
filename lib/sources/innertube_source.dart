@@ -4,6 +4,7 @@ import 'dart:io';
 
 import '../core/models.dart';
 import '../core/source_backend.dart';
+import '../follow/follow_models.dart';
 import 'stream/audio_proxy.dart';
 import 'stream/resolved_stream.dart';
 import 'stream/stream_orchestrator.dart';
@@ -273,6 +274,78 @@ class InnerTubeSource extends SourceBackend {
 
     walk(data);
     return tracks;
+  }
+
+  /// Página de artista (WEB_REMIX `browse`): álbumes, sencillos y EP.
+  Future<ArtistPage> artistPage(String browseId) async {
+    if (!RegExp(r'^[A-Za-z0-9_-]{8,64}$').hasMatch(browseId)) {
+      throw ArgumentError('Identificador de artista no válido.');
+    }
+    return parseArtistPage(
+      await _post('browse', {'context': _context(), 'browseId': browseId}),
+    );
+  }
+
+  static ArtistPage parseArtistPage(Map<String, dynamic> data) {
+    final header = data['header'] as Map? ?? const {};
+    final head =
+        (header['musicImmersiveHeaderRenderer'] ??
+                header['musicVisualHeaderRenderer'] ??
+                header['musicHeaderRenderer'])
+            as Map?;
+    final name =
+        ((head?['title']?['runs'] as List?)?.firstOrNull as Map?)?['text']
+            as String?;
+    final seen = <String>{};
+    final releases = <ArtistRelease>[];
+    void walk(Object? node) {
+      if (node is Map) {
+        final row = node['musicTwoRowItemRenderer'];
+        if (row is Map) {
+          final browse = row['navigationEndpoint']?['browseEndpoint'] as Map?;
+          final id = browse?['browseId'] as String?;
+          final page =
+              browse?['browseEndpointContextSupportedConfigs']?['browseEndpointContextMusicConfig']?['pageType'];
+          final title =
+              ((row['title']?['runs'] as List?)?.firstOrNull as Map?)?['text']
+                  as String?;
+          if (id != null &&
+              page == 'MUSIC_PAGE_TYPE_ALBUM' &&
+              title != null &&
+              title.trim().isNotEmpty &&
+              seen.add(id)) {
+            final parts = [
+              for (final r in (row['subtitle']?['runs'] as List? ?? const []))
+                ((r as Map)['text'] as String? ?? '').trim(),
+            ].where((t) => t.isNotEmpty && t != '•').toList();
+            final year = parts
+                .map((t) => RegExp(r'^(?:19|20)\d{2}$').hasMatch(t) ? t : null)
+                .whereType<String>()
+                .firstOrNull;
+            releases.add(
+              ArtistRelease(
+                id: id,
+                title: title.trim(),
+                kind: parts.where((t) => t != year).firstOrNull ?? '',
+                year: year == null ? null : int.parse(year),
+                artworkUrl: _artwork(row['thumbnailRenderer']),
+              ),
+            );
+          }
+          return;
+        }
+        node.values.forEach(walk);
+      } else if (node is List) {
+        node.forEach(walk);
+      }
+    }
+
+    walk(data['contents']);
+    return ArtistPage(
+      name: name,
+      imageUrl: _artwork(head?['thumbnail']),
+      releases: releases,
+    );
   }
 
   static List<Track> parseSearch(Map<String, dynamic> data) =>
