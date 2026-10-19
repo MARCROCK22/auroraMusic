@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import '../app_controller.dart';
 import '../core/models.dart';
 import '../core/queue_policy.dart';
@@ -12,7 +12,7 @@ import 'transport/supabase_jam_transport.dart';
 import '../sources/innertube_source.dart';
 import 'jam_playback_bridge.dart';
 
-class JamController extends ChangeNotifier {
+class JamController extends ChangeNotifier with WidgetsBindingObserver {
   JamController({
     required this.app,
     JamService? service,
@@ -31,7 +31,37 @@ class JamController extends ChangeNotifier {
     _completed = app.audio.completed.listen((_) {
       if (this.service.isHost && bridge.enabled) unawaited(next());
     });
+    try {
+      WidgetsBinding.instance.addObserver(this);
+      _observing = true;
+    } catch (_) {
+      // Sin binding (pruebas de lógica): se puede llamar a [lifecycleChanged].
+    }
   }
+  bool _observing = false;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) =>
+      lifecycleChanged(state);
+
+  /// Segundo plano (paused/hidden/detached) ≠ salir de la Jam: solo se pausan
+  /// los relojes de silencio; al volver se re-sincroniza. `inactive` es
+  /// transitorio (diálogos, barra de notificaciones) y se ignora.
+  void lifecycleChanged(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        service.appResumed();
+        // Al volver, el invitado retoma la posición del anfitrión.
+        if (service.connected && !service.isHost) bridge.resync();
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.detached:
+        service.appBackgrounded();
+      case AppLifecycleState.inactive:
+        break;
+    }
+  }
+
   final AppController app;
   JamTransport? _transport;
 
@@ -778,6 +808,7 @@ class JamController extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (_observing) WidgetsBinding.instance.removeObserver(this);
     _disposed = true;
     _searchGeneration++;
     _broadcastTimer?.cancel();

@@ -57,11 +57,25 @@ class JamService extends ChangeNotifier {
   final Map<String, DateTime> _lastSuggest = {};
   String? _lastCode;
   bool _handingOff = false;
+  bool _background = false;
+  Timer? _probeTimer, _hubWatch;
+
+  /// Espera a que Realtime recupere solo el canal del anfitrión tras volver al
+  /// primer plano antes de reabrirlo.
+  @visibleForTesting
+  Duration hubRecoveryDelay = const Duration(seconds: 10);
   final Set<String> _skipVotes = {};
   Future<void> Function(bool play)? onPlayPause;
   bool get isRemote => _transport != null;
   bool get isHost => connection == JamConnection.hosting;
   bool get connected => isHost || connection == JamConnection.connected;
+
+  /// Conexión caída pero la Jam sigue siendo nuestra: se reconecta sola.
+  bool get reconnecting =>
+      connection == JamConnection.disconnected &&
+      invite != null &&
+      !_stopRetry &&
+      !_disposed;
   JamParticipant? get me =>
       participants.where((p) => p.id == participantId).firstOrNull;
   String participantName(String id) =>
@@ -289,6 +303,7 @@ class JamService extends ChangeNotifier {
         return;
       }
       _client = socket;
+      if (_background && socket is JamGuestPeer) socket.pause();
       socket.listen(
         (message) {
           if (_disposed || generation != _generation) return;
@@ -850,6 +865,7 @@ class JamService extends ChangeNotifier {
 
   void _clientDisconnected() {
     _pingTimer?.cancel();
+    _probeTimer?.cancel();
     if (connection != JamConnection.closed) {
       connection = JamConnection.disconnected;
       error = isRemote ? _remoteLostMessage() : connectionHelp;
@@ -862,6 +878,8 @@ class JamService extends ChangeNotifier {
     ++_generation;
     _expiryTimer?.cancel();
     _pingTimer?.cancel();
+    _probeTimer?.cancel();
+    _hubWatch?.cancel();
     _pings.clear();
     final server = _server;
     _server = null;
@@ -909,6 +927,71 @@ class JamService extends ChangeNotifier {
     await _client?.close();
     _client = null;
     _clientDisconnected();
+  }
+
+  // --- Ciclo de vida: el segundo plano no cierra la Jam ---------------------
+  // Android congela red y temporizadores de una app sin audio; al volver, los
+  // relojes de silencio vencen aunque nadie se haya ido. Aquí se pausan y, al
+  // reanudar, se re-sincroniza (latido, hello, reconexión inmediata).
+
+  bool get inBackground => _background;
+
+  void appBackgrounded() {
+    if (_background || _disposed) return;
+    _background = true;
+    _hub?.pause();
+    final client = _client;
+    if (client is JamGuestPeer) client.pause();
+    _announceBackground(true);
+  }
+
+  void appResumed() {
+    if (!_background) return;
+    _background = false;
+    if (_disposed ||
+        connection == JamConnection.closed ||
+        connection == JamConnection.idle) {
+      return;
+    }
+    _announceBackground(false);
+    _hub?.resume();
+    _heartbeatNow();
+    if (isHost) {
+      if (isRemote) {
+        _broadcast(); // estado fresco para quien se perdió mensajes
+        _watchHub();
+      }
+      return;
+    }
+    final client = _client;
+    if (client is JamGuestPeer) client.resume();
+    if (connection == JamConnection.disconnected) {
+      if (_stopRetry || _terminalError || invite == null) return;
+      _retryTimer?.cancel();
+      _attempt = 0;
+      reconnect().catchError((Object _) {});
+    } else {
+      _probe();
+    }
+  }
+
+  /// Comprueba que el enlace sigue vivo (un socket puede quedar a medias tras
+  /// el segundo plano): sin pong en 6 s se reconecta con el token de reanudación.
+  void _probe() {
+    _ping();
+    final sent = _pings.keys.firstOrNull;
+    final generation = _generation;
+    _probeTimer?.cancel();
+    if (sent == null) return;
+    _probeTimer = Timer(const Duration(seconds: 6), () {
+      if (_disposed ||
+          generation != _generation ||
+          connection != JamConnection.connected ||
+          !_pings.containsKey(sent)) {
+        return;
+      }
+      unawaited(disconnect());
+    });
   }
 
   void _notify() {
