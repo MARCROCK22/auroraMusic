@@ -24,7 +24,7 @@ class LibraryDatabase extends GeneratedDatabase {
   }
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
   @override
   Iterable<TableInfo<Table, Object?>> get allTables => const [];
   @override
@@ -48,11 +48,28 @@ class LibraryDatabase extends GeneratedDatabase {
         'CREATE TABLE downloads (id TEXT PRIMARY KEY, data TEXT NOT NULL)',
       );
       await _createVectorTables();
+      await _createFollowTables();
     },
     onUpgrade: (_, from, _) async {
       if (from < 2) await _createVectorTables();
+      if (from < 3) await _createFollowTables();
     },
   );
+
+  /// Artistas seguidos y novedades detectadas (lib/follow). Solo añade tablas.
+  Future<void> _createFollowTables() async {
+    await customStatement(
+      'CREATE TABLE IF NOT EXISTS followed_artists (browse_id TEXT PRIMARY KEY, '
+      'name TEXT NOT NULL, image_url TEXT, followed_at INTEGER NOT NULL, '
+      'last_release_id TEXT, last_release_title TEXT, '
+      "known_releases TEXT NOT NULL DEFAULT '[]', checked_at INTEGER)",
+    );
+    await customStatement(
+      'CREATE TABLE IF NOT EXISTS new_releases (release_id TEXT PRIMARY KEY, '
+      'artist_id TEXT NOT NULL, artist_name TEXT NOT NULL, title TEXT NOT NULL, '
+      'subtitle TEXT NOT NULL, artwork_url TEXT, detected_at INTEGER NOT NULL)',
+    );
+  }
 
   Future<void> _createVectorTables() async {
     await customStatement(

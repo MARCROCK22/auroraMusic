@@ -48,6 +48,8 @@ import 'offline_settings_panel.dart';
 import '../youtube_music/youtube_music_page.dart';
 import 'video_downloads_page.dart';
 import 'artists_page.dart';
+import 'follow_widgets.dart';
+import '../follow/follow_providers.dart';
 import 'track_actions.dart';
 import '../audio/routed_music_audio.dart';
 import '../audio_web/web_music_audio.dart';
@@ -203,6 +205,26 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     _guardWebClose();
     _audio.setVisualizationEnabled(false);
     _listenForJamLinks();
+    _startFollow();
+  }
+
+  /// Carga los artistas seguidos y busca novedades (como mucho cada ~12 h).
+  void _startFollow() {
+    final follow = ref.read(followServiceProvider);
+    // Enganche del DJ: refuerzo suave a pistas de artistas seguidos.
+    ref.read(controllerProvider).followedArtistKeys = () =>
+        follow.followedArtistKeys;
+    unawaited(
+      follow
+          .load()
+          .then((_) => follow.refreshIfDue())
+          .catchError((Object _) {}),
+    );
+  }
+
+  Future<void> _openEntry(SearchEntry entry) async {
+    await _navigate(1);
+    if (mounted) ref.read(controllerProvider).openSearchEntry(entry);
   }
 
   // aurora://jam/CODIGO: argumentos de Windows (arranque o 2.ª instancia) o
@@ -996,7 +1018,10 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       case 3:
         return _downloads(c);
       case 4:
-        return VinylPlayer(controller: c);
+        return VinylPlayer(
+          controller: c,
+          follow: ref.read(followServiceProvider),
+        );
       case 5:
         return QueuePanel(controller: c);
       case 6:
@@ -1013,6 +1038,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       case 12:
         return ArtistsPage(
           controller: c,
+          follow: ref.read(followServiceProvider),
           tracks: c.tracks,
           onPlay: c.playTrack,
           onSearch: (query) {
@@ -1375,6 +1401,19 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             ],
           ),
         ),
+        if (entry.kind == SearchKind.artists)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: FollowButton(
+                service: ref.read(followServiceProvider),
+                name: entry.title,
+                browseId: entry.browseId,
+                imageUrl: entry.artworkUrl,
+              ),
+            ),
+          ),
         if (c.searchDetailLoading) const LinearProgressIndicator(minHeight: 2),
         if (tracks.isNotEmpty)
           Padding(
@@ -1582,6 +1621,12 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                   _playlist = null;
                 }),
               ),
+              FollowedArtistsSection(
+                showArtists: false,
+                service: ref.read(followServiceProvider),
+                onOpenArtist: (_) {},
+                onOpenRelease: (release) => _openEntry(release.entry),
+              ),
               if (c.playlists.isEmpty)
                 _empty(
                   Icons.queue_music,
@@ -1596,6 +1641,19 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                     _playlist = playlist;
                   }),
                 ),
+              FollowedArtistsSection(
+                showNews: false,
+                service: ref.read(followServiceProvider),
+                onOpenArtist: (artist) => _openEntry(
+                  SearchEntry(
+                    kind: SearchKind.artists,
+                    browseId: artist.browseId,
+                    title: artist.name,
+                    artworkUrl: artist.imageUrl,
+                  ),
+                ),
+                onOpenRelease: (release) => _openEntry(release.entry),
+              ),
             ],
           ),
         ),

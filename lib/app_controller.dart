@@ -19,6 +19,7 @@ import 'core/models.dart';
 import 'core/queue_policy.dart';
 import 'core/source_backend.dart';
 import 'import/spotify_import.dart';
+import 'follow/follow_boost.dart';
 import 'library/library_database.dart';
 import 'dj/ai_dj.dart';
 import 'dj/dj_modes.dart';
@@ -50,6 +51,10 @@ class AppController extends ChangeNotifier {
   final LibraryDatabase database;
   final SharedPreferences preferences;
   final Directory supportDirectory;
+
+  /// Artistas seguidos (lib/follow); lo conecta la interfaz al arrancar.
+  Set<String> Function() followedArtistKeys = _noFollowedArtists;
+  static Set<String> _noFollowedArtists() => const {};
   bool get usesOfficialYouTubeMusic => source.usesOfficialYouTubeMusic;
   bool get usesYouTubeWebAudio => source.usesYouTubeWebAudio;
 
@@ -1019,14 +1024,16 @@ class AppController extends ChangeNotifier {
       skippedArtists: skippedArtists,
       queueTail: queue.skip(max(0, queueIndex)).toList(),
       filters: djFilters,
-      adjust: (t) => djModeBonus(
-        _djMode,
-        t,
-        now: DateTime.now(),
-        knownArtists: {
-          for (final r in recentTracks.take(30)) djPrimaryArtist(r),
-        },
-      ),
+      adjust: (t) =>
+          djModeBonus(
+            _djMode,
+            t,
+            now: DateTime.now(),
+            knownArtists: {
+              for (final r in recentTracks.take(30)) djPrimaryArtist(r),
+            },
+          ) +
+          followedArtistBonus(t, followedArtistKeys()),
     );
     for (final pick in picks) {
       queue.add(pick.track);

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
 import '../core/models.dart';
+import '../follow/follow_service.dart';
+import 'follow_widgets.dart';
 import 'artwork.dart';
 import 'studio/studio_components.dart';
 import 'track_actions.dart';
@@ -14,7 +16,11 @@ class ArtistsPage extends StatefulWidget {
     required this.onPlay,
     required this.onSearch,
     this.controller,
+    this.follow,
   });
+
+  /// Si se pasa, la ficha ofrece «Seguir / Siguiendo».
+  final FollowService? follow;
 
   /// Si se pasa, las canciones ofrecen cola/Jam (menú ⋯, clic derecho, atajos).
   final AppController? controller;
@@ -162,6 +168,12 @@ class _ArtistsPageState extends State<ArtistsPage> {
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),
+        if (widget.follow != null) ...[
+          const SizedBox(height: 12),
+          Center(
+            child: FollowButton(service: widget.follow!, name: artist.name),
+          ),
+        ],
         const SizedBox(height: 20),
         if (widget.controller != null) ...[
           TrackBatchButtons(

@@ -3,11 +3,16 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
+import '../follow/follow_service.dart';
 import 'artwork.dart';
+import 'follow_widgets.dart';
 
 class VinylPlayer extends StatefulWidget {
-  const VinylPlayer({super.key, required this.controller});
+  const VinylPlayer({super.key, required this.controller, this.follow});
   final AppController controller;
+
+  /// Si se pasa, junto al artista aparece «Seguir / Siguiendo».
+  final FollowService? follow;
 
   @override
   State<VinylPlayer> createState() => _VinylPlayerState();
@@ -263,13 +268,27 @@ class _VinylPlayerState extends State<VinylPlayer>
               ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 6),
-            Text(
-              track?.artist ?? 'Elige una canci\u00f3n de tu biblioteca',
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(color: color.onSurfaceVariant),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            Wrap(
+              spacing: 12,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Text(
+                  track?.artist ?? 'Elige una canci\u00f3n de tu biblioteca',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: color.onSurfaceVariant,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (widget.follow != null &&
+                    track != null &&
+                    _primaryArtist(track.artist).isNotEmpty)
+                  FollowButton(
+                    service: widget.follow!,
+                    name: _primaryArtist(track.artist),
+                  ),
+              ],
             ),
             const SizedBox(height: 24),
             Row(
@@ -497,6 +516,10 @@ class _GroovesPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _GroovesPainter oldDelegate) => false;
 }
+
+/// Primer artista de «A, B feat. C» (YouTube Music los lista juntos).
+String _primaryArtist(String artist) =>
+    artist.split(RegExp(r'\s*(?:,|&|;|\sfeat\.?\s|\sft\.?\s)\s*')).first.trim();
 
 String _time(Duration value) {
   final seconds = value.inSeconds;
