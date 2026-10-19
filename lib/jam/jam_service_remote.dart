@@ -60,6 +60,7 @@ extension JamServiceRemote on JamService {
   Future<void> _startHub(JamTransport transport, JamRoomInfo room) async {
     final channel = transport.openChannel(room.code, asHost: true);
     final hub = JamHubHost(channel, hostUid: _uid);
+    if (_background) hub.pause();
     _hub = hub;
     hub.arrivals.listen((peer) => unawaited(_admit(peer)));
     channel.online.listen((online) {
@@ -248,10 +249,46 @@ extension JamServiceRemote on JamService {
   void _startBeat() {
     _beatTimer?.cancel();
     _beatTimer = Timer.periodic(const Duration(seconds: 20), (_) {
-      final room = _room;
-      if (room != null) {
-        _transport?.heartbeat(room.code).catchError((Object _) {});
+      _heartbeatNow();
+      if (_background) _announceBackground(true); // el aviso caduca solo
+    });
+  }
+
+  void _heartbeatNow() {
+    final room = _room;
+    if (room != null) {
+      _transport?.heartbeat(room.code).catchError((Object _) {});
+    }
+  }
+
+  /// El anfitrión en línea avisa a los invitados de que pasa a segundo plano
+  /// (`s` segundos de margen, 0 = ya volvió). Solo lo obedece quien venga del
+  /// anfitrión (JamGuestPeer). En la LAN no hace falta: no hay presencia.
+  void _announceBackground(bool background) {
+    final hub = _hub;
+    if (hub == null || !isHost) return;
+    hub.broadcast(jsonEncode({'kind': 'bg', 's': background ? 60 : 0}));
+  }
+
+  /// Si tras volver el canal del anfitrión sigue caído, se reabre.
+  void _watchHub() {
+    _hubWatch?.cancel();
+    final hub = _hub;
+    if (hub == null || hub.channel.isOnline) return;
+    _hubWatch = Timer(hubRecoveryDelay, () async {
+      if (_disposed || _hub != hub || !isHost || hub.channel.isOnline) return;
+      final transport = _transport, room = _room;
+      if (transport == null || room == null) return;
+      _hub = null;
+      await hub.close(); // los invitados se reanudan con su `hello`
+      try {
+        await _startHub(transport, room);
+        error = null;
+      } catch (failure) {
+        error = _remoteError(failure);
       }
+      _notify();
+      _watchHub();
     });
   }
 
@@ -272,6 +309,7 @@ extension JamServiceRemote on JamService {
     _retryTimer?.cancel();
     _hostLostTimer?.cancel();
     _hostLostTimer = null;
+    _hubWatch?.cancel();
     _hub = null;
     _room = null;
     _transport = null;

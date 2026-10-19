@@ -1,11 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import '../jam_peer.dart';
 import 'jam_transport.dart';
 
+/// Control del hub hacia un invitado desconocido: que vuelva a saludar.
+const jamRehelloText = '{"kind":"rehello"}';
+
 /// Par virtual en el lado del anfitrión: representa a un invitado remoto.
 class JamHubPeer implements JamPeer {
-  JamHubPeer._(this._hub, this.uid) : lastHeard = DateTime.now();
+  JamHubPeer._(this._hub, this.uid) : lastHeard = _hub._now();
   final JamHubHost _hub;
   final String uid;
   DateTime lastHeard;
@@ -52,13 +56,20 @@ class JamHubHost {
     this.channel, {
     required this.hostUid,
     this.silence = const Duration(seconds: 30),
-  }) {
+    DateTime Function()? now,
+  }) : _now = now ?? DateTime.now {
+    _lastSweep = _now();
     _sub = channel.incoming.listen(_receive);
-    _watchdog = Timer.periodic(const Duration(seconds: 5), (_) => _sweep());
+    _watchdog = Timer.periodic(_sweepEvery, (_) => sweep());
   }
+  static const _sweepEvery = Duration(seconds: 5);
   final JamChannel channel;
   final String hostUid;
   final Duration silence;
+  final DateTime Function() _now;
+  late DateTime _lastSweep;
+  bool _paused = false;
+  final _askedHello = <String, DateTime>{};
   final Map<String, JamHubPeer> _peers = {};
   final _arrivals = StreamController<JamHubPeer>.broadcast();
   late final StreamSubscription<JamEnvelope> _sub;
@@ -95,8 +106,24 @@ class JamHubHost {
       _arrivals.add(fresh);
       return;
     }
-    if (peer == null) return; // sin hello previo: se ignora
-    peer.lastHeard = DateTime.now();
+    if (peer == null) {
+      // Sin hello previo no se atiende, pero se le pide uno (como mucho cada
+      // 5 s): pasa tras reabrir el canal o dar de baja a un invitado callado.
+      final last = _askedHello[e.from];
+      final now = _now();
+      if (last == null || now.difference(last) > const Duration(seconds: 5)) {
+        _askedHello[e.from] = now;
+        unawaited(
+          channel
+              .send(
+                JamEnvelope(from: hostUid, to: e.from, text: jamRehelloText),
+              )
+              .catchError((Object _) {}),
+        );
+      }
+      return;
+    }
+    peer.lastHeard = _now();
     // Backpressure: más de 20 mensajes por segundo de un par se descartan.
     final second = peer.lastHeard.millisecondsSinceEpoch ~/ 1000;
     if (second != peer._burstSecond) {
@@ -107,8 +134,33 @@ class JamHubHost {
     if (!peer._inbox.isClosed) peer._inbox.add(e.text);
   }
 
-  void _sweep() {
-    final now = DateTime.now();
+  /// App en segundo plano: el SO puede congelar la red y los temporizadores,
+  /// así que el silencio de los invitados no cuenta hasta [resume].
+  void pause() => _paused = true;
+
+  /// Vuelve al primer plano: da a todos los pares una ventana nueva (llevaban
+  /// el mismo tiempo sin poder hablar que nosotros sin poder oírlos).
+  void resume() {
+    _paused = false;
+    _forgive();
+  }
+
+  void _forgive() {
+    final now = _now();
+    _lastSweep = now;
+    for (final peer in _peers.values) {
+      peer.lastHeard = now;
+    }
+  }
+
+  @visibleForTesting
+  void sweep() {
+    final now = _now();
+    // Un barrido que llega muy tarde es un temporizador congelado, no
+    // invitados mudos: se perdona en vez de expulsar a todos.
+    final starved = now.difference(_lastSweep) > _sweepEvery * 3;
+    if (_paused || starved) return _forgive();
+    _lastSweep = now;
     for (final peer in [..._peers.values]) {
       if (now.difference(peer.lastHeard) > silence) unawaited(peer.close());
     }
@@ -135,7 +187,18 @@ class JamGuestPeer implements JamPeer {
     required this.hostUid,
     this.silence = const Duration(seconds: 25),
     this.hostGrace = const Duration(seconds: 12),
-  });
+    this.netGrace = const Duration(seconds: 10),
+    this.starveSlack = const Duration(seconds: 3),
+    DateTime Function()? now,
+  }) : _now = now ?? DateTime.now;
+  final DateTime Function() _now;
+
+  /// Tiempo que se espera a que vuelva la red tras reanudar la app antes de
+  /// rendirse (en primer plano un corte cierra el par al instante).
+  final Duration netGrace;
+
+  /// Retraso admitido en un temporizador antes de tomarlo por congelado.
+  final Duration starveSlack;
   final JamTransport transport;
   final JamChannel channel;
   final String code, uid;
@@ -149,8 +212,11 @@ class JamGuestPeer implements JamPeer {
   /// darlo por caído: la presencia no es una identidad verificada, así que solo
   /// cuenta si además calla (cualquier mensaje suyo la desmiente).
   final Duration hostGrace;
-  Timer? _graceTimer;
+  Timer? _graceTimer, _netTimer;
   bool _open = true;
+  bool _paused = false;
+  DateTime? _hostBgUntil, _armedAt;
+  Duration _armedFor = Duration.zero;
   final _inbox = StreamController<Object?>();
   final _subs = <StreamSubscription<Object?>>[];
   Timer? _watchdog;
@@ -167,9 +233,13 @@ class JamGuestPeer implements JamPeer {
         // pueden): solo se acepta lo que dice venir del anfitrión.
         if (e.from != hostUid) return;
         if (e.to != uid && e.to != '*') return;
+        // Avisos de control (`bg`, `rehello`): solo para este par, no llegan
+        // al servicio. Se leen antes de rearmar para que el margen cuente ya.
+        final control = _followBackground(e.text);
         _graceTimer?.cancel();
         _graceTimer = null;
         _rearm();
+        if (control) return;
         _followHandoff(e.text);
         if (!_inbox.isClosed) _inbox.add(e.text);
       }),
@@ -181,13 +251,20 @@ class JamGuestPeer implements JamPeer {
           _graceTimer?.cancel();
           _graceTimer = null;
         } else {
-          _graceTimer ??= Timer(hostGrace, () => _drop('host'));
+          if (!_paused && _graceTimer == null) _armGrace();
         }
       }),
     );
     _subs.add(
       channel.online.listen((online) {
-        if (!online) _drop('network');
+        if (online) {
+          _netTimer?.cancel();
+          _netTimer = null;
+        } else if (!_paused) {
+          // En segundo plano el SO corta sockets sin que la sala esté caída:
+          // se reevalúa al volver ([resume]).
+          _drop('network');
+        }
       }),
     );
     await channel.track();
@@ -207,9 +284,86 @@ class JamGuestPeer implements JamPeer {
     } catch (_) {}
   }
 
+  /// El anfitrión avisó (`bg`) de que pasa a segundo plano: mientras dure el
+  /// aviso se le da más margen de silencio. Acotado y solo si el sobre viene
+  /// del anfitrión (el filtro `e.from` de [start]); `s: 0` lo anula.
+  static const maxHostBackground = Duration(seconds: 90);
+  bool get hostInBackground => _bgExtra() > Duration.zero;
+  Duration _bgExtra() {
+    final until = _hostBgUntil;
+    final left = until?.difference(_now());
+    return left != null && left > Duration.zero ? left : Duration.zero;
+  }
+
+  bool _followBackground(String text) {
+    if (text == jamRehelloText) {
+      if (!_paused) {
+        transport.command(code, 'hello', const {}).catchError((Object _) {});
+      }
+      return true;
+    }
+    if (text.length > 64 || !text.contains('"bg"')) return false;
+    try {
+      final m = jsonDecode(text);
+      if (m is! Map || m['kind'] != 'bg') return false;
+      final s = m['s'];
+      final seconds = s is int ? s.clamp(0, maxHostBackground.inSeconds) : 0;
+      _hostBgUntil = seconds == 0
+          ? null
+          : _now().add(Duration(seconds: seconds));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _armGrace() {
+    final armed = _now(), span = hostGrace + _bgExtra();
+    _graceTimer = Timer(span, () {
+      _graceTimer = null;
+      // Despertar tardío = proceso congelado: la presencia no es de fiar aún.
+      if (!_late(armed, span)) _drop('host');
+    });
+  }
+
+  bool _late(DateTime armed, Duration span) =>
+      _now().difference(armed) > span + starveSlack;
+
   void _rearm() {
     _watchdog?.cancel();
-    _watchdog = Timer(silence, () => _drop('silence'));
+    if (_paused) return;
+    _armedAt = _now();
+    _armedFor = silence + _bgExtra();
+    _watchdog = Timer(_armedFor, _silent);
+  }
+
+  void _silent() {
+    if (!_open) return;
+    // Despertar tardío = proceso congelado: los mensajes siguen en cola.
+    if (_late(_armedAt ?? _now(), _armedFor)) return _rearm();
+    _drop('silence');
+  }
+
+  /// App en segundo plano: el silencio y la presencia dejan de contar.
+  void pause() {
+    _paused = true;
+    _watchdog?.cancel();
+    _graceTimer?.cancel();
+    _graceTimer = null;
+  }
+
+  /// Vuelve al primer plano: ventana de silencio nueva, un `hello` por si el
+  /// anfitrión nos dio de baja mientras callábamos, y margen para que la red
+  /// vuelva antes de darla por perdida.
+  void resume() {
+    if (!_open) return;
+    _paused = false;
+    _rearm();
+    if (!channel.isOnline) {
+      _netTimer ??= Timer(netGrace, () => _drop('network'));
+    } else {
+      transport.command(code, 'hello', const {}).catchError((Object _) {});
+    }
   }
 
   void _drop(String reason) {
@@ -263,6 +417,7 @@ class JamGuestPeer implements JamPeer {
     _open = false;
     _watchdog?.cancel();
     _graceTimer?.cancel();
+    _netTimer?.cancel();
     for (final sub in _subs) {
       await sub.cancel();
     }
