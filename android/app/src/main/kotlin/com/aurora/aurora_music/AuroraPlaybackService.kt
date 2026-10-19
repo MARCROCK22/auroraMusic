@@ -36,9 +36,12 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
-import kotlin.math.ln
+import kotlin.math.cos
+import kotlin.math.log10
+import kotlin.math.max
 import kotlin.math.pow
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import java.util.concurrent.atomic.AtomicLong
 
 /** One native player. Flutter owns the queue, repeat, shuffle and track resolution. */
@@ -79,7 +82,6 @@ class AuroraPlaybackService : MediaSessionService() {
     private var userVolume = 0.8f
     private var preamp = 1f
     // The eight UI controls form a curve mapped onto the device's native bands.
-    private val eqFrequencies = listOf(60.0, 170.0, 310.0, 600.0, 1000.0, 3000.0, 6000.0, 12000.0)
     private val progress = object : Runnable {
         override fun run() {
             publishState()
@@ -227,13 +229,42 @@ class AuroraPlaybackService : MediaSessionService() {
         }
     }
 
+    /** Respuesta en dB de un filtro peaking RBJ (48 kHz) en la frecuencia [at]. */
+    private fun peakingDb(frequency: Double, gainDb: Double, q: Double, at: Double): Double {
+        if (gainDb == 0.0) return 0.0
+        val sampleRate = 48000.0
+        val a = 10.0.pow(gainDb / 40)
+        val w0 = 2 * Math.PI * frequency.coerceIn(1.0, sampleRate * 0.49) / sampleRate
+        val alpha = sin(w0) / (2 * q)
+        val a0 = 1 + alpha / a
+        val b0 = (1 + alpha * a) / a0
+        val b1 = -2 * cos(w0) / a0
+        val b2 = (1 - alpha * a) / a0
+        val a1 = b1
+        val a2 = (1 - alpha / a) / a0
+        val w = 2 * Math.PI * at / sampleRate
+        val c1 = cos(w)
+        val c2 = cos(2 * w)
+        val num = b0 * b0 + b1 * b1 + b2 * b2 + 2 * (b0 * b1 + b1 * b2) * c1 + 2 * b0 * b2 * c2
+        val den = 1 + a1 * a1 + a2 * a2 + 2 * (a1 + a1 * a2) * c1 + 2 * a2 * c2
+        return 10 * log10(max(num, 1e-30) / max(den, 1e-30))
+    }
+
     private fun setEqualizer(arguments: Map<*, *>) {
         val enabled = arguments["enabled"] == true
-        val gains = (arguments["gainsDb"] as? List<*>)?.map {
-            require(it is Number && it.toDouble().isFinite()) { "Ganancia invalida" }
-            it.toDouble().coerceIn(-12.0, 12.0)
+        val autoPreamp = arguments["autoPreamp"] != false
+        // Cada banda: frecuencia, ganancia y Q; la curva paramétrica se muestrea en
+        // las bandas fijas del efecto del sistema (aproximación, sin Q real).
+        val bands = (arguments["bands"] as? List<*>)?.map { raw ->
+            val band = raw as? Map<*, *> ?: throw IllegalArgumentException("Banda invalida")
+            val values = listOf("frequency", "gainDb", "q").map {
+                val value = band[it]
+                require(value is Number && value.toDouble().isFinite()) { "Banda invalida" }
+                value.toDouble()
+            }
+            Triple(values[0].coerceIn(20.0, 20000.0), values[1].coerceIn(-12.0, 12.0), values[2].coerceIn(0.3, 10.0))
         } ?: emptyList()
-        require(gains.size == eqFrequencies.size) { "Bandas de ecualizador invalidas" }
+        require(bands.size == 8) { "Bandas de ecualizador invalidas" }
         val effect = equalizer ?: return
         try {
             check(effect.hasControl())
@@ -243,21 +274,16 @@ class AuroraPlaybackService : MediaSessionService() {
             } else {
                 val range = effect.bandLevelRange
                 val levels = (0 until effect.numberOfBands).map { band ->
-                    val frequency = effect.getCenterFreq(band.toShort()) / 1000.0
-                    val upper = eqFrequencies.indexOfFirst { it >= frequency }
-                    val gain = when {
-                        upper == 0 -> gains.first()
-                        upper < 0 -> gains.last()
-                        else -> {
-                            val fraction = (ln(frequency) - ln(eqFrequencies[upper - 1])) /
-                                (ln(eqFrequencies[upper]) - ln(eqFrequencies[upper - 1]))
-                            gains[upper - 1] + (gains[upper] - gains[upper - 1]) * fraction
-                        }
-                    }
+                    val center = effect.getCenterFreq(band.toShort()) / 1000.0
+                    val gain = bands.sumOf { (frequency, gainDb, q) -> peakingDb(frequency, gainDb, q, center) }
                     (gain * 100).roundToInt().coerceIn(range[0].toInt(), range[1].toInt()).toShort()
                 }
                 // Attenuate before enabling boosted bands, preserving the requested user volume.
-                preamp = 10.0.pow(-(levels.maxOrNull()?.toInt() ?: 0).coerceAtLeast(0) / 2000.0).toFloat()
+                preamp = if (autoPreamp) {
+                    10.0.pow(-(levels.maxOrNull()?.toInt() ?: 0).coerceAtLeast(0) / 2000.0).toFloat()
+                } else {
+                    1f
+                }
                 player.volume = userVolume * preamp
                 levels.forEachIndexed { band, level -> effect.setBandLevel(band.toShort(), level) }
                 check(effect.setEnabled(true) == AudioEffect.SUCCESS)
@@ -380,7 +406,6 @@ class AuroraPlaybackService : MediaSessionService() {
         "durationMs" to (player.duration.takeIf { it > 0L } ?: expectedDuration),
         "volume" to userVolume.toDouble(), "error" to failure,
         "supportsEqualizer" to (equalizer != null),
-        "eqFrequencies" to (if (equalizer != null) eqFrequencies else emptyList<Double>()),
         "audioNetworkRequests" to networkRequests.get(), "audioNetworkBytes" to networkBytes.get(),
     )
     private fun publishState() {

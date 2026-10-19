@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:aurora_music/audio/android_music_audio.dart';
+import 'package:aurora_music/audio/eq_model.dart';
 import 'package:aurora_music/core/models.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -221,33 +222,35 @@ void main() {
   );
 
   test(
-    'exposes native EQ availability and passes eight bounded gains',
+    'exposes native EQ availability and passes eight bounded parametric bands',
     () async {
-      audio.setEqualizer(true, [5]);
+      audio.setEqualizer(true, [EqBand(60, 5)]);
       expect(calls.last.method, 'initialize');
-      await emit({
-        'type': 'state',
-        'generation': 0,
-        'supportsEqualizer': true,
-        'eqFrequencies': [60, 170, 310, 600, 1000, 3000, 6000, 12000],
-      });
+      await emit({'type': 'state', 'generation': 0, 'supportsEqualizer': true});
       expect(audio.supportsEqualizer, true);
-      expect(audio.eqFrequencies.length, 8);
-      audio.setEqualizer(true, [20, -20, double.nan, 3]);
+      audio.setEqualizer(true, [
+        EqBand(60, 20),
+        EqBand(170, -20, double.nan),
+        EqBand(310, 3, 2),
+      ], autoPreamp: false);
       await Future<void>.delayed(Duration.zero);
       expect(calls.last.method, 'equalizer');
-      expect(calls.last.arguments, {
-        'enabled': true,
-        'gainsDb': [12.0, -12.0, 0.0, 3.0, 0.0, 0.0, 0.0, 0.0],
-      });
+      final args = calls.last.arguments as Map;
+      expect(args['enabled'], true);
+      expect(args['autoPreamp'], false);
+      final bands = (args['bands'] as List).cast<Map>();
+      expect(bands.length, 8);
+      expect(bands[0], {'frequency': 60.0, 'gainDb': 12.0, 'q': 1.0});
+      expect(bands[1]['gainDb'], -12.0);
+      expect(bands[1]['q'], 1.0);
+      expect(bands[2], {'frequency': 310.0, 'gainDb': 3.0, 'q': 2.0});
+      expect(bands[3]['frequency'], eqDefaultFrequencies[3]);
       await emit({
         'type': 'state',
         'generation': 0,
         'supportsEqualizer': false,
-        'eqFrequencies': <num>[],
       });
       expect(audio.supportsEqualizer, false);
-      expect(audio.eqFrequencies, isEmpty);
       expect(audio.lastError, null);
     },
   );

@@ -899,8 +899,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Ecualizador'));
     await tester.pumpAndSettle();
-    expect(find.text('375 Hz'), findsOneWidget);
-    expect(find.text('24k'), findsOneWidget);
+    expect(find.text('60'), findsOneWidget);
+    expect(find.text('12k'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.tap(find.byTooltip('Cerrar ecualizador'));
     await tester.pumpAndSettle();

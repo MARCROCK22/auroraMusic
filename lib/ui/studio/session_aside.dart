@@ -7,6 +7,7 @@ import '../jam/jam_flows.dart';
 import '../jam/jam_add_sheet.dart';
 import '../jam/jam_qr_code.dart';
 import '../jam/jam_widgets.dart';
+import 'equalizer_panel.dart';
 import 'studio_components.dart';
 import 'studio_symbols.dart';
 
@@ -266,99 +267,7 @@ class StudioSessionAside extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 24),
-          StudioPanel(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(StudioSymbols.tune, size: 16),
-                    const SizedBox(width: 6),
-                    const Expanded(
-                      child: StudioStamp('FILTRO DE VÁLVULA & CINTA'),
-                    ),
-                    StudioStamp(
-                      c.eqEnabled ? 'EQ ACTIVO' : 'EQ INACTIVO',
-                      filled: true,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  c.webPlayback
-                      ? 'El ecualizador aplica a archivos locales, no a YouTube Music.'
-                      : c.audio.supportsEqualizer
-                      ? 'Ecualizador real · simulación de válvula y cinta pendiente'
-                      : 'El dispositivo no ofrece un ecualizador compatible.',
-                  style: const TextStyle(fontSize: 10),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    for (final index in [0, 3, 6].where(
-                      (i) =>
-                          i < c.audio.eqFrequencies.length &&
-                          i < c.eqGains.length,
-                    ))
-                      Expanded(
-                        child: Column(
-                          children: [
-                            StudioStamp(
-                              '${c.audio.eqFrequencies[index].round()} Hz',
-                            ),
-                            const SizedBox(height: 8),
-                            SizedBox(
-                              height: 112,
-                              width: 44,
-                              child: RotatedBox(
-                                quarterTurns: 3,
-                                child: SliderTheme(
-                                  data: SliderTheme.of(context).copyWith(
-                                    trackHeight: 8,
-                                    thumbShape: const RoundSliderThumbShape(
-                                      enabledThumbRadius: 6,
-                                    ),
-                                  ),
-                                  child: Slider(
-                                    value: c.eqGains[index].clamp(-12, 12),
-                                    min: -12,
-                                    max: 12,
-                                    onChanged: (value) {
-                                      if (!c.eqEnabled) {
-                                        c.setEqualizerEnabled(true);
-                                      }
-                                      c.setEqGain(index, value);
-                                    },
-                                    semanticFormatterCallback: (value) =>
-                                        '${value.toStringAsFixed(1)} decibelios',
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            StudioStamp(
-                              '${c.eqGains[index].toStringAsFixed(1)} dB',
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text(
-                    'Ecualizador',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                  value: c.eqEnabled,
-                  onChanged: c.audio.supportsEqualizer
-                      ? c.setEqualizerEnabled
-                      : null,
-                ),
-              ],
-            ),
-          ),
+          StudioPanel(child: EqualizerPanel(controller: c)),
         ],
       ),
     );

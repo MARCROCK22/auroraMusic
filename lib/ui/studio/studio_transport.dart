@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import '../../app_controller.dart';
 import '../../core/models.dart';
 import '../../jam/jam_controller.dart';
+import '../../shortcuts/shortcut_service.dart';
 import '../artwork.dart';
 import '../jam/jam_session_panel.dart' show jamTrackAsTrack;
 import '../jam/jam_widgets.dart';
+import 'equalizer_panel.dart';
 import 'studio_components.dart';
 import 'studio_symbols.dart';
 
@@ -19,9 +21,13 @@ class StudioTransport extends StatefulWidget {
     this.jam,
     this.onJam,
     this.onStartJam,
+    this.shortcuts,
   });
   final AppController controller;
   final VoidCallback onLyrics, onVinyl, onQueue, onOpenPlayer;
+
+  /// Para mostrar el atajo actual en los tooltips.
+  final ShortcutService? shortcuts;
 
   /// Con una Jam activa la barra refleja rol, modo y permisos de la sesión.
   final JamController? jam;
@@ -35,10 +41,15 @@ class _StudioTransportState extends State<StudioTransport> {
   String? _scrubTrack;
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: Listenable.merge([widget.controller, ?widget.jam]),
+    listenable: Listenable.merge([
+      widget.controller,
+      ?widget.jam,
+      ?widget.shortcuts,
+    ]),
     builder: (context, _) {
       final c = widget.controller;
       final j = widget.jam;
+      final eqShortcut = widget.shortcuts?.labelOf(ShortcutId.equalizer);
       final jamOn = j != null && j.active;
       // Con audio de Jam, la pista y los permisos salen de la sesión.
       final jamAudio = _jamAudio;
@@ -163,6 +174,7 @@ class _StudioTransportState extends State<StudioTransport> {
                 ),
             ],
           );
+          final tight = constraints.maxWidth < 400;
           final progress = _progress(c, track != null);
           final jamControl = jamOn
               ? JamPill(
@@ -211,8 +223,8 @@ class _StudioTransportState extends State<StudioTransport> {
                         const SizedBox(width: 20),
                         SizedBox(
                           width: jamOn
-                              ? (constraints.maxWidth < 1500 ? 570 : 610)
-                              : 440,
+                              ? (constraints.maxWidth < 1500 ? 660 : 700)
+                              : 490,
                           child: Row(
                             children: [
                               jamControl,
@@ -239,6 +251,10 @@ class _StudioTransportState extends State<StudioTransport> {
                                   StudioSymbols.queueMusic,
                                   size: 18,
                                 ),
+                              ),
+                              TransportEqualizerButton(
+                                controller: c,
+                                shortcut: eqShortcut,
                               ),
                               const Icon(StudioSymbols.volumeUp, size: 16),
                               Expanded(
@@ -291,7 +307,24 @@ class _StudioTransportState extends State<StudioTransport> {
                             onPressed: widget.onLyrics,
                             icon: const Icon(StudioSymbols.lyrics),
                           ),
-                          if (!jamOn) jamControl,
+                          if (!jamOn && !tight) jamControl,
+                          // Sin sitio (estrecho o texto grande) el EQ pasa al
+                          // menú de desbordamiento, con «Iniciar una Jam» si
+                          // tampoco cabe su botón.
+                          if (!tight && !large)
+                            TransportEqualizerButton(
+                              controller: c,
+                              shortcut: eqShortcut,
+                              size: 24,
+                            )
+                          else
+                            TransportOverflowMenu(
+                              controller: c,
+                              shortcut: eqShortcut,
+                              onStartJam: jamOn || !tight
+                                  ? null
+                                  : widget.onStartJam,
+                            ),
                         ],
                       ),
                       if (jamOn)
@@ -540,4 +573,101 @@ class TransportPreviousButton extends StatelessWidget {
       icon: Icon(StudioSymbols.skipPrevious, size: size),
     );
   }
+}
+
+/// Mensaje común del botón y del menú de desbordamiento.
+String _eqTooltip(AppController c, String? shortcut) {
+  if (!c.eq.supported) {
+    return c.webPlayback
+        ? 'Ecualizador no disponible: el reproductor oficial de YouTube Music no lo admite'
+        : 'Ecualizador no disponible: este dispositivo no lo admite';
+  }
+  return 'Ecualizador${c.eq.active ? ' (activo)' : ''}${_hint(shortcut)}';
+}
+
+/// Botón de ecualizador de la barra de reproducción: abre el panel compartido
+/// en una hoja sin salir de la pantalla actual. Cada oyente tiene el suyo.
+class TransportEqualizerButton extends StatelessWidget {
+  const TransportEqualizerButton({
+    super.key,
+    required this.controller,
+    this.shortcut,
+    this.size = 18,
+  });
+  final AppController controller;
+  final String? shortcut;
+  final double size;
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: controller.eq,
+    builder: (context, _) {
+      final colors = Theme.of(context).colorScheme;
+      final eq = controller.eq;
+      return IconButton(
+        tooltip: _eqTooltip(controller, shortcut),
+        onPressed: eq.supported
+            ? () => showEqualizerSheet(context, controller)
+            : null,
+        icon: Icon(
+          StudioSymbols.equalizer,
+          size: size,
+          color: eq.active ? colors.primaryContainer : null,
+        ),
+      );
+    },
+  );
+}
+
+/// Menú «más acciones» para barras estrechas: lleva el ecualizador cuando no
+/// cabe el botón.
+class TransportOverflowMenu extends StatelessWidget {
+  const TransportOverflowMenu({
+    super.key,
+    required this.controller,
+    this.shortcut,
+    this.onStartJam,
+  });
+  final AppController controller;
+  final String? shortcut;
+
+  /// Si no es null, se ofrece «Iniciar una Jam» en el menú.
+  final VoidCallback? onStartJam;
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: controller.eq,
+    builder: (context, _) => PopupMenuButton<void>(
+      tooltip: 'Más acciones',
+      icon: const Icon(Icons.more_vert),
+      itemBuilder: (_) => [
+        PopupMenuItem<void>(
+          enabled: controller.eq.supported,
+          onTap: () => showEqualizerSheet(context, controller),
+          child: Row(
+            children: [
+              Icon(
+                StudioSymbols.equalizer,
+                size: 20,
+                color: controller.eq.active
+                    ? Theme.of(context).colorScheme.primaryContainer
+                    : null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: Text(_eqTooltip(controller, shortcut))),
+            ],
+          ),
+        ),
+        if (onStartJam != null)
+          PopupMenuItem<void>(
+            onTap: onStartJam,
+            child: const Row(
+              children: [
+                Icon(StudioSymbols.groups, size: 20),
+                SizedBox(width: 12),
+                Expanded(child: Text('Iniciar una Jam')),
+              ],
+            ),
+          ),
+      ],
+    ),
+  );
 }

@@ -17,6 +17,7 @@ import '../core/window_controls.dart';
 import '../jam/jam_protocol.dart';
 import 'desktop_settings_tiles.dart';
 import '../jam/jam_controller.dart';
+import 'studio/equalizer_panel.dart';
 import 'studio/studio_navigation.dart';
 import 'studio/studio_transport.dart';
 import 'studio/session_aside.dart';
@@ -418,7 +419,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       case ShortcutId.lyrics:
         _navigate(6);
       case ShortcutId.equalizer:
-        _navigate(7);
+        showEqualizerSheet(context, c);
       case ShortcutId.sleep:
         c.setSleepTimer(
           c.sleepRemaining == null ? const Duration(minutes: 30) : null,
@@ -569,6 +570,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                         const SizedBox.shrink()
                       else
                         StudioTransport(
+                          shortcuts: ref.watch(shortcutServiceProvider),
                           jam: _jam,
                           onJam: _openJamPanel,
                           onStartJam: _startJam,
@@ -1907,88 +1909,8 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         ),
       (
         title: 'Ecualizador',
-        subtitle: c.webPlayback
-            ? 'El ecualizador aplica a archivos locales, no a YouTube Music'
-            : !c.audio.supportsEqualizer
-            ? 'El dispositivo no ofrece un ecualizador compatible'
-            : c.eqEnabled
-            ? 'Ecualizador activado'
-            : 'Ecualizador desactivado',
-        children: [
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Activar ecualizador'),
-            value: c.eqEnabled,
-            onChanged: c.audio.supportsEqualizer ? c.setEqualizerEnabled : null,
-          ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: ['Plano', 'Graves', 'Vocal', 'Rock']
-                .map(
-                  (name) => OutlinedButton(
-                    onPressed: c.audio.supportsEqualizer
-                        ? () => c.applyEqPreset(name)
-                        : null,
-                    child: Text(name),
-                  ),
-                )
-                .toList(),
-          ),
-          const SizedBox(height: 12),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final count = math.min(
-                c.eqGains.length,
-                c.audio.eqFrequencies.length,
-              );
-              final cellWidth = (constraints.maxWidth / count).clamp(
-                38.0,
-                76.0,
-              );
-              return Wrap(
-                alignment: WrapAlignment.spaceBetween,
-                runSpacing: 8,
-                children: [
-                  for (var i = 0; i < count; i++)
-                    SizedBox(
-                      width: cellWidth,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            '${c.eqGains[i].toStringAsFixed(1)} dB',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          SizedBox(
-                            height: 120,
-                            child: RotatedBox(
-                              quarterTurns: 3,
-                              child: Slider(
-                                label:
-                                    '${_frequency(c.audio.eqFrequencies[i])}: ${c.eqGains[i].toStringAsFixed(1)} dB',
-                                value: c.eqGains[i].clamp(-12, 12),
-                                min: -12,
-                                max: 12,
-                                divisions: 48,
-                                onChanged: c.eqEnabled
-                                    ? (value) => c.setEqGain(i, value)
-                                    : null,
-                              ),
-                            ),
-                          ),
-                          Text(
-                            _frequency(c.audio.eqFrequencies[i]),
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
-              );
-            },
-          ),
-        ],
+        subtitle: 'Bandas paramétricas, presets y comparación A/B',
+        children: [EqualizerPanel(controller: c)],
       ),
       (
         title: 'Atajos',
@@ -2468,10 +2390,9 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                                 onPressed: () => _addToPlaylist(player, t),
                                 icon: const Icon(Icons.playlist_add),
                               ),
-                              IconButton(
-                                tooltip: 'Ecualizador',
-                                onPressed: () => _showEq(player),
-                                icon: const Icon(Icons.equalizer),
+                              TransportEqualizerButton(
+                                controller: player,
+                                size: 24,
                               ),
                               IconButton(
                                 tooltip: 'Temporizador de sueño',
@@ -2624,122 +2545,6 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                           ),
                         ),
                       ),
-              ),
-            ],
-          ),
-        );
-      },
-    ),
-  );
-
-  Future<void> _showEq(AppController c) => showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    builder: (context) => Consumer(
-      builder: (context, ref, _) {
-        final player = ref.watch(controllerProvider);
-        return SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 40),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'Ecualizador',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Cerrar ecualizador',
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Activar ecualizador'),
-                subtitle: const Text('Ajusta el sonido para tus auriculares.'),
-                value: player.eqEnabled,
-                onChanged: player.audio.supportsEqualizer
-                    ? player.setEqualizerEnabled
-                    : null,
-              ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: ['Plano', 'Graves', 'Vocal', 'Rock']
-                    .map(
-                      (name) => OutlinedButton(
-                        onPressed: player.audio.supportsEqualizer
-                            ? () => player.applyEqPreset(name)
-                            : null,
-                        child: Text(name),
-                      ),
-                    )
-                    .toList(),
-              ),
-              const SizedBox(height: 24),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    for (
-                      int i = 0;
-                      i <
-                          math.min(
-                            player.eqGains.length,
-                            player.audio.eqFrequencies.length,
-                          );
-                      i++
-                    )
-                      SizedBox(
-                        width: 72,
-                        child: Column(
-                          children: [
-                            Text(
-                              '${player.eqGains[i].toStringAsFixed(1)} dB',
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                            SizedBox(
-                              height: 170,
-                              child: RotatedBox(
-                                quarterTurns: 3,
-                                child: Slider(
-                                  label:
-                                      '${_frequency(player.audio.eqFrequencies[i])}: ${player.eqGains[i].toStringAsFixed(1)} dB',
-                                  value: player.eqGains[i].clamp(-12, 12),
-                                  min: -12,
-                                  max: 12,
-                                  divisions: 48,
-                                  onChanged: player.eqEnabled
-                                      ? (value) => player.setEqGain(i, value)
-                                      : null,
-                                ),
-                              ),
-                            ),
-                            Text(
-                              _frequency(player.audio.eqFrequencies[i]),
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Desliza para ver todas las bandas. Plano restablece la ganancia.',
-                style: TextStyle(fontSize: 12),
               ),
             ],
           ),
@@ -3158,7 +2963,3 @@ String _time(Duration value) {
   final minutes = seconds ~/ 60;
   return '${minutes.toString().padLeft(2, '0')}:${(seconds % 60).toString().padLeft(2, '0')}';
 }
-
-String _frequency(double value) => value >= 1000
-    ? '${(value / 1000).toStringAsFixed(value % 1000 == 0 ? 0 : 1)}k'
-    : '${value.round()} Hz';

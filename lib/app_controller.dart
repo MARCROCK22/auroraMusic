@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/legacy.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'audio/equalizer_controller.dart';
 import 'audio/media_controls.dart';
 import 'audio/routed_music_audio.dart';
 import 'core/audio_backend.dart';
@@ -50,6 +51,12 @@ class AppController extends ChangeNotifier {
   final LibraryDatabase database;
   final SharedPreferences preferences;
   final Directory supportDirectory;
+
+  /// Ecualizador local de este dispositivo (la Jam no lo sincroniza).
+  late final EqualizerController eq = EqualizerController(
+    audio: audio,
+    preferences: preferences,
+  );
   bool get usesOfficialYouTubeMusic => source.usesOfficialYouTubeMusic;
   bool get usesYouTubeWebAudio => source.usesYouTubeWebAudio;
 
@@ -461,9 +468,7 @@ class AppController extends ChangeNotifier {
   }
 
   RepeatMode repeat = RepeatMode.off;
-  bool eqEnabled = false;
   bool experimentalProgressivePlayback = false;
-  List<double> eqGains = List.filled(8, 0);
   bool adaptiveColors = true;
   String accentPalette = 'automatic';
   static const Map<String, Color> accentPaletteColors = {
@@ -1115,13 +1120,7 @@ class AppController extends ChangeNotifier {
         (mode) => mode.name == preferences.getString('themeMode'),
         orElse: () => ThemeMode.dark,
       );
-      eqEnabled = preferences.getBool('eqEnabled') ?? false;
-      final savedGains = preferences.getStringList('eqGains');
-      if (savedGains?.length == 8) {
-        eqGains = savedGains!
-            .map((v) => (double.tryParse(v) ?? 0).clamp(-12.0, 12.0))
-            .toList();
-      }
+      eq.load();
       queue = _lookup(preferences.getStringList('queue') ?? []);
       queueIndex = queue.isEmpty
           ? -1
@@ -1153,9 +1152,8 @@ class AppController extends ChangeNotifier {
         await audio.initialize();
         _audioInitialized = true;
       }
-      eqEnabled = eqEnabled && audio.supportsEqualizer;
       audio.setVolume(preferences.getDouble('volume') ?? 0.75);
-      audio.setEqualizer(eqEnabled, eqGains);
+      eq.apply();
       if (_completedSubscription == null) {
         audio.addListener(_audioChanged);
         _completedSubscription = audio.completed.listen(
@@ -3190,14 +3188,6 @@ class AppController extends ChangeNotifier {
     _notify();
   }
 
-  void setEqualizerEnabled(bool value) {
-    if (!audio.supportsEqualizer) return;
-    eqEnabled = value;
-    audio.setEqualizer(value, eqGains);
-    unawaited(preferences.setBool('eqEnabled', value));
-    _notify();
-  }
-
   void setExperimentalProgressivePlayback(bool value) {
     if (!source.supportsExperimentalProgressivePlayback ||
         experimentalProgressivePlayback == value) {
@@ -3206,36 +3196,6 @@ class AppController extends ChangeNotifier {
     experimentalProgressivePlayback = value;
     source.setExperimentalProgressivePlayback(value);
     unawaited(preferences.setBool('experimentalProgressivePlayback', value));
-    _notify();
-  }
-
-  void setEqGain(int index, double value) {
-    if (index < 0 || index >= eqGains.length) return;
-    eqGains[index] = value.clamp(-12, 12);
-    audio.setEqualizer(eqEnabled, eqGains);
-    unawaited(
-      preferences.setStringList(
-        'eqGains',
-        eqGains.map((v) => v.toString()).toList(),
-      ),
-    );
-    _notify();
-  }
-
-  void applyEqPreset(String name) {
-    eqGains = switch (name) {
-      'Graves' => [6, 3, 0, -1, -2, -2, -2, 0],
-      'Vocal' => [-3, 2, 4, 2, -1, -2, -2, 0],
-      'Rock' => [4, 1, -2, 1, 3, 2, 1, 0],
-      _ => List.filled(8, 0),
-    };
-    audio.setEqualizer(eqEnabled, eqGains);
-    unawaited(
-      preferences.setStringList(
-        'eqGains',
-        eqGains.map((v) => v.toString()).toList(),
-      ),
-    );
     _notify();
   }
 
@@ -3562,6 +3522,7 @@ class AppController extends ChangeNotifier {
     _sleepTimer?.cancel();
     unawaited(_completedSubscription?.cancel());
     audio.removeListener(_audioChanged);
+    eq.dispose();
     unawaited(_saveQueue());
     if (_controls != null) unawaited(_controls!.dispose());
     audio.dispose();

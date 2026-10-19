@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import '../audio/eq_model.dart';
 import 'models.dart';
 
 abstract class AudioBackend extends ChangeNotifier {
@@ -10,7 +11,6 @@ abstract class AudioBackend extends ChangeNotifier {
   Duration get position;
   Duration get duration;
   double get volume;
-  List<double> get eqFrequencies;
   ValueListenable<List<double>> get spectrum;
   Stream<void> get completed;
   Stream<String> get mediaActions => const Stream.empty();
@@ -34,6 +34,8 @@ abstract class AudioBackend extends ChangeNotifier {
   Future<void> stop();
   Future<void> seek(Duration position);
   void setVolume(double volume);
-  void setEqualizer(bool enabled, List<double> gainsDb);
+
+  /// Aplica el ecualizador paramétrico; solo si [supportsEqualizer].
+  void setEqualizer(bool enabled, List<EqBand> bands, {bool autoPreamp = true});
   void setVisualizationEnabled(bool enabled);
 }

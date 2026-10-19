@@ -728,6 +728,11 @@ class _LyricsPanelState extends State<LyricsPanel> {
                       size: 24,
                       shortcut: _hint(ShortcutId.next),
                     ),
+                    TransportEqualizerButton(
+                      controller: controller,
+                      shortcut: _hint(ShortcutId.equalizer),
+                      size: 22,
+                    ),
                   ],
                 ),
               ),
