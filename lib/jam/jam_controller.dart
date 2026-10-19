@@ -266,7 +266,7 @@ class JamController extends ChangeNotifier with WidgetsBindingObserver {
     );
     _suggesting = true;
     try {
-      final items = await _adapter().build(current: app.currentTrack);
+      final items = await _adapter().build(current: app.nowTrack);
       if (items.isNotEmpty && service.connected) {
         service.publishSuggestions(items);
       }
@@ -498,7 +498,7 @@ class JamController extends ChangeNotifier with WidgetsBindingObserver {
         try {
           final items = await _adapter(
             count: 20,
-          ).build(current: app.currentTrack).timeout(topUpTimeout);
+          ).build(current: app.nowTrack).timeout(topUpTimeout);
           service.addAutoplay([for (final i in items) i.track], need: short());
         } catch (_) {
           // Motor lento, sin red o con error: sigue el respaldo local.

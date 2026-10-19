@@ -72,7 +72,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
   }
 
   void _changed() {
-    final track = widget.controller.currentTrack;
+    final track = widget.controller.nowTrack;
     if (track?.id == _trackId) return;
     _trackId = track?.id;
     _request++;
@@ -116,7 +116,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
         onInterim: (cached) {
           if (mounted &&
               request == _request &&
-              widget.controller.currentTrack?.id == track.id) {
+              widget.controller.nowTrack?.id == track.id) {
             setState(() {
               _result = cached;
               _loading = false;
@@ -126,20 +126,20 @@ class _LyricsPanelState extends State<LyricsPanel> {
       );
       if (!mounted ||
           request != _request ||
-          widget.controller.currentTrack?.id != track.id) {
+          widget.controller.nowTrack?.id != track.id) {
         return;
       }
       setState(() => _result = result);
     } catch (_) {
       if (mounted &&
           request == _request &&
-          widget.controller.currentTrack?.id == track.id) {
+          widget.controller.nowTrack?.id == track.id) {
         setState(() => _error = 'No se pudieron cargar las letras.');
       }
     } finally {
       if (mounted &&
           request == _request &&
-          widget.controller.currentTrack?.id == track.id) {
+          widget.controller.nowTrack?.id == track.id) {
         setState(() => _loading = false);
       }
     }
@@ -166,7 +166,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
       _offsetMs = ms;
       _lastActive = -1;
     });
-    final track = widget.controller.currentTrack;
+    final track = widget.controller.nowTrack;
     if (track != null) {
       unawaited(
         _service.saveOffset(track, widget.controller.supportDirectory, ms),
@@ -175,7 +175,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
   }
 
   Future<void> _pickOther() async {
-    final track = widget.controller.currentTrack;
+    final track = widget.controller.nowTrack;
     if (track == null) return;
     final request = ++_request;
     setState(() {
@@ -222,13 +222,13 @@ class _LyricsPanelState extends State<LyricsPanel> {
       widget.controller.supportDirectory,
       choice,
     );
-    if (mounted && widget.controller.currentTrack?.id == track.id) {
+    if (mounted && widget.controller.nowTrack?.id == track.id) {
       setState(() => _result = result);
     }
   }
 
   Future<void> _import() async {
-    final track = widget.controller.currentTrack;
+    final track = widget.controller.nowTrack;
     if (track == null) return;
     final request = ++_request;
     setState(() {
@@ -242,20 +242,20 @@ class _LyricsPanelState extends State<LyricsPanel> {
       );
       if (mounted &&
           request == _request &&
-          widget.controller.currentTrack?.id == track.id &&
+          widget.controller.nowTrack?.id == track.id &&
           result != null) {
         setState(() => _result = result);
       }
     } catch (_) {
       if (mounted &&
           request == _request &&
-          widget.controller.currentTrack?.id == track.id) {
+          widget.controller.nowTrack?.id == track.id) {
         setState(() => _error = 'No se pudo importar el archivo.');
       }
     } finally {
       if (mounted &&
           request == _request &&
-          widget.controller.currentTrack?.id == track.id) {
+          widget.controller.nowTrack?.id == track.id) {
         setState(() => _loading = false);
       }
     }
@@ -272,7 +272,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final track = widget.controller.currentTrack;
+    final track = widget.controller.nowTrack;
     final media = MediaQuery.of(context);
     final lines = _result?.lines ?? const <LyricLine>[];
     return LayoutBuilder(
@@ -652,7 +652,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
         .clamp(0, length > 0 ? length : 0)
         .toDouble();
     final volume = audio.volume.clamp(0.0, 1.0);
-    final enabled = controller.currentTrack != null;
+    final enabled = controller.nowTrack != null;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
@@ -669,11 +669,11 @@ class _LyricsPanelState extends State<LyricsPanel> {
                     value: position,
                     max: length > 0 ? length.toDouble() : 1,
                     onChangeStart: enabled && length > 0
-                        ? (_) => _scrubTrackId = controller.currentTrack?.id
+                        ? (_) => _scrubTrackId = controller.nowTrack?.id
                         : null,
                     onChanged: enabled && length > 0
                         ? (value) {
-                            if (_scrubTrackId != controller.currentTrack?.id) {
+                            if (_scrubTrackId != controller.nowTrack?.id) {
                               return;
                             }
                             setState(
@@ -688,7 +688,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
                             final trackId = _scrubTrackId;
                             _scrubTrackId = null;
                             _scrubPosition = null;
-                            if (trackId == controller.currentTrack?.id) {
+                            if (trackId == controller.nowTrack?.id) {
                               unawaited(
                                 controller.seek(
                                   Duration(milliseconds: value.round()),

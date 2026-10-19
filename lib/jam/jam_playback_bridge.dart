@@ -104,6 +104,7 @@ class JamPlaybackBridge extends ChangeNotifier {
     // Let an already-started native load finish before restoring personal audio.
     await _draining;
     currentEntryId = null;
+    app.setJamNowPlaying(null);
     _failedEntryId = null;
     _lastPlaying = false;
     loading = false;
@@ -142,6 +143,7 @@ class JamPlaybackBridge extends ChangeNotifier {
       if (app.youtubeMusicActive) {
         loading = false;
         currentEntryId = null;
+        app.setJamNowPlaying(null);
         warning =
             'La escucha sincronizada está suspendida mientras '
             'YouTube Music usa su reproductor oficial. La cola de Jam se conserva.';
@@ -155,6 +157,7 @@ class JamPlaybackBridge extends ChangeNotifier {
       if (entry == null) {
         await app.audio.pause();
         currentEntryId = null;
+        app.setJamNowPlaying(null);
         _notify();
         continue;
       }
@@ -176,6 +179,7 @@ class JamPlaybackBridge extends ChangeNotifier {
             app.openYouTubeMusic(WebMusicSource.uriForTrack(track));
             _failedEntryId = entry.id;
             currentEntryId = null;
+            app.setJamNowPlaying(null);
             loading = false;
             warning =
                 'YouTube Music se abre en el reproductor oficial. '
@@ -212,6 +216,8 @@ class JamPlaybackBridge extends ChangeNotifier {
             continue;
           }
           currentEntryId = entry.id;
+          app.setJamNowPlaying(track);
+          unawaited(app.noteJamPlay(track).catchError((Object _) {}));
           _lastSeekMs = clock().millisecondsSinceEpoch;
         } else if (!app.audio.isBuffering) {
           final now = clock().millisecondsSinceEpoch;
