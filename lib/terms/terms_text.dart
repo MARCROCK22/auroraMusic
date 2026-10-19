@@ -3,7 +3,7 @@
 // para que todos los usuarios vuelvan a aceptarlo.
 
 /// Versión del texto. Cambiarla obliga a volver a aceptar.
-const kTermsVersion = '2026-10-19';
+const kTermsVersion = '2026-10-19.2';
 
 /// Fecha legible de esta versión.
 const kTermsDate = '19 de octubre de 2026';
@@ -46,7 +46,8 @@ const kTermsSections = <TermsSection>[
     'Tu biblioteca, tus listas, tus ajustes, tu historial y el perfil de '
         'gustos del DJ, junto con su base de datos de similitud musical, se '
         'guardan y se calculan en tu dispositivo. Aurora no los envía a '
-        'servidores propios ni los vende. Puedes borrarlos desinstalando la '
+        'servidores propios ni los vende; lo único que sale de tu dispositivo '
+        'es lo que actives tú en la sección 6. Puedes borrarlos desinstalando la '
         'aplicación o eliminando sus datos locales.',
   ),
   TermsSection(
@@ -55,13 +56,38 @@ const kTermsSections = <TermsSection>[
         'terceros para buscar música, obtener el audio, letras, carátulas y '
         'recomendaciones, y comprueba si hay actualizaciones. Esos servicios '
         'ven tu dirección IP y los datos propios de cada petición, y se rigen '
-        'por sus propias políticas de privacidad. Si en el futuro se activa '
-        'ListenBrainz u otro servicio similar para compartir tu historial de '
-        'escucha, será opcional, requerirá que lo actives tú y se te '
-        'informará antes.',
+        'por sus propias políticas de privacidad. Compartir tu historial con '
+        'ListenBrainz es opcional y está desactivado por defecto (ver la '
+        'sección 6).',
   ),
   TermsSection(
-    '6. Jam y funciones de red',
+    '6. ListenBrainz (opcional)',
+    'ListenBrainz es un servicio de MetaBrainz Foundation. Está desactivado '
+        'por defecto y solo funciona si pegas tu propio token de usuario y '
+        'enciendes el interruptor en Ajustes. Entonces Aurora envía a '
+        'ListenBrainz lo que escuchas: artista, título, álbum si se conoce, '
+        'duración, la hora de inicio de la reproducción y el nombre del '
+        'cliente («Aurora»). No se envían escuchas de menos de 30 segundos ni '
+        'durante una Jam. Aurora también usa tu token para pedir a '
+        'ListenBrainz tus recomendaciones y novedades, y las usa para '
+        'sugerirte canciones; después Aurora busca esas canciones en '
+        'YouTube. El token se guarda en el almacenamiento seguro del sistema, '
+        'nunca en texto plano. Tú lo controlas: puedes cerrar sesión en '
+        'Ajustes, lo que borra el token y las escuchas pendientes de enviar, '
+        'o revocarlo en tu cuenta de ListenBrainz. ListenBrainz y MetaBrainz '
+        'Foundation tratan esos datos bajo sus propios términos y su propia '
+        'política de privacidad (listenbrainz.org y metabrainz.org); léelos '
+        'antes de activarlo. Por defecto tus escuchas son públicas en tu '
+        'perfil de ListenBrainz, salvo que lo cambies allí. Aurora no vende '
+        'tus datos.',
+  ),
+  TermsSection(
+    '7. Artistas que sigues',
+    'La lista de artistas que sigues se guarda solo en tu dispositivo. '
+        'Aurora no la envía a ningún servidor propio ni la comparte.',
+  ),
+  TermsSection(
+    '8. Jam y funciones de red',
     'La función Jam permite escuchar junto a otras personas conectándote a '
         'ellas. Al usarla, comparte con los demás participantes la información '
         'necesaria para sincronizar la reproducción (por ejemplo, qué suena y '
@@ -70,7 +96,7 @@ const kTermsSections = <TermsSection>[
         'actividades ilegales.',
   ),
   TermsSection(
-    '7. Sin garantía',
+    '9. Sin garantía',
     'Aurora se ofrece «tal cual», sin garantías de ningún tipo, expresas o '
         'implícitas, incluidas las de disponibilidad, ausencia de errores o '
         'idoneidad para un fin concreto. En la medida que permita la ley, los '
@@ -78,13 +104,13 @@ const kTermsSections = <TermsSection>[
         'servicio ni daños derivados del uso de la aplicación.',
   ),
   TermsSection(
-    '8. Cambios de versión',
+    '10. Cambios de versión',
     'Estas condiciones pueden cambiar con nuevas versiones de Aurora. Cuando '
         'cambien, se te pedirá aceptarlas de nuevo antes de seguir usando la '
         'aplicación. Si no las aceptas, no podrás usarla.',
   ),
   TermsSection(
-    '9. Aceptación',
+    '11. Aceptación',
     'Al pulsar «Aceptar» confirmas que has leído estas condiciones y que las '
         'aceptas. Se guardará en tu dispositivo la versión aceptada y la '
         'fecha. Si pulsas «Rechazar» o cierras esta ventana sin elegir, la '

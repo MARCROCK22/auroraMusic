@@ -20,6 +20,7 @@ import 'core/queue_policy.dart';
 import 'core/source_backend.dart';
 import 'import/spotify_import.dart';
 import 'library/library_database.dart';
+import 'listenbrainz/listenbrainz_service.dart';
 import 'dj/ai_dj.dart';
 import 'dj/dj_modes.dart';
 import 'dj/recommendations.dart';
@@ -44,7 +45,11 @@ class AppController extends ChangeNotifier {
     required this.database,
     required this.preferences,
     required this.supportDirectory,
+    this.listenBrainz,
   });
+
+  /// Scrobbling y recomendaciones opcionales de ListenBrainz (null = sin ellas).
+  final ListenBrainzService? listenBrainz;
   final AudioBackend audio;
   final SourceBackend source;
   final LibraryDatabase database;
@@ -218,16 +223,23 @@ class AppController extends ChangeNotifier {
   SuggestionsApi? _suggestionsApi;
 
   /// Motor de recomendaciones compartido con la Jam; se crea una sola vez.
-  SuggestionsApi get suggestionsApi => _suggestionsApi ??= SuggestionsApi(
-    sources: source is InnerTubeSource
-        ? spotifyRecSources(
-            catalog: ProviderSpotifyCatalog(SpotifyMetadataProvider()),
-            matcher: YoutubeMatcher(
-              search: (q, k) => source.searchPage(q, k).then((p) => p.tracks),
-            ),
-          )
-        : const [],
-  );
+  SuggestionsApi get suggestionsApi {
+    if (_suggestionsApi != null) return _suggestionsApi!;
+    final matcher = YoutubeMatcher(
+      search: (q, k) => source.searchPage(q, k).then((p) => p.tracks),
+    );
+    return _suggestionsApi = SuggestionsApi(
+      sources: source is InnerTubeSource
+          ? [
+              ...spotifyRecSources(
+                catalog: ProviderSpotifyCatalog(SpotifyMetadataProvider()),
+                matcher: matcher,
+              ),
+              if (listenBrainz != null) listenBrainz!.recSource(matcher),
+            ]
+          : const [],
+    );
+  }
 
   /// Perfil de gustos de ESTE dispositivo (nunca sale del equipo).
   ParticipantTaste get selfTaste => ParticipantTaste('self', _tasteProfile());
@@ -1221,6 +1233,16 @@ class AppController extends ChangeNotifier {
   }
 
   void _audioChanged() {
+    // Scrobble: nunca en Jam compartido (track null reinicia la sesión).
+    final loaded = currentTrack;
+    listenBrainz?.observe(
+      !_jamPlaybackActive && loaded != null && _loadedTrackId == loaded.id
+          ? loaded
+          : null,
+      playing: audio.isPlaying,
+      position: audio.position,
+      duration: audio.duration,
+    );
     if (_jamPlaybackActive) {
       _notify();
       return;
@@ -3562,6 +3584,7 @@ class AppController extends ChangeNotifier {
     _sleepTimer?.cancel();
     unawaited(_completedSubscription?.cancel());
     audio.removeListener(_audioChanged);
+    listenBrainz?.dispose();
     unawaited(_saveQueue());
     if (_controls != null) unawaited(_controls!.dispose());
     audio.dispose();

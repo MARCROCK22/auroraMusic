@@ -16,6 +16,7 @@ import '../core/desktop_shell.dart';
 import '../core/window_controls.dart';
 import '../jam/jam_protocol.dart';
 import 'desktop_settings_tiles.dart';
+import 'listenbrainz_settings_panel.dart';
 import '../jam/jam_controller.dart';
 import 'studio/studio_navigation.dart';
 import 'studio/studio_transport.dart';
@@ -1774,6 +1775,12 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         subtitle: 'Nuevas versiones desde GitHub Releases',
         children: [UpdateSettings(controller: _updates)],
       ),
+      if (c.listenBrainz != null)
+        (
+          title: 'ListenBrainz',
+          subtitle: 'Opcional: historial y recomendaciones',
+          children: [ListenBrainzSettingsPanel(service: c.listenBrainz!)],
+        ),
       (
         title: 'Música sin conexión',
         subtitle: 'Descargas explícitas y archivos locales',

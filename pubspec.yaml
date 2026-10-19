@@ -52,6 +52,7 @@ dependencies:
   adblocker_webview: 2.3.0
   # JAM remota: cliente puro Dart (sin plugins nativos ni deep links propios).
   supabase: 2.16.5
+  flutter_secure_storage: ^11.2.0
 
 dev_dependencies:
   integration_test:
