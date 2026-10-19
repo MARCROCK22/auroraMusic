@@ -60,6 +60,7 @@ class SessionContext {
     this.now,
     this.seed,
     this.remember = true,
+    this.heardShare,
   });
   final List<ParticipantTaste> participants;
   final DjMode mode;
@@ -73,6 +74,10 @@ class SessionContext {
   final DateTime? now;
   final int? seed;
   final bool remember;
+
+  /// Cuota (0..1) de pistas ya oídas por tanda; `library` define qué cuenta
+  /// como oído. null = sin cuota (comportamiento de la Jam).
+  final double? heardShare;
 }
 
 class Suggestion {
@@ -266,21 +271,32 @@ class SuggestionsApi {
     } else {
       candidates = _cache[key] ?? const [];
     }
-    if (candidates.length < ctx.limit * 2) {
+    final heardOn = (ctx.heardShare ?? 0) > 0;
+    final lowSupply = candidates.length < ctx.limit * 2;
+    if (lowSupply || heardOn) {
       // Poca oferta: la biblioteca completa el pool (y es el único respaldo).
+      // Con cuota de ya oídas entra siempre, una muestra para no embeber todo.
       final inKnown = {for (final c in candidates) c.track.id};
+      var fromLibrary = [
+        for (final t in ctx.library)
+          if (!inKnown.contains(t.id)) t,
+      ];
+      if (!lowSupply) {
+        fromLibrary = (fromLibrary..shuffle(rnd))
+            .take(math.max(30, ctx.limit * 3))
+            .toList();
+      }
       candidates = [
         ...candidates,
-        for (final t in ctx.library)
-          if (!inKnown.contains(t.id))
-            DjCandidate(
-              t,
-              'De tu biblioteca',
-              prior: 0.3,
-              bucket: ctx.favoriteArtists.contains(djPrimaryArtist(t))
-                  ? RecBucket.similar
-                  : RecBucket.adjacent,
-            ),
+        for (final t in fromLibrary)
+          DjCandidate(
+            t,
+            'De tu biblioteca',
+            prior: 0.3,
+            bucket: ctx.favoriteArtists.contains(djPrimaryArtist(t))
+                ? RecBucket.similar
+                : RecBucket.adjacent,
+          ),
       ];
     }
     final picks = _rank(ctx, candidates, now, rnd);
@@ -390,13 +406,23 @@ class SuggestionsApi {
     ];
     if (soft.length >= ctx.limit) items.retainWhere(soft.contains);
 
+    // Con cuota, lo que ya está en la biblioteca cuenta como «ya oído» y se
+    // enfría con una ventana corta (djHeardCooldown) en vez de la de 7 días.
+    final share = ctx.heardShare ?? 0;
+    final heardKeys = share > 0
+        ? {for (final t in ctx.library) ...recommendationTrackKeys(t)}
+        : const <String>{};
+    bool heardOf(_Item i) =>
+        recommendationTrackKeys(i.track).any(heardKeys.contains);
+    Duration windowOf(_Item i) => heardOf(i) ? djHeardCooldown : memory.window;
+
     // Tramos de relajación del filtro de repetición: ventana completa,
     // mitad, cuarto y sin filtro (entonces solo pesa la penalización).
     List<_Item> eligible(double tier) => [
       for (final i in items)
         if (() {
           final age = memory.ageOf(i.track, now);
-          if (age != null && age < memory.window * tier) return false;
+          if (age != null && age < windowOf(i) * tier) return false;
           return !(tier >= 0.5 &&
               recommendationTrackKeys(i.track).any(ctx.recentKeys.contains));
         }())
@@ -412,7 +438,7 @@ class SuggestionsApi {
       final age = memory.ageOf(i.track, now);
       final novelty = age == null
           ? 0.0
-          : 0.4 * math.exp(-age.inMinutes / memory.window.inMinutes);
+          : 0.4 * math.exp(-age.inMinutes / windowOf(i).inMinutes);
       final bonus =
           djModeBonus(
             ctx.mode,
@@ -454,6 +480,7 @@ class SuggestionsApi {
     final byArtist = <String, int>{}, byGenre = <String, int>{};
     final byDecade = <int, int>{};
     final byBucket = <RecBucket, int>{};
+    var heardPicked = 0;
 
     bool cooled(_Item i) =>
         i.artist.isEmpty ||
@@ -478,6 +505,15 @@ class SuggestionsApi {
         ];
       }
       if (options.isEmpty) options = remaining; // nunca vacío
+      if (share > 0) {
+        // Cuota de ya oídas / nuevas; si no queda de la clase, cualquiera.
+        final wantHeard = djWantHeard(heardPicked, chosen.length, share);
+        final preferred = [
+          for (final i in options)
+            if (heardOf(i) == wantHeard) i,
+        ];
+        if (preferred.isNotEmpty) options = preferred;
+      }
       final scores = <double>[];
       for (final i in options) {
         var redundancy = 0.0;
@@ -517,6 +553,7 @@ class SuggestionsApi {
         }
       }
       final pick = options[best];
+      if (share > 0 && heardOf(pick)) heardPicked++;
       remaining.remove(pick);
       chosen.add(pick);
       turns.add(parts.isEmpty ? null : parts[turn].id);

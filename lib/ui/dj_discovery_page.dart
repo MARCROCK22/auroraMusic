@@ -5,9 +5,9 @@ import 'package:flutter/material.dart';
 import '../app_controller.dart';
 import '../core/models.dart';
 import '../dj/discovery_controller.dart';
-import '../dj/dj_modes.dart';
 import 'artwork.dart';
 import 'dj_filters_panel.dart';
+import 'dj_panel.dart';
 
 class DjDiscoveryPage extends StatefulWidget {
   const DjDiscoveryPage({
@@ -80,7 +80,8 @@ class _DjDiscoveryPageState extends State<DjDiscoveryPage> {
           const Text(
             'A la izquierda, omitir. A la derecha, guardar en favoritos y añadir a la cola. Tú decides qué escuchar.',
           ),
-          const SizedBox(height: 24),
+          DjSessionCard(controller: c),
+          const SizedBox(height: 16),
           Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 560),
@@ -128,20 +129,6 @@ class _DjDiscoveryPageState extends State<DjDiscoveryPage> {
                 icon: const Icon(Icons.search),
                 label: const Text('Buscar música'),
               ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final mode in DjMode.values)
-                ChoiceChip(
-                  label: Text(mode.label),
-                  selected: c.djMode == mode,
-                  onSelected: (_) => c.setDjMode(mode),
-                ),
             ],
           ),
           const SizedBox(height: 8),

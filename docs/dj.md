@@ -90,6 +90,37 @@ Cada elección conserva un motivo breve: «Porque escuchaste X», «Parecido a t
 favoritos», «De tus favoritos», «Porque escuchas a X», «Por tu gusto por X» o
 el motivo del recomendador clásico. El panel DJ muestra el siguiente motivo.
 
+## Nuevas y ya oídas
+
+Cada tanda mezcla pistas nuevas con pistas que el usuario ya conoce (todo lo de
+la biblioteca: historial, favoritos y listas). Cuota de ya oídas por modo
+(`djHeardShare`): Descubrir 30 %, Energía 35 %, Por hora y ánimo 35 %, Relax
+40 %; el resto son nuevas. El reparto es determinista (`djWantHeard`): la tanda
+empieza por una nueva y alterna; si no queda de la clase que toca, entra la
+otra. Una pista ya oída se enfría `djHeardCooldown` (3 h) y además no entra si
+está entre las últimas 20 reproducidas ni si ya está en la cola de esta
+sesión; las nuevas siguen con la ventana de 7 días de la memoria
+anti-repetición. La cuota se aplica en el motor (`SessionContext.heardShare`,
+la Jam no la usa) y en `rankDjCandidates`. El perfil local sigue mandando en
+la puntuación y el filtro de coherencia de artista no cambia.
+
+## Variedad de artistas
+
+Ninguna cola generada se llena con un solo artista: nunca el mismo artista
+seguido, máximo 2 de cada 9 en el DJ, tope de ~20 % por tanda en el motor y de
+~30 % (3 de 10) en el relleno automático de la cola (`_fillQueue`). La regla
+solo se relaja, y solo para esa pista, cuando no queda otra alternativa. No
+existe aún un modo «solo este artista». Al tocar una pista a mano suena la
+elegida primero y la cola de recomendaciones se conserva (el DJ sigue activo).
+
+## Iniciar el DJ
+
+`AppController.startDjSession` (envoltura de `startPersonalDj`) fija el modo,
+arranca con lo local o la pista actual y, sin semilla local, pide una tanda al
+motor (radio de YouTube/Spotify). Las pantallas DJ y Para ti usan
+`DjSessionCard`: estado «DJ activo · modo», selector de modo, «Iniciar DJ» y
+«Detener DJ». Con una Jam activa el botón queda deshabilitado.
+
 ## Cola
 
 - Al iniciar, el DJ llena hasta unas 20 canciones pendientes; después recarga

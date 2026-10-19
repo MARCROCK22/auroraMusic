@@ -308,6 +308,7 @@ class AppController extends ChangeNotifier {
               queueTail: queue.skip(max(0, queue.length - 3)).toList(),
               extraCandidates: extra,
               limit: limit,
+              heardShare: djHeardShare(_djMode),
             ),
           )
           .timeout(refillEngineTimeout);
@@ -366,8 +367,16 @@ class AppController extends ChangeNotifier {
         !(usesOfficialYouTubeMusic || usesYouTubeWebAudio) ||
         isNativePlayable(t);
     int need() => target - (queue.length - queueIndex - 1) - picked.length;
-    void take(
-      Iterable<Track> pool, {
+    // Tope por artista en lo que viene (~30 %): una semilla de un solo artista
+    // no puede llenar la cola; se mezcla con otros del perfil y nuevos.
+    final perArtist = <String, int>{};
+    for (final t in queue.skip(max(0, queueIndex + 1))) {
+      perArtist.update(djPrimaryArtist(t), (n) => n + 1, ifAbsent: () => 1);
+    }
+    final artistCap = max(2, (target * 0.3).ceil());
+    void takeOnce(
+      Iterable<Track> pool,
+      bool relaxed, {
       bool allowRecent = false,
       bool reuse = false,
     }) {
@@ -375,7 +384,7 @@ class AppController extends ChangeNotifier {
         for (final t in [if (!reuse) ...queue, ...picked])
           ...recommendationTrackKeys(t),
       };
-      for (final relaxed in [false, true]) {
+      {
         for (final t in pool) {
           if (need() <= 0) return;
           final keys = recommendationTrackKeys(t);
@@ -389,13 +398,31 @@ class AppController extends ChangeNotifier {
           final previous = picked.isNotEmpty
               ? picked.last
               : (at > 0 && at <= queue.length ? queue[at - 1] : null);
+          final artist = djPrimaryArtist(t);
           if (!relaxed &&
-              previous != null &&
-              djPrimaryArtist(previous) == djPrimaryArtist(t)) {
+              ((previous != null && djPrimaryArtist(previous) == artist) ||
+                  (artist.isNotEmpty &&
+                      (perArtist[artist] ?? 0) >= artistCap))) {
             continue;
           }
+          perArtist.update(artist, (n) => n + 1, ifAbsent: () => 1);
           picked.add(t);
           seen.addAll(keys);
+        }
+      }
+    }
+
+    // Un grupo de orígenes: todos con la regla de artista estricta y solo
+    // después, si falta, relajada (si no, el primer origen repetía artista
+    // antes de que la biblioteca aportara variedad).
+    void take(
+      List<Iterable<Track>> pools, {
+      bool allowRecent = false,
+      bool reuse = false,
+    }) {
+      for (final relaxed in [false, true]) {
+        for (final pool in pools) {
+          takeOnce(pool, relaxed, allowRecent: allowRecent, reuse: reuse);
         }
       }
     }
@@ -413,22 +440,23 @@ class AppController extends ChangeNotifier {
       if (i < picks.length) mixed.add(picks[i]);
       if (i < lead.length) mixed.add(lead[i]);
     }
-    take(mixed);
     if (!fallbacks) {
+      take([mixed]);
       await _commitFill(picked, before, allowed, insertAt);
       return;
     }
-    take(tracks);
+    take([mixed, tracks]);
     final favorites = [
       for (final t in tracks)
         if (favoriteIds.contains(t.id)) t,
     ];
-    take(favorites, allowRecent: true);
-    take(tracks, allowRecent: true);
+    take([favorites, tracks], allowRecent: true);
     // Último recurso: repetir lo ya sonado antes que quedarse en silencio.
     if (need() > 0 && current != null) {
       take(
-        [...queue.take(queueIndex), current],
+        [
+          [...queue.take(queueIndex), current],
+        ],
         allowRecent: true,
         reuse: true,
       );
@@ -711,7 +739,32 @@ class AppController extends ChangeNotifier {
     _notify();
   }
 
-  Future<void> startPersonalDj({bool includeDiscovery = false}) async {
+  /// «Iniciar DJ»: fija el modo y arranca con lo local (o la pista actual); si
+  /// no hay semilla local pide una tanda al motor (radio de YouTube/Spotify).
+  /// false = no pudo empezar (Jam activa, sin música ni red). El relleno
+  /// continuo es el de [startPersonalDj]; no se reimplementa nada.
+  Future<bool> startDjSession({
+    DjMode? mode,
+    bool includeDiscovery = false,
+  }) async {
+    if (_jamPlaybackActive) return false;
+    if (mode != null) await setDjMode(mode);
+    if (_personalDjActive) return true;
+    await startPersonalDj(includeDiscovery: includeDiscovery);
+    if (!_personalDjActive && !_disposed) {
+      final picks = await _engineSuggestions(limit: 12);
+      await startPersonalDj(
+        includeDiscovery: includeDiscovery,
+        seeds: [for (final pick in picks) pick.track],
+      );
+    }
+    return _personalDjActive;
+  }
+
+  Future<void> startPersonalDj({
+    bool includeDiscovery = false,
+    List<Track> seeds = const [],
+  }) async {
     if (_jamPlaybackActive) return;
     if (personalDjActive) return;
     includeDiscovery =
@@ -729,6 +782,7 @@ class AppController extends ChangeNotifier {
     for (final track in [
       ...recommendations.map((item) => item.track),
       if (includeDiscovery) ...discoveredRecommendations,
+      ...seeds,
     ]) {
       if (preserveCurrent && queue.length + seedTracks.length >= 24) break;
       final keys = recommendationTrackKeys(track);
@@ -1019,6 +1073,8 @@ class AppController extends ChangeNotifier {
       skippedArtists: skippedArtists,
       queueTail: queue.skip(max(0, queueIndex)).toList(),
       filters: djFilters,
+      heardKeys: {for (final t in tracks) ...recommendationTrackKeys(t)},
+      heardShare: djHeardShare(_djMode),
       adjust: (t) => djModeBonus(
         _djMode,
         t,
@@ -1594,7 +1650,9 @@ class AppController extends ChangeNotifier {
     final selected =
         tracks.where((item) => item.id == track.id).firstOrNull ?? track;
     if (_routeToYouTubeMusic(selected)) return;
-    if (_personalDjActive) stopPersonalDj();
+    // Elegir a mano una pista suelta (replaceQueue false) no apaga el DJ ni
+    // reemplaza su cola; solo reemplazar la cola lo detiene.
+    if (_personalDjActive && replaceQueue) stopPersonalDj();
     await _playTrack(track, context: context, replaceQueue: replaceQueue);
   }
 
