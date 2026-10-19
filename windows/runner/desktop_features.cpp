@@ -55,32 +55,42 @@ void ReleaseInstanceMutex() {
 }
 
 bool ForwardToExistingInstance(const std::wstring& arguments) {
-  // El handle se mantiene abierto hasta que el proceso termina.
-  HANDLE mutex = CreateMutexW(nullptr, TRUE, kMutexName);
-  if (mutex && GetLastError() != ERROR_ALREADY_EXISTS) {
-    g_instance_mutex = mutex;
-    return false;
-  }
+  // Hasta ~8 s: la primera instancia puede estar creando su ventana, o morir
+  // (proceso agonizante que aun retiene el mutex pero ya sin ventana).
+  for (int i = 0; i < 80; ++i) {
+    // El handle se mantiene abierto hasta que el proceso termina.
+    HANDLE mutex = CreateMutexW(nullptr, TRUE, kMutexName);
+    if (mutex && GetLastError() != ERROR_ALREADY_EXISTS) {
+      g_instance_mutex = mutex;
+      return false;
+    }
+    if (mutex) CloseHandle(mutex);
 
-  // La primera instancia puede estar aun creando su ventana: reintenta.
-  HWND target = nullptr;
-  for (int i = 0; i < 50 && !target; ++i) {
-    target = FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", L"Aurora");
-    if (!target) Sleep(100);
+    // Solo la clase: el titulo puede cambiar y la ventana puede estar oculta
+    // (FindWindow tambien encuentra ventanas ocultas).
+    HWND target = FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", nullptr);
+    if (target) {
+      DWORD pid = 0;
+      GetWindowThreadProcessId(target, &pid);
+      AllowSetForegroundWindow(pid);
+      COPYDATASTRUCT data = {};
+      data.dwData = kForwardArgsMagic;
+      data.cbData =
+          static_cast<DWORD>((arguments.size() + 1) * sizeof(wchar_t));
+      data.lpData = const_cast<wchar_t*>(arguments.c_str());
+      DWORD_PTR handled = 0;
+      if (SendMessageTimeoutW(target, WM_COPYDATA, 0,
+                              reinterpret_cast<LPARAM>(&data),
+                              SMTO_ABORTIFHUNG, 3000, &handled) &&
+          handled) {
+        return true;
+      }
+    }
+    Sleep(100);
   }
-  if (target) {
-    DWORD pid = 0;
-    GetWindowThreadProcessId(target, &pid);
-    AllowSetForegroundWindow(pid);
-    COPYDATASTRUCT data = {};
-    data.dwData = kForwardArgsMagic;
-    data.cbData = static_cast<DWORD>((arguments.size() + 1) * sizeof(wchar_t));
-    data.lpData = const_cast<wchar_t*>(arguments.c_str());
-    SendMessageTimeoutW(target, WM_COPYDATA, 0,
-                        reinterpret_cast<LPARAM>(&data), SMTO_ABORTIFHUNG,
-                        3000, nullptr);
-  }
-  return true;
+  // Nadie respondio (instancia colgada): arrancar normal en vez de salir sin
+  // ventana, que dejaba al usuario sin Aurora.
+  return false;
 }
 
 bool IsAutostartEnabled() {
