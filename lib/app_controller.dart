@@ -572,6 +572,31 @@ class AppController extends ChangeNotifier {
   int _expiryRetries = 0;
   Duration _recoveryProgressPosition = Duration.zero;
 
+  Track? _jamNowPlaying;
+
+  /// Pista que suena en la Jam (null hasta que cargue la primera).
+  Track? get jamNowPlaying => _jamNowPlaying;
+  void setJamNowPlaying(Track? track) {
+    if (_jamNowPlaying?.id == track?.id) return;
+    _jamNowPlaying = track;
+    _notify();
+  }
+
+  /// Lo que realmente suena: la pista de la Jam o la de la cola personal.
+  Track? get nowTrack => _jamPlaybackActive ? _jamNowPlaying : currentTrack;
+
+  /// Historial/perfil para lo que suena en Jam; sin tocar la cola personal.
+  Future<void> noteJamPlay(Track track) async {
+    await _remember(track);
+    await database.recordPlay(track.id);
+    recentTracks = [
+      track,
+      ...recentTracks.where((item) => item.id != track.id),
+    ].take(100).toList();
+    await RecsMemory.shared.record([track], DateTime.now());
+    _notify();
+  }
+
   Track? get currentTrack =>
       queueIndex >= 0 && queueIndex < queue.length ? queue[queueIndex] : null;
   List<TrackRecommendation> get recommendations => recommendTracks(
@@ -1958,6 +1983,7 @@ class AppController extends ChangeNotifier {
       _usingRemote = false;
       _playIntent = false;
       _jamPlaybackActive = false;
+      _jamNowPlaying = null;
       _controls?.updateTrack(currentTrack);
       _notify();
     }
