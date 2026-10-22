@@ -45,7 +45,7 @@ class DjFiltersPanel extends StatelessWidget {
               icon: const Icon(Icons.person_outline),
               label: const Text('Artistas'),
               onPressed: () async {
-                final selected = await _choose(context, 'Artistas del DJ', {
+                final selected = await choose(context, 'Artistas del DJ', {
                   for (final a in artists) a: a,
                 }, filters.artists);
                 if (selected != null) {
@@ -66,7 +66,7 @@ class DjFiltersPanel extends StatelessWidget {
               icon: const Icon(Icons.music_note_outlined),
               label: const Text('Canciones'),
               onPressed: () async {
-                final selected = await _choose(context, 'Canciones del DJ', {
+                final selected = await choose(context, 'Canciones del DJ', {
                   for (final t in controller.tracks)
                     t.id: '${t.title} · ${t.artist}',
                 }, filters.trackIds);
@@ -90,12 +90,9 @@ class DjFiltersPanel extends StatelessWidget {
               onPressed: genres.isEmpty
                   ? null
                   : () async {
-                      final selected = await _choose(
-                        context,
-                        'Géneros del DJ',
-                        {for (final g in genres) g: g},
-                        filters.genres,
-                      );
+                      final selected = await choose(context, 'Géneros del DJ', {
+                        for (final g in genres) g: g,
+                      }, filters.genres);
                       if (selected != null) {
                         await controller.setDjFilters(
                           DjFilters(
@@ -127,7 +124,7 @@ class DjFiltersPanel extends StatelessWidget {
     );
   }
 
-  Future<List<String>?> _choose(
+  static Future<List<String>?> choose(
     BuildContext context,
     String title,
     Map<String, String> options,

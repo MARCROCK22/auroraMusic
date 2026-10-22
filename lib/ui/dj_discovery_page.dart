@@ -8,6 +8,8 @@ import '../dj/discovery_controller.dart';
 import 'artwork.dart';
 import 'dj_filters_panel.dart';
 import 'dj_panel.dart';
+import '../theme/slush_theme.dart';
+import 'slush/slush_dj.dart';
 
 class DjDiscoveryPage extends StatefulWidget {
   const DjDiscoveryPage({
@@ -69,6 +71,14 @@ class _DjDiscoveryPageState extends State<DjDiscoveryPage> {
     builder: (context, _) {
       final c = widget.controller;
       final recommendation = _discovery.current;
+      if (isSlush(context)) {
+        return SlushDj(
+          controller: c,
+          discovery: _discovery,
+          onSearch: widget.onSearch,
+          wrap: (track, child) => _swipe(track, child),
+        );
+      }
       return ListView(
         padding: const EdgeInsets.all(24),
         children: [
@@ -173,8 +183,14 @@ class _DjDiscoveryPageState extends State<DjDiscoveryPage> {
     ),
   );
 
-  Widget _card(Track track, String reason) => Listener(
+  Widget _card(Track track, String reason) => _swipe(
+    track,
+    _cardBody(track, reason),
     key: const ValueKey('dj-discovery-card'),
+  );
+
+  Widget _swipe(Track track, Widget child, {Key? key}) => Listener(
+    key: key,
     onPointerDown: (event) {
       if (_pointer != null || _discovery.busy) return;
       _pointer = event.pointer;
@@ -207,82 +223,75 @@ class _DjDiscoveryPageState extends State<DjDiscoveryPage> {
       offset: _reduceMotion
           ? Offset.zero
           : Offset(_delta.dx.clamp(-20, 20).toDouble(), 0),
-      child: Card(
-        margin: EdgeInsets.zero,
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: LayoutBuilder(
-            builder: (context, constraints) => Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      child: child,
+    ),
+  );
+
+  Widget _cardBody(Track track, String reason) => Card(
+    margin: EdgeInsets.zero,
+    color: Theme.of(context).colorScheme.surfaceContainerLow,
+    child: Padding(
+      padding: const EdgeInsets.all(20),
+      child: LayoutBuilder(
+        builder: (context, constraints) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Artwork(
+                track: track,
+                artworkContext: ArtworkContext.playerCompact,
+                radius: 12,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(track.title, style: Theme.of(context).textTheme.headlineSmall),
+            const SizedBox(height: 4),
+            Text(track.artist, style: Theme.of(context).textTheme.titleMedium),
+            if (track.album?.trim().isNotEmpty ?? false) ...[
+              const SizedBox(height: 8),
+              Text(track.album!),
+            ],
+            if (track.genres.isNotEmpty || track.duration > Duration.zero) ...[
+              const SizedBox(height: 8),
+              Text(
+                [
+                  ...track.genres,
+                  if (track.duration > Duration.zero)
+                    '${track.duration.inMinutes}:${(track.duration.inSeconds % 60).toString().padLeft(2, '0')}',
+                ].join(' · '),
+              ),
+            ],
+            const SizedBox(height: 16),
+            Text(
+              reason,
+              style: TextStyle(color: Theme.of(context).colorScheme.primary),
+            ),
+            const SizedBox(height: 20),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
               children: [
-                Center(
-                  child: Artwork(
-                    track: track,
-                    artworkContext: ArtworkContext.playerCompact,
-                    radius: 12,
+                OutlinedButton.icon(
+                  key: const ValueKey('dj-discovery-skip'),
+                  onPressed: _discovery.busy
+                      ? null
+                      : () => _discovery.skip(track),
+                  icon: const Icon(Icons.close),
+                  label: const Text('Omitir'),
+                ),
+                FilledButton.icon(
+                  key: const ValueKey('dj-discovery-add'),
+                  onPressed: _discovery.busy
+                      ? null
+                      : () => _discovery.accept(track),
+                  icon: const Icon(Icons.favorite_border),
+                  label: Text(
+                    _discovery.busy ? 'Guardando…' : 'Añadir y seguir',
                   ),
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  track.title,
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  track.artist,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                if (track.album?.trim().isNotEmpty ?? false) ...[
-                  const SizedBox(height: 8),
-                  Text(track.album!),
-                ],
-                if (track.genres.isNotEmpty ||
-                    track.duration > Duration.zero) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    [
-                      ...track.genres,
-                      if (track.duration > Duration.zero)
-                        '${track.duration.inMinutes}:${(track.duration.inSeconds % 60).toString().padLeft(2, '0')}',
-                    ].join(' · '),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                Text(
-                  reason,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 8,
-                  children: [
-                    OutlinedButton.icon(
-                      key: const ValueKey('dj-discovery-skip'),
-                      onPressed: _discovery.busy
-                          ? null
-                          : () => _discovery.skip(track),
-                      icon: const Icon(Icons.close),
-                      label: const Text('Omitir'),
-                    ),
-                    FilledButton.icon(
-                      key: const ValueKey('dj-discovery-add'),
-                      onPressed: _discovery.busy
-                          ? null
-                          : () => _discovery.accept(track),
-                      icon: const Icon(Icons.favorite_border),
-                      label: Text(
-                        _discovery.busy ? 'Guardando…' : 'Añadir y seguir',
-                      ),
-                    ),
-                  ],
                 ),
               ],
             ),
-          ),
+          ],
         ),
       ),
     ),
