@@ -686,6 +686,35 @@ class AppController extends ChangeNotifier {
   DjMode _djMode = DjMode.discover;
   DjMode get djMode => _djMode;
 
+  double _djDiversity = djDefaultDiversity;
+  double get djDiversity => _djDiversity;
+  bool _djArtistCooldown = true;
+  bool get djArtistCooldown => _djArtistCooldown;
+
+  Future<void> setDjDiversity(double value) async {
+    value = value.clamp(0.0, djMaxDiversity);
+    if (value == _djDiversity) return;
+    _djDiversity = value;
+    ++_personalDjGeneration;
+    _notify();
+    await preferences.setDouble('djDiversity', value);
+  }
+
+  Future<void> setDjArtistCooldown(bool value) async {
+    if (value == _djArtistCooldown) return;
+    _djArtistCooldown = value;
+    ++_personalDjGeneration;
+    _notify();
+    await preferences.setBool('djArtistCooldown', value);
+  }
+
+  /// Afinidad 0-1 de [track] con tu perfil local (null si aún no hay gustos).
+  double? djTrackAffinity(Track track) => djAffinity(
+    profile: _tasteProfile().vector,
+    track: track,
+    current: currentTrack,
+  );
+
   Future<void> setDjMode(DjMode mode) async {
     if (mode == _djMode) return;
     _djMode = mode;
@@ -1139,6 +1168,8 @@ class AppController extends ChangeNotifier {
       skippedArtists: skippedArtists,
       queueTail: queue.skip(max(0, queueIndex)).toList(),
       filters: djFilters,
+      lambda: 1 - _djDiversity,
+      artistCooldown: _djArtistCooldown,
       heardKeys: {for (final t in tracks) ...recommendationTrackKeys(t)},
       heardShare: djHeardShare(_djMode),
       adjust: (t) =>
@@ -1201,6 +1232,12 @@ class AppController extends ChangeNotifier {
       _djMode =
           DjMode.values.asNameMap()[preferences.getString('djMode')] ??
           DjMode.discover;
+      _djDiversity =
+          (preferences.getDouble('djDiversity') ?? djDefaultDiversity).clamp(
+            0.0,
+            djMaxDiversity,
+          );
+      _djArtistCooldown = preferences.getBool('djArtistCooldown') ?? true;
       final savedFilters = preferences.getString('djFilters');
       if (savedFilters != null) {
         try {
@@ -2644,13 +2681,19 @@ class AppController extends ChangeNotifier {
       } catch (_) {}
     }
     try {
-      await preferences.setString('playlistPhotos', jsonEncode(_playlistPhotos));
+      await preferences.setString(
+        'playlistPhotos',
+        jsonEncode(_playlistPhotos),
+      );
     } catch (_) {}
     final index = playlists.indexWhere((item) => item.id == id);
     if (index >= 0) playlists[index] = playlists[index].withPhoto(path);
   }
 
-  Future<void> setPlaylistPhoto(MusicPlaylist playlist, Uint8List? bytes) async {
+  Future<void> setPlaylistPhoto(
+    MusicPlaylist playlist,
+    Uint8List? bytes,
+  ) async {
     String? path;
     if (bytes != null) {
       final dir = Directory(p.join(supportDirectory.path, 'playlist_covers'));
