@@ -90,7 +90,7 @@ class LyricsService {
   static const maxCacheFiles = 400;
   // shortcut: versión fija, no se lee de package_info; actualizar al subir de versión.
   static const userAgent =
-      'Aurora/1.2.4 (https://github.com/kaz-py/auroraMusic)';
+      'Aurora/1.3.0 (https://github.com/kaz-py/auroraMusic)';
   final HttpClient Function() _clientFactory;
   final Duration backoff;
   final int retries;

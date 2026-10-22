@@ -6,7 +6,7 @@ import '../dj/reco_memory.dart';
 
 /// Versión del cliente enviada como `submission_client_version`.
 // shortcut: versión fija como en LyricsService; actualizar al subir de versión.
-const kListenBrainzClientVersion = '1.2.4';
+const kListenBrainzClientVersion = '1.3.0';
 
 /// Tamaño máximo documentado por listen (bytes de su JSON).
 const kMaxListenBytes = 10240;
