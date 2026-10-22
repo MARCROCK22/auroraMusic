@@ -58,3 +58,6 @@ RETOMAR_AURORA.md
 dart_defines.json
 dart_defines.local.json
 *.defines.json
+
+# graphify
+graphify-out/

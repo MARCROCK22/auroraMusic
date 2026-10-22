@@ -80,6 +80,14 @@ $env:PATH = "$PWD/build/build-tools/nuget;$env:PATH"; & $flutter build windows -
   **Sin líneas `Co-Authored-By` ni atribución a Claude** en commits o PRs.
 - No afirmar reproducción real basándose solo en tests simulados.
 
+## Consultas sobre el código (graphify)
+
+Para cualquier pregunta sobre el código, su arquitectura o la relación entre
+archivos, usa primero el skill `graphify` (grafo en `graphify-out/`: consulta,
+camino y explicación de nodos) antes de recorrer el árbol con Grep/Read. Si el
+grafo falta o está viejo, regénralo con el skill. Aplica también a los
+subagentes. Estado del trabajo pendiente: `CONTINUAR.md`.
+
 ## Trabajo con subagentes
 
 El agente principal orquesta: reparte tareas por áreas con dueños de archivos
