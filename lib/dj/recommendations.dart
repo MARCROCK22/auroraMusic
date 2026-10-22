@@ -52,10 +52,17 @@ class DjFilters {
 }
 
 class TrackRecommendation {
-  const TrackRecommendation({required this.track, required this.reason});
+  const TrackRecommendation({
+    required this.track,
+    required this.reason,
+    this.affinity,
+  });
 
   final Track track;
   final String reason;
+
+  /// Afinidad 0-1 con el perfil de gustos; null si no se calculó.
+  final double? affinity;
 }
 
 Set<String> recommendationTrackKeys(Track track) {

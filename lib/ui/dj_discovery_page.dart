@@ -57,6 +57,12 @@ class _DjDiscoveryPageState extends State<DjDiscoveryPage> {
       widget.controller.reducedMotion ||
       MediaQuery.disableAnimationsOf(context);
 
+  final _affinities = <String, double?>{};
+  double? _affinity(Track t) => _affinities.putIfAbsent(
+    '${t.id}:${_discovery.added + _discovery.skipped}',
+    () => widget.controller.djTrackAffinity(t),
+  );
+
   void _resetDrag() {
     _pointer = null;
     _start = null;
@@ -77,6 +83,7 @@ class _DjDiscoveryPageState extends State<DjDiscoveryPage> {
           discovery: _discovery,
           onSearch: widget.onSearch,
           wrap: (track, child) => _swipe(track, child),
+          affinityOf: _affinity,
         );
       }
       return ListView(

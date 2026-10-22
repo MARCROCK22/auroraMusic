@@ -20,6 +20,37 @@ const djRecentPenalty = 0.35;
 const djSkippedArtistPenalty = 0.30;
 const djMmrLambda = 0.7;
 
+/// Ajustes del usuario: diversidad = 1 - lambda de MMR (0 = solo relevancia,
+/// por defecto 0,3 = comportamiento histórico) y enfriamiento de artistas.
+const djDefaultDiversity = 1 - djMmrLambda;
+const djMaxDiversity = 0.8;
+
+/// Afinidad 0-1 de una pista con el perfil: `relevancia / máximo posible`.
+/// El máximo suma solo los términos presentes (gusto siempre; prior si se da
+/// [prior]; continuidad si hay [current]), así que 1 = coincidencia perfecta.
+/// Se recorta a [0, 1]; con perfil vacío devuelve null (no hay gustos).
+double? djAffinity({
+  required List<double> profile,
+  required Track track,
+  Track? current,
+  double? prior,
+  double bonus = 0,
+}) {
+  if (profile.every((v) => v == 0)) return null;
+  final vector = embedDjTrack(track);
+  var score = djTasteWeight * djCosine(profile, vector) + bonus;
+  var max = djTasteWeight;
+  if (prior != null) {
+    score += djPriorWeight * prior;
+    max += djPriorWeight;
+  }
+  if (current != null) {
+    score += djContinuityWeight * djCosine(embedDjTrack(current), vector);
+    max += djContinuityWeight;
+  }
+  return (score / max).clamp(0.0, 1.0);
+}
+
 const _noiseTokens = {
   'official',
   'oficial',
@@ -346,6 +377,7 @@ List<TrackRecommendation> rankDjCandidates({
   List<Track> queueTail = const [],
   DjFilters filters = const DjFilters(),
   double lambda = djMmrLambda,
+  bool artistCooldown = true, // false: permite el mismo artista seguido
   double Function(Track track)? adjust, // sesgo de modo (dj_modes.dart)
   Set<String> heardKeys = const {}, // claves de lo ya oído (biblioteca)
   double? heardShare, // cuota de ya oídas por tanda; null = sin cuota
@@ -386,7 +418,7 @@ List<TrackRecommendation> rankDjCandidates({
     ...queueTail.map(djPrimaryArtist),
   ];
   bool allowed(String artist) {
-    if (artist.isEmpty) return true;
+    if (artist.isEmpty || !artistCooldown) return true;
     if (artistsSoFar.isNotEmpty && artistsSoFar.last == artist) return false;
     final window = artistsSoFar.length > 9
         ? artistsSoFar.sublist(artistsSoFar.length - 9)
@@ -397,7 +429,8 @@ List<TrackRecommendation> rankDjCandidates({
   bool heardOf(DjCandidate c) =>
       recommendationTrackKeys(c.track).any(heardKeys.contains);
   var heardPicked = 0;
-  final picked = <({DjCandidate candidate, Float32List vector})>[];
+  final picked =
+      <({DjCandidate candidate, Float32List vector, double relevance})>[];
   while (picked.length < limit && pool.isNotEmpty) {
     // One relaxed pick per batch when every artist is cooling down, so
     // single-artist libraries still continue (slowly) instead of stopping.
@@ -434,7 +467,11 @@ List<TrackRecommendation> rankDjCandidates({
     if (bestIndex < 0) break;
     final best = pool.removeAt(bestIndex);
     if (heardOf(best.candidate)) heardPicked++;
-    picked.add((candidate: best.candidate, vector: best.vector));
+    picked.add((
+      candidate: best.candidate,
+      vector: best.vector,
+      relevance: best.relevance,
+    ));
     artistsSoFar.add(djPrimaryArtist(best.candidate.track));
   }
   return [
@@ -442,6 +479,8 @@ List<TrackRecommendation> rankDjCandidates({
       TrackRecommendation(
         track: pick.candidate.track,
         reason: pick.candidate.reason,
+        // Relevancia (suma ponderada, máximo teórico 1) recortada a 0-1.
+        affinity: pick.relevance.clamp(0.0, 1.0),
       ),
   ];
 }

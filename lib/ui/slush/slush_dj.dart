@@ -1,4 +1,8 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+
+import '../../dj/ai_dj.dart' show djMaxDiversity;
 
 import '../../app_controller.dart';
 import '../../core/models.dart';
@@ -27,15 +31,22 @@ class SlushDj extends StatelessWidget {
     required this.discovery,
     required this.onSearch,
     required this.wrap,
+    this.affinityOf,
   });
   final AppController controller;
   final DjDiscoveryController discovery;
   final VoidCallback onSearch;
   final Widget Function(Track track, Widget child) wrap;
 
+  /// Afinidad 0-1 de una pista sin puntuación propia (memoizada por la página).
+  final double? Function(Track track)? affinityOf;
+
   @override
   Widget build(BuildContext context) {
     final rec = discovery.current;
+    final affinity = rec == null
+        ? null
+        : rec.affinity ?? affinityOf?.call(rec.track);
     final errors = [?discovery.error, ?controller.recommendationDiscoveryError];
     return ColoredBox(
       color: _screenGreen(context),
@@ -44,12 +55,19 @@ class SlushDj extends StatelessWidget {
           final wide = box.maxWidth >= 900;
           final stack = rec == null
               ? _empty(context)
-              : wrap(rec.track, _Stack(track: rec.track, reason: rec.reason));
+              : wrap(
+                  rec.track,
+                  _Stack(
+                    track: rec.track,
+                    reason: rec.reason,
+                    affinity: affinity,
+                  ),
+                );
           final skip = _RoundAction(
             key: const ValueKey('dj-discovery-skip'),
             color: Slush.orange,
             icon: Icons.close,
-            label: 'OMITIR',
+            label: '← OMITIR',
             onTap: rec == null || discovery.busy
                 ? null
                 : () => discovery.skip(rec.track),
@@ -58,7 +76,7 @@ class SlushDj extends StatelessWidget {
             key: const ValueKey('dj-discovery-add'),
             color: _ink,
             icon: Icons.favorite,
-            label: discovery.busy ? 'GUARDANDO…' : 'GUARDAR',
+            label: discovery.busy ? 'GUARDANDO…' : 'GUARDAR →',
             onTap: rec == null || discovery.busy
                 ? null
                 : () => discovery.accept(rec.track),
@@ -85,7 +103,7 @@ class SlushDj extends StatelessWidget {
               ? Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    SizedBox(width: 150, child: counters),
+                    SizedBox(width: 176, child: counters),
                     skip,
                     const SizedBox(width: 12),
                     Flexible(
@@ -95,9 +113,15 @@ class SlushDj extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 12),
-                    save,
-                    const SizedBox(width: 24),
-                    SizedBox(width: 300, child: filters),
+                    Transform.translate(
+                      offset: const Offset(-26, 0),
+                      child: save,
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      width: 300,
+                      child: Transform.rotate(angle: -.025, child: filters),
+                    ),
                   ],
                 )
               : Column(
@@ -107,13 +131,12 @@ class SlushDj extends StatelessWidget {
                       child: stack,
                     ),
                     const SizedBox(height: 20),
-                    Wrap(
-                      spacing: 32,
-                      runSpacing: 16,
-                      alignment: WrapAlignment.center,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [skip, save, counters],
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [skip, const SizedBox(width: 56), save],
                     ),
+                    const SizedBox(height: 20),
+                    Align(alignment: Alignment.centerLeft, child: counters),
                     const SizedBox(height: 20),
                     filters,
                   ],
@@ -181,9 +204,10 @@ BoxDecoration _cardDeco(Color color, [double r = 28]) => BoxDecoration(
 );
 
 class _Stack extends StatelessWidget {
-  const _Stack({required this.track, required this.reason});
+  const _Stack({required this.track, required this.reason, this.affinity});
   final Track track;
   final String reason;
+  final double? affinity;
 
   @override
   Widget build(BuildContext context) {
@@ -197,15 +221,21 @@ class _Stack extends StatelessWidget {
         clipBehavior: Clip.none,
         children: [
           Positioned.fill(
-            child: Transform.rotate(
-              angle: .1,
-              child: DecoratedBox(decoration: _cardDeco(Slush.violet)),
+            child: Transform.translate(
+              offset: const Offset(14, 4),
+              child: Transform.rotate(
+                angle: .1,
+                child: DecoratedBox(decoration: _cardDeco(Slush.violet)),
+              ),
             ),
           ),
           Positioned.fill(
-            child: Transform.rotate(
-              angle: .05,
-              child: DecoratedBox(decoration: _cardDeco(Slush.yellow)),
+            child: Transform.translate(
+              offset: const Offset(-10, 8),
+              child: Transform.rotate(
+                angle: -.07,
+                child: DecoratedBox(decoration: _cardDeco(Slush.yellow)),
+              ),
             ),
           ),
           Container(
@@ -222,10 +252,12 @@ class _Stack extends StatelessWidget {
                     borderRadius: BorderRadius.circular(16),
                     child: AspectRatio(
                       aspectRatio: 1,
-                      child: Artwork.fill(
-                        track: track,
-                        artworkContext: ArtworkContext.playerCompact,
-                      ),
+                      child: (track.artworkUrl?.trim().isEmpty ?? true)
+                          ? const _StarPlaceholder()
+                          : Artwork.fill(
+                              track: track,
+                              artworkContext: ArtworkContext.playerCompact,
+                            ),
                     ),
                   ),
                 ),
@@ -256,7 +288,18 @@ class _Stack extends StatelessWidget {
                     ),
                   ),
                 const SizedBox(height: 10),
-                _ReasonPill(reason),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    if (affinity != null)
+                      SlushPill(
+                        '${(affinity! * 100).round()}% afinidad',
+                        color: Slush.mint,
+                      ),
+                    _ReasonPill(reason),
+                  ],
+                ),
               ],
             ),
           ),
@@ -305,6 +348,48 @@ class _Stack extends StatelessWidget {
   }
 }
 
+/// Portada de reemplazo: estrella amarilla con centro naranja sobre lila.
+class _StarPlaceholder extends StatelessWidget {
+  const _StarPlaceholder();
+
+  @override
+  Widget build(BuildContext context) => const ColoredBox(
+    color: Slush.lilac,
+    child: CustomPaint(painter: _StarPainter(), size: Size.infinite),
+  );
+}
+
+class _StarPainter extends CustomPainter {
+  const _StarPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final r = size.shortestSide * .38;
+    final path = Path();
+    for (var i = 0; i < 8; i++) {
+      final a = -math.pi / 2 + math.pi * i / 4;
+      final rr = i.isEven ? r : r * .42;
+      final p = c + Offset(math.cos(a), math.sin(a)) * rr;
+      i == 0 ? path.moveTo(p.dx, p.dy) : path.lineTo(p.dx, p.dy);
+    }
+    path.close();
+    canvas.drawPath(path, Paint()..color = Slush.yellow);
+    final line = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3
+      ..strokeJoin = StrokeJoin.round
+      ..color = _ink;
+    canvas.drawPath(path, line);
+    final dot = Rect.fromCircle(center: c, radius: r * .26);
+    canvas.drawOval(dot, Paint()..color = Slush.orange);
+    canvas.drawOval(dot, line);
+  }
+
+  @override
+  bool shouldRepaint(_StarPainter old) => false;
+}
+
 class _ReasonPill extends StatelessWidget {
   const _ReasonPill(this.reason);
   final String reason;
@@ -346,19 +431,19 @@ class _RoundAction extends StatelessWidget {
       children: [
         Semantics(
           button: true,
-          label: label,
+          label: label.replaceAll('←', '').replaceAll('→', '').trim(),
           child: GestureDetector(
             onTap: onTap,
             child: Container(
-              width: 76,
-              height: 76,
+              width: 92,
+              height: 92,
               decoration: BoxDecoration(
                 color: color,
                 shape: BoxShape.circle,
                 border: Border.all(color: _ink, width: 2.5),
                 boxShadow: Slush.hardShadow,
               ),
-              child: Icon(icon, size: 34, color: Colors.white),
+              child: Icon(icon, size: 42, color: Colors.white),
             ),
           ),
         ),
@@ -456,25 +541,34 @@ class _SlushFilters extends StatelessWidget {
         children: [
           Text('Filtros', style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(height: 8),
-          Row(
-            children: [
-              Switch(
-                value: yt,
-                onChanged: c.setPersonalDjIncludeDiscovery,
-                trackColor: WidgetStateProperty.resolveWith(
-                  (s) => s.contains(WidgetState.selected)
-                      ? Slush.yellow
-                      : Colors.white,
-                ),
-              ),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text(
-                  'Novedades de YouTube',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
-                ),
-              ),
-            ],
+          _SwitchRow(
+            'Novedades de YouTube',
+            yt,
+            c.setPersonalDjIncludeDiscovery,
+          ),
+          _SwitchRow(
+            'Enfriar artistas',
+            c.djArtistCooldown,
+            c.setDjArtistCooldown,
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Diversidad',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+          ),
+          SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              thumbShape: const _DotThumb(),
+              trackHeight: 8,
+              activeTrackColor: _ink,
+              inactiveTrackColor: _ink,
+              overlayShape: SliderComponentShape.noOverlay,
+            ),
+            child: Slider(
+              value: c.djDiversity.clamp(0.0, djMaxDiversity),
+              max: djMaxDiversity,
+              onChanged: c.setDjDiversity,
+            ),
           ),
           const SizedBox(height: 8),
           const Text(
@@ -552,6 +646,68 @@ class _SlushFilters extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _SwitchRow extends StatelessWidget {
+  const _SwitchRow(this.label, this.value, this.onChanged);
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Switch(
+        value: value,
+        onChanged: onChanged,
+        trackColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? Slush.yellow : Colors.white,
+        ),
+      ),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Text(
+          label,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+        ),
+      ),
+    ],
+  );
+}
+
+/// Punto amarillo con borde negro para el slider.
+class _DotThumb extends SliderComponentShape {
+  const _DotThumb();
+  @override
+  Size getPreferredSize(bool isEnabled, bool isDiscrete) =>
+      const Size.fromRadius(10);
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset center, {
+    required Animation<double> activationAnimation,
+    required Animation<double> enableAnimation,
+    required bool isDiscrete,
+    required TextPainter labelPainter,
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required TextDirection textDirection,
+    required double value,
+    required double textScaleFactor,
+    required Size sizeWithOverflow,
+  }) {
+    final canvas = context.canvas;
+    canvas.drawCircle(center, 9, Paint()..color = Slush.yellow);
+    canvas.drawCircle(
+      center,
+      9,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5
+        ..color = _ink,
     );
   }
 }
