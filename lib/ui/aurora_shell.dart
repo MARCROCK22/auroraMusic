@@ -25,6 +25,7 @@ import 'desktop_settings_tiles.dart';
 import 'playlist_views/playlist_view_mode_tile.dart';
 import 'listenbrainz_settings_panel.dart';
 import '../jam/jam_controller.dart';
+import 'slush/slush_eq_queue.dart';
 import 'studio/equalizer_panel.dart';
 import 'studio/studio_navigation.dart';
 import 'slush/slush_bars.dart';
@@ -1273,6 +1274,13 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
           onSection: _navigate,
         );
       case 5:
+        if (isSlush(context) && MediaQuery.sizeOf(context).width >= 900) {
+          return SlushEqQueue(
+            controller: c,
+            onNavigate: _navigate,
+            showQueueTab: true,
+          );
+        }
         return _slushTabs(c, 5, QueuePanel(controller: c));
       case 6:
         return _slushTabs(
@@ -1290,6 +1298,9 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       case 8:
         return DjDiscoveryPage(controller: c, onSearch: () => _navigate(1));
       case 13:
+        if (isSlush(context) && MediaQuery.sizeOf(context).width >= 900) {
+          return SlushEqQueue(controller: c, onNavigate: _navigate);
+        }
         return _slushTabs(
           c,
           13,
