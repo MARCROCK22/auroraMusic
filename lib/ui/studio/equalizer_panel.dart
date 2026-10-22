@@ -10,6 +10,8 @@ import '../../audio/equalizer_controller.dart';
 import '../../theme/brasa_theme.dart';
 import '../../theme/modern_theme.dart';
 import '../../theme/modern_widgets.dart';
+import '../../theme/slush_theme.dart';
+import '../slush/slush_eq_queue.dart';
 import 'studio_components.dart';
 import 'studio_symbols.dart';
 
@@ -45,7 +47,15 @@ String eqGainLabel(double db) => '${db > 0 ? '+' : ''}${db.toStringAsFixed(1)}';
 /// ocho bandas y ajuste fino de la banda elegida. Es el único panel de EQ de
 /// la aplicación (lateral, hoja de la barra y Ajustes).
 class EqualizerPanel extends StatefulWidget {
-  const EqualizerPanel({super.key, required this.controller, this.onClose});
+  const EqualizerPanel({
+    super.key,
+    required this.controller,
+    this.onClose,
+    this.slushBoard = false,
+  });
+
+  /// Layout Slush completo (pantalla EQ + Cola); false = versión compacta.
+  final bool slushBoard;
   final AppController controller;
   final VoidCallback? onClose;
   @override
@@ -114,7 +124,22 @@ class _EqualizerPanelState extends State<EqualizerPanel> {
   }
 
   @override
-  Widget build(BuildContext context) => isBrasa(context)
+  Widget build(BuildContext context) => widget.slushBoard && isSlush(context)
+      ? ListenableBuilder(
+          listenable: _eq,
+          builder: (context, _) => SlushEqBoard(
+            eq: _eq,
+            webPlayback: widget.controller.webPlayback,
+            selected: _selected,
+            onSelect: (i) => setState(() => _selected = i),
+            onEngage: _engage,
+            onSave: _save,
+            onImport: _import,
+            onExport: _export,
+            message: _message,
+          ),
+        )
+      : isBrasa(context)
       ? DecoratedBox(
           decoration: BoxDecoration(
             color: Brasa.obsidian,
