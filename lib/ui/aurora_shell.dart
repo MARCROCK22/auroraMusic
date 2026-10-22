@@ -26,6 +26,7 @@ import 'listenbrainz_settings_panel.dart';
 import '../jam/jam_controller.dart';
 import 'studio/equalizer_panel.dart';
 import 'studio/studio_navigation.dart';
+import 'slush/slush_bars.dart';
 import 'studio/studio_transport.dart';
 import 'studio/session_aside.dart';
 import 'studio/downloads_studio_page.dart';
@@ -552,6 +553,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
               final desktop = size.maxWidth >= 1200;
               final rail = size.maxWidth >= 600;
               final brasa = isBrasa(context);
+              final slushBar = isSlush(context) && rail;
               final jamOn =
                   _jam?.service.connected == true ||
                   _jam?.service.reconnecting == true;
@@ -559,7 +561,15 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                 body: SafeArea(
                   child: Column(
                     children: [
-                      if (rail || WindowControls.supported)
+                      if (slushBar)
+                        SlushTopBar(
+                          selected: _section,
+                          onNavigate: _navigate,
+                          sessionText: jamOn ? 'JAM ACTIVA' : 'INICIAR JAM',
+                          onSession: jamOn ? _openJamPanel : _startJam,
+                          onAdd: () => _createPlaylist(c),
+                        )
+                      else if (rail || WindowControls.supported)
                         StudioTitleBar(
                           onNavigate: _navigate,
                           avatar: c.profileAvatar,
@@ -590,11 +600,12 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                       Expanded(
                         child: Row(
                           children: [
-                            if (rail) _sidebar(c, wide),
+                            if (rail && !slushBar) _sidebar(c, wide),
                             Expanded(
                               child: Column(
                                 children: [
                                   if (!(brasa && rail) &&
+                                      !(slushBar && _section == 0) &&
                                       (!wide || ![0, 3, 6].contains(_section)))
                                     _header(c, rail),
                                   if (!c.ready || c.busy)
@@ -631,6 +642,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                               ),
                             ),
                             if (desktop &&
+                                !slushBar &&
                                 !c.jamPlaybackActive &&
                                 _section != 3 &&
                                 _section != 4 &&
@@ -657,6 +669,16 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                       ),
                       if (_section == 10 && c.usesOfficialYouTubeMusic)
                         const SizedBox.shrink()
+                      else if (slushBar && !c.jamPlaybackActive)
+                        SlushPlayerBar(
+                          controller: c,
+                          onLyrics: () => _showLyrics(c),
+                          onVinyl: () => _navigate(4),
+                          onQueue: () => _navigate(5),
+                          onEqualizer: () => _navigate(13),
+                          onSettings: () => _navigate(7),
+                          onOpenPlayer: () => _showPlayer(c),
+                        )
                       else
                         StudioTransport(
                           shortcuts: ref.watch(shortcutServiceProvider),

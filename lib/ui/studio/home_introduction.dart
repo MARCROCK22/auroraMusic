@@ -11,6 +11,7 @@ import '../../theme/modern_widgets.dart';
 import '../../theme/slush_theme.dart';
 import '../../theme/slush_widgets.dart';
 import '../artwork.dart';
+import '../slush/slush_home.dart';
 import 'studio_components.dart';
 import 'studio_symbols.dart';
 
@@ -227,133 +228,9 @@ class StudioHomeIntroduction extends StatelessWidget {
     );
   }
 
-  /// Slush: «PARA TI.» gigante sobre la onda azul, tarjeta lila «Mix del día»
-  /// y botones en píldora.
-  Widget _slush(BuildContext context, Track? track) {
-    final c = controller;
-    final narrow = MediaQuery.sizeOf(context).width < 700;
-    final mix = c.recommendations.map((r) => r.track).toList();
-    final pool = mix.isNotEmpty
-        ? mix
-        : c.tracks.where((t) => !t.isPendingSpotifyMatch).toList();
-    final headline = Stack(
-      clipBehavior: Clip.none,
-      children: [
-        const Positioned(
-          left: -32,
-          right: -32,
-          top: 60,
-          child: SlushWave(height: 150),
-        ),
-        Text(
-          'PARA\nTI.',
-          style: Theme.of(context).textTheme.displayLarge?.copyWith(
-            fontSize: narrow ? 96 : 190,
-            height: .85,
-            letterSpacing: -4,
-          ),
-        ),
-        const Positioned(
-          right: 0,
-          top: 0,
-          child: SlushSticker('NUEVO', size: 84),
-        ),
-      ],
-    );
-    final card = DecoratedBox(
-      decoration: BoxDecoration(
-        color: Slush.lilac,
-        borderRadius: BorderRadius.circular(28),
-        border: Border.fromBorderSide(Slush.border),
-        boxShadow: Slush.hardShadow,
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (track != null)
-              Artwork(
-                track: track,
-                artworkContext: ArtworkContext.card,
-                radius: 16,
-              ),
-            const SizedBox(height: 10),
-            const Text(
-              'MIX DEL DÍA',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
-            ),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '${pool.length} canciones',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                IconButton.filled(
-                  tooltip: 'Reproducir mix',
-                  onPressed: pool.isEmpty
-                      ? null
-                      : () => c.playTrack(pool.first, context: pool),
-                  icon: const Icon(Icons.play_arrow_rounded),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-    final buttons = Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        FilledButton.icon(
-          onPressed: pool.isEmpty
-              ? onSearch
-              : () => c.playTrack(pool.first, context: pool),
-          icon: const Icon(Icons.play_arrow_rounded),
-          label: const Text('Reproducir todo'),
-        ),
-        OutlinedButton.icon(
-          onPressed: () => c.startDjSession(),
-          icon: const Icon(Icons.auto_awesome),
-          label: const Text('Abrir DJ'),
-        ),
-        OutlinedButton.icon(
-          onPressed: c.refreshRecommendations,
-          icon: const Icon(Icons.refresh),
-          label: const Text('Actualizar'),
-        ),
-      ],
-    );
-    final left = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        headline,
-        const SizedBox(height: 16),
-        const Text(
-          'Una mezcla de tus favoritos, listas y escuchas recientes.',
-          style: TextStyle(fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 16),
-        buttons,
-      ],
-    );
-    if (narrow || track == null) return left;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Expanded(flex: 3, child: left),
-        const SizedBox(width: 32),
-        Expanded(flex: 2, child: Transform.rotate(angle: .05, child: card)),
-      ],
-    );
-  }
+  /// Slush: inicio fiel al diseño (ver slush_home.dart).
+  Widget _slush(BuildContext context, Track? track) =>
+      SlushHome(controller: controller, onSearch: onSearch);
 
   Widget _modern(BuildContext context, Track? track) {
     final width = MediaQuery.sizeOf(context).width;
