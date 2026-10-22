@@ -10,6 +10,7 @@ import '../theme/modern_theme.dart';
 import '../theme/modern_widgets.dart';
 import '../theme/slush_theme.dart';
 import 'artwork.dart';
+import 'slush/slush_decor.dart';
 import 'slush/slush_mobile.dart';
 import 'studio/home_introduction.dart';
 import 'studio/studio_components.dart';
@@ -68,6 +69,17 @@ class HomeMusicPage extends StatelessWidget {
       }
       return LayoutBuilder(
         builder: (context, bounds) {
+          if (isSlush(context)) {
+            return _slush(
+              context,
+              c,
+              bounds.maxWidth,
+              recommendations,
+              recommendedTracks,
+              personalized,
+              followed,
+            );
+          }
           final recentWidth = modern
               ? 220.0
               : bounds.maxWidth >= 560
@@ -238,6 +250,209 @@ class HomeMusicPage extends StatelessWidget {
       );
     },
   );
+
+  /// Slush: bandas de color planas alternadas, encabezados enormes y espacio
+  /// final para que la barra inferior no tape nada.
+  Widget _slush(
+    BuildContext context,
+    AppController c,
+    double width,
+    List<TrackRecommendation> recommendations,
+    List<Track> recommendedTracks,
+    bool personalized,
+    List<FollowedArtist> followed,
+  ) {
+    final text = MediaQuery.textScalerOf(context);
+    final compact = width < 600;
+    final theme = Theme.of(context);
+    var i = 0;
+    Widget band(Widget child) => Padding(
+      padding: const EdgeInsets.only(bottom: 28),
+      child: SlushBand(
+        tone: SlushBand.tones[i++ % SlushBand.tones.length],
+        padding: EdgeInsets.all(compact ? 14 : 22),
+        child: Theme(
+          data: theme.copyWith(
+            textTheme: theme.textTheme.copyWith(
+              titleLarge: const TextStyle(
+                fontFamily: 'Bagel Fat One',
+                fontSize: 36,
+                height: 1,
+                color: Slush.ink,
+              ),
+            ),
+          ),
+          child: child,
+        ),
+      ),
+    );
+    final itemW = compact ? 170.0 : 200.0;
+    return ListView(
+      padding: EdgeInsets.fromLTRB(
+        compact ? 16 : 32,
+        compact ? 8 : 24,
+        compact ? 16 : 32,
+        140,
+      ),
+      children: [
+        if (compact)
+          SlushMobileHome(controller: c, onSearch: onSearch)
+        else ...[
+          StudioHomeIntroduction(
+            controller: c,
+            onSearch: onSearch,
+            onSearchQuery: onSearchQuery,
+            onVinyl: onVinyl ?? onSearch,
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              SlushChip('TODO', selected: true, onTap: () {}),
+              SlushChip(
+                'DESCARGAS LOCALES',
+                icon: Icons.download_outlined,
+                color: Slush.yellow,
+                onTap: onDownloads,
+              ),
+              SlushChip(
+                'FAVORITOS',
+                icon: Icons.favorite_border,
+                color: Slush.mint,
+                onTap: onLikes,
+              ),
+            ],
+          ),
+        ],
+        const SizedBox(height: 28),
+        if (c.recentTracks.isNotEmpty && !compact)
+          band(
+            HorizontalMusicRow(
+              key: const ValueKey('home-recent'),
+              title: 'Hace poco',
+              subtitle: 'Continúa donde lo dejaste',
+              itemWidth: 260,
+              itemCount: c.recentTracks.length,
+              itemHeight: 238 + text.scale(72),
+              itemBuilder: (context, index) => _RecentSleeve(
+                controller: c,
+                track: c.recentTracks[index],
+                actionLabel: 'Reanudar',
+                onPlay: () =>
+                    _play(context, c.recentTracks[index], c.recentTracks),
+              ),
+            ),
+          ),
+        band(
+          recommendations.isNotEmpty
+              ? HorizontalMusicRow(
+                  key: const ValueKey('home-recommendations'),
+                  title: 'Para ti',
+                  subtitle: personalized
+                      ? 'Basado en tus favoritos, listas y escucha reciente'
+                      : 'Aún no hay señales personales; elegimos de tu biblioteca',
+                  itemCount: recommendations.length,
+                  itemWidth: itemW,
+                  itemHeight: 228 + text.scale(136),
+                  itemBuilder: (context, index) => _TrackCard(
+                    controller: c,
+                    track: recommendations[index].track,
+                    reason: recommendations[index].reason,
+                    actionLabel: 'Reproducir',
+                    onPlay: () => _play(
+                      context,
+                      recommendations[index].track,
+                      recommendedTracks,
+                      replaceQueue: false,
+                    ),
+                  ),
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Para ti', style: theme.textTheme.titleLarge),
+                    const SizedBox(height: 8),
+                    Text(
+                      c.tracks.isEmpty
+                          ? 'Añade canciones reproducibles y aparecerán recomendaciones aquí.'
+                          : 'No hay recomendaciones disponibles con tus filtros y escucha actual.',
+                    ),
+                  ],
+                ),
+        ),
+        band(DjPanel(controller: c, showRecommendations: false)),
+        if (c.discoveredRecommendations.isNotEmpty)
+          band(
+            HorizontalMusicRow(
+              title: 'Encontradas en YouTube',
+              subtitle: 'Búsqueda solicitada por ti',
+              itemCount: c.discoveredRecommendations.length,
+              itemWidth: itemW,
+              itemHeight: 220 + text.scale(72),
+              itemBuilder: (context, index) => _TrackCard(
+                controller: c,
+                track: c.discoveredRecommendations[index],
+                actionLabel: 'Reproducir',
+                onPlay: () => _play(
+                  context,
+                  c.discoveredRecommendations[index],
+                  c.discoveredRecommendations,
+                  replaceQueue: false,
+                ),
+              ),
+            ),
+          ),
+        if (c.playlists.isNotEmpty)
+          band(
+            PlaylistShelf(
+              controller: c,
+              horizontal: true,
+              onOpen: onOpenPlaylist,
+            ),
+          ),
+        if (followed.isNotEmpty)
+          band(
+            HorizontalMusicRow(
+              key: const ValueKey('home-artists'),
+              title: 'Tus artistas',
+              itemCount: followed.length,
+              itemWidth: itemW,
+              itemHeight: 228 + text.scale(120),
+              itemBuilder: (context, index) =>
+                  _followedCard(c, followed[index]),
+            ),
+          ),
+        if (c.tracks.isNotEmpty)
+          band(
+            HorizontalMusicRow(
+              key: const ValueKey('home-library'),
+              title: 'Tu colección',
+              subtitle:
+                  '${c.tracks.length} canciones · ${c.playlists.length} listas',
+              itemCount: c.tracks.length,
+              itemWidth: itemW,
+              itemHeight: 220 + text.scale(72),
+              itemBuilder: (context, index) => _TrackCard(
+                controller: c,
+                track: c.tracks[index],
+                actionLabel: 'Escuchar',
+                onPlay: () => _play(context, c.tracks[index], c.tracks),
+              ),
+            ),
+          )
+        else
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: c.importFiles,
+              icon: const Icon(Icons.add),
+              label: const Text('Añadir música a tu biblioteca'),
+            ),
+          ),
+      ],
+    );
+  }
 
   Widget _brasa(
     BuildContext context,

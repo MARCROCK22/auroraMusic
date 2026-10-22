@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../theme/brasa_theme.dart';
+import '../theme/slush_theme.dart';
 
 /// A bounded music shelf. Native pointer handling keeps vertical wheel events
 /// with the surrounding page; Shift + wheel and trackpad x deltas move the row.
@@ -133,7 +134,17 @@ class _HorizontalMusicRowState extends State<HorizontalMusicRow> {
               ],
             )
           else
-            Text(widget.title, style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              widget.title,
+              style: isSlush(context)
+                  ? const TextStyle(
+                      fontFamily: 'Bagel Fat One',
+                      fontSize: 36,
+                      height: 1,
+                      color: Slush.ink,
+                    )
+                  : Theme.of(context).textTheme.titleLarge,
+            ),
           if (widget.subtitle != null) ...[
             const SizedBox(height: 6),
             Text(
