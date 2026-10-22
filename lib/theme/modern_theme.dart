@@ -70,8 +70,8 @@ ThemeData modernTheme(Brightness brightness, Color accent) {
             : const Color(0xff4d5160),
         outline: dark ? const Color(0xff8a91b3) : const Color(0xff6d6f75),
         outlineVariant: dark
-            ? const Color(0xff4a5275)
-            : const Color(0xffc4c2be),
+            ? const Color(0xff6a739b)
+            : const Color(0xff8c8a85),
       );
 
   // Guía Tracky: GRIFTER (sustituta libre: Bagel Fat One) solo en títulos
@@ -137,7 +137,11 @@ ThemeData modernTheme(Brightness brightness, Color accent) {
     fontFamily: font,
     textTheme: textTheme,
     scaffoldBackgroundColor: scheme.surface,
-    dividerTheme: DividerThemeData(color: scheme.outlineVariant, thickness: 1),
+    // Las líneas finas siguen suaves; los bordes de controles usan outline.
+    dividerTheme: DividerThemeData(
+      color: dark ? const Color(0xff4a5275) : const Color(0xffc4c2be),
+      thickness: 1,
+    ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         minimumSize: const Size(0, 44),
@@ -150,6 +154,7 @@ ThemeData modernTheme(Brightness brightness, Color accent) {
       style:
           OutlinedButton.styleFrom(
             minimumSize: const Size(0, 44),
+            backgroundColor: scheme.surfaceContainerLow,
             shape: shape(8),
           ).copyWith(
             overlayColor: overlay,
@@ -160,7 +165,7 @@ ThemeData modernTheme(Brightness brightness, Color accent) {
                     : s.contains(WidgetState.focused)
                     ? states.focusRing
                     : scheme.outline,
-                width: s.contains(WidgetState.focused) ? 2 : 1,
+                width: s.contains(WidgetState.focused) ? 2 : 1.5,
               ),
             ),
           ),
@@ -172,7 +177,7 @@ ThemeData modernTheme(Brightness brightness, Color accent) {
       ).copyWith(overlayColor: overlay),
     ),
     chipTheme: ChipThemeData(
-      backgroundColor: scheme.surfaceContainerHigh,
+      backgroundColor: scheme.surfaceContainerHighest,
       selectedColor: scheme.primary,
       checkmarkColor: scheme.onPrimary,
       labelStyle: TextStyle(
@@ -183,12 +188,14 @@ ThemeData modernTheme(Brightness brightness, Color accent) {
         color: scheme.onPrimary,
         fontWeight: FontWeight.w500,
       ),
-      side: BorderSide(color: scheme.outline),
+      side: BorderSide(color: scheme.outline, width: 1.5),
       shape: shape(8),
     ),
     segmentedButtonTheme: SegmentedButtonThemeData(
       style: ButtonStyle(
-        side: WidgetStateProperty.all(BorderSide(color: scheme.outline)),
+        side: WidgetStateProperty.all(
+          BorderSide(color: scheme.outline, width: 1.5),
+        ),
         overlayColor: overlay,
         foregroundColor: WidgetStateProperty.resolveWith(
           (s) => s.contains(WidgetState.selected)
@@ -198,7 +205,7 @@ ThemeData modernTheme(Brightness brightness, Color accent) {
         backgroundColor: WidgetStateProperty.resolveWith(
           (s) => s.contains(WidgetState.selected)
               ? scheme.primary
-              : scheme.surfaceContainerHigh,
+              : scheme.surfaceContainerHighest,
         ),
       ),
     ),
@@ -211,13 +218,13 @@ ThemeData modernTheme(Brightness brightness, Color accent) {
       trackColor: WidgetStateProperty.resolveWith(
         (s) => s.contains(WidgetState.selected)
             ? scheme.primary
-            : scheme.surfaceContainerHigh,
+            : scheme.surfaceContainerHighest,
       ),
       trackOutlineColor: WidgetStateProperty.resolveWith(
-        (s) => s.contains(WidgetState.selected)
-            ? scheme.primary
-            : scheme.outline,
+        (s) =>
+            s.contains(WidgetState.selected) ? scheme.primary : scheme.outline,
       ),
+      trackOutlineWidth: WidgetStateProperty.all(1.5),
     ),
     appBarTheme: const AppBarTheme(
       backgroundColor: Colors.transparent,
@@ -246,8 +253,8 @@ ThemeData modernTheme(Brightness brightness, Color accent) {
       surfaceTintColor: Colors.transparent,
     ),
     listTileTheme: ListTileThemeData(
-      selectedColor: states.onSelected,
-      selectedTileColor: states.selected,
+      selectedColor: scheme.onSecondaryContainer,
+      selectedTileColor: scheme.secondaryContainer,
       iconColor: scheme.onSurfaceVariant,
       shape: shape(8),
     ),

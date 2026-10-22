@@ -151,40 +151,49 @@ class _RailItem extends StatelessWidget {
         : active
         ? colors.onSecondaryContainer
         : colors.onSurface;
-    final inactive = slush
-        ? Colors.white
-        : colors.surfaceContainerHigh.withValues(alpha: .6);
+    final inactive = slush ? Colors.white : colors.surfaceContainerLow;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Material(
-        color: active ? colors.secondaryContainer : inactive,
-        shape: slush
-            ? const StadiumBorder(side: Slush.border)
-            : RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-                side: BorderSide(
-                  color: active ? colors.secondary : colors.outlineVariant,
-                ),
-              ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(
-              children: [
-                Icon(icon, size: 20, color: fg),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      color: fg,
-                      fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-                    ),
+      padding: const EdgeInsets.only(bottom: 8, right: 4),
+      child: DecoratedBox(
+        decoration: slush && active
+            ? const ShapeDecoration(
+                shape: StadiumBorder(),
+                shadows: Slush.hardShadow,
+              )
+            : const BoxDecoration(),
+        child: Material(
+          color: active ? colors.secondaryContainer : inactive,
+          shape: slush
+              ? const StadiumBorder(side: Slush.border)
+              : RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: BorderSide(
+                    color: active
+                        ? colors.onSecondaryContainer
+                        : colors.outline,
+                    width: active ? 2 : 1.5,
                   ),
                 ),
-              ],
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  Icon(icon, size: 20, color: fg),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        color: fg,
+                        fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

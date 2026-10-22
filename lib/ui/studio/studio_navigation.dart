@@ -562,31 +562,45 @@ class StudioSidebar extends StatelessWidget {
                     PlaylistPhotoMenu(
                       controller: controller,
                       playlist: playlist,
-                      child: TextButton(
-                      style: TextButton.styleFrom(
-                        alignment: Alignment.centerLeft,
-                        foregroundColor: colors.onSurfaceVariant,
-                      ),
-                      onPressed: () => onPlaylist(playlist),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.circle,
-                            color: colors.onSurfaceVariant,
-                            size: 10,
+                      child: Padding(
+                        // Margen para que el contorno de 2 px no se recorte.
+                        padding: isSlush(context)
+                            ? const EdgeInsets.fromLTRB(2, 3, 2, 3)
+                            : EdgeInsets.zero,
+                        child: TextButton(
+                          style: TextButton.styleFrom(
+                            alignment: Alignment.centerLeft,
+                            foregroundColor: isSlush(context)
+                                ? Slush.ink
+                                : colors.onSurfaceVariant,
+                            backgroundColor: isSlush(context)
+                                ? Colors.white
+                                : null,
+                            shape: isSlush(context)
+                                ? const StadiumBorder(side: Slush.border)
+                                : null,
                           ),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              playlist.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 12),
-                            ),
+                          onPressed: () => onPlaylist(playlist),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.circle,
+                                color: colors.onSurfaceVariant,
+                                size: 10,
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  playlist.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
-                    ),
                     ),
                   if (controller.playlists.isEmpty)
                     const Padding(

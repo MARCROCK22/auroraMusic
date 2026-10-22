@@ -107,10 +107,10 @@ ThemeData slushTheme(Brightness brightness, Color accent) {
     borderSide: BorderSide(color: ink, width: w),
   );
   const heavy = TextStyle(fontFamily: font, fontWeight: FontWeight.w800);
-  // Hover amarillo, pulsado menta: se ve sobre blanco y sobre el fondo pastel.
+  // Hover amarillo, pulsado lila: se ve sobre blanco, menta y el fondo pastel.
   final overlay = WidgetStateProperty.resolveWith<Color?>(
     (s) => s.contains(WidgetState.pressed)
-        ? Slush.mint.withValues(alpha: .7)
+        ? Slush.lilac.withValues(alpha: .85)
         : s.contains(WidgetState.hovered) || s.contains(WidgetState.focused)
         ? Slush.yellow.withValues(alpha: .55)
         : null,
@@ -161,7 +161,11 @@ ThemeData slushTheme(Brightness brightness, Color accent) {
         textStyle: WidgetStateProperty.all(heavy),
         overlayColor: overlay,
         backgroundColor: WidgetStateProperty.resolveWith(
-          (s) => s.contains(WidgetState.selected) ? Slush.mint : Colors.white,
+          (s) => s.contains(WidgetState.selected)
+              ? Slush.mint
+              : s.contains(WidgetState.hovered)
+              ? Slush.yellow
+              : Colors.white,
         ),
       ),
     ),
@@ -186,6 +190,19 @@ ThemeData slushTheme(Brightness brightness, Color accent) {
     chipTheme: ChipThemeData(
       backgroundColor: Colors.white,
       selectedColor: Slush.mint,
+      elevation: 0,
+      pressElevation: 0,
+      color: WidgetStateProperty.resolveWith(
+        (s) => s.contains(WidgetState.disabled)
+            ? const Color(0xffe6e6e6)
+            : s.contains(WidgetState.selected)
+            ? Slush.mint
+            : s.contains(WidgetState.pressed)
+            ? Slush.lilac
+            : s.contains(WidgetState.hovered)
+            ? Slush.yellow
+            : Colors.white,
+      ),
       disabledColor: const Color(0xffe6e6e6),
       labelStyle: heavy.copyWith(color: ink),
       secondaryLabelStyle: heavy.copyWith(color: ink),
@@ -243,7 +260,7 @@ ThemeData slushTheme(Brightness brightness, Color accent) {
     switchTheme: SwitchThemeData(
       thumbColor: WidgetStateProperty.all(ink),
       trackColor: WidgetStateProperty.resolveWith(
-        (s) => s.contains(WidgetState.selected) ? Slush.mint : Colors.white,
+        (s) => s.contains(WidgetState.selected) ? Slush.mint : Slush.lilac,
       ),
       trackOutlineColor: WidgetStateProperty.all(ink),
       trackOutlineWidth: WidgetStateProperty.all(2),
@@ -251,9 +268,9 @@ ThemeData slushTheme(Brightness brightness, Color accent) {
     sliderTheme: const SliderThemeData(
       trackHeight: 6,
       activeTrackColor: ink,
-      thumbColor: Slush.yellow,
-      inactiveTrackColor: Color(0xff767676),
-      overlayColor: Color(0x22000000),
+      thumbColor: Slush.violet,
+      inactiveTrackColor: Color(0xff5c5c5c),
+      overlayColor: Color(0x335b3fe0),
     ),
     progressIndicatorTheme: const ProgressIndicatorThemeData(
       color: ink,
