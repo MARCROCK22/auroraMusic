@@ -8,6 +8,7 @@ import 'aurora_states.dart';
 import '../theme/brasa_theme.dart';
 import '../theme/slush_theme.dart';
 import 'slush/slush_player.dart';
+import 'slush/slush_mobile.dart';
 import '../theme/modern_theme.dart';
 import '../theme/modern_widgets.dart';
 import 'package:flutter/services.dart';
@@ -669,7 +670,8 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                           ],
                         ),
                       ),
-                      if (_section == 10 && c.usesOfficialYouTubeMusic)
+                      if (_section == 10 && c.usesOfficialYouTubeMusic ||
+                          (!rail && isSlush(context) && !c.jamPlaybackActive))
                         const SizedBox.shrink()
                       else if (slushBar && !c.jamPlaybackActive)
                         SlushPlayerBar(
@@ -698,6 +700,34 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                 ),
                 bottomNavigationBar: rail
                     ? null
+                    : isSlush(context)
+                    ? SlushBottomBar(
+                        icons: [
+                          for (final s in _primarySections)
+                            switch (s) {
+                              8 => Icons.auto_awesome,
+                              2 => Icons.queue_music,
+                              _ => _icons[s],
+                            },
+                        ],
+                        labels: [
+                          for (final s in _primarySections) _sections[s],
+                        ],
+                        selected: math.max(
+                          0,
+                          _primarySections.indexOf(_section),
+                        ),
+                        onSelect: (i) => _navigate(_primarySections[i]),
+                        mini:
+                            c.jamPlaybackActive ||
+                                (_section == 10 && c.usesOfficialYouTubeMusic)
+                            ? null
+                            : SlushMiniPlayer(
+                                controller: c,
+                                onOpen: () => _showPlayer(c),
+                                onToggle: () => _togglePlay(c),
+                              ),
+                      )
                     : NavigationBar(
                         selectedIndex: math.max(
                           0,
@@ -985,7 +1015,12 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     );
   }
 
-  Widget _header(AppController c, bool rail) => Padding(
+  Widget _header(AppController c, bool rail) =>
+      !rail && _section == 0 && _playlist == null && isSlush(context)
+      ? SlushMobileTopBar(onSettings: () => _navigate(7), onMore: _navigate)
+      : _headerBar(c, rail);
+
+  Widget _headerBar(AppController c, bool rail) => Padding(
     padding: EdgeInsets.fromLTRB(
       rail ? 32 : 20,
       isModern(context) ? 28 : 18,
