@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'aurora_states.dart';
 import '../theme/brasa_theme.dart';
 import '../theme/slush_theme.dart';
+import 'slush/slush_player.dart';
 import '../theme/modern_theme.dart';
 import '../theme/modern_widgets.dart';
 import 'package:flutter/services.dart';
@@ -1242,6 +1243,21 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     ],
   );
 
+  /// Slush: pestañas del reproductor (Vinilo/Letras/EQ/Cola) sobre la sección.
+  Widget _slushTabs(AppController c, int section, Widget child) =>
+      isSlush(context)
+      ? Column(
+          children: [
+            SlushPlayerHeader(
+              controller: c,
+              current: section,
+              onSection: _navigate,
+            ),
+            Expanded(child: child),
+          ],
+        )
+      : child;
+
   Widget _page(AppController c) {
     switch (_section) {
       case 1:
@@ -1254,24 +1270,33 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         return VinylPlayer(
           controller: c,
           follow: ref.read(followServiceProvider),
+          onSection: _navigate,
         );
       case 5:
-        return QueuePanel(controller: c);
+        return _slushTabs(c, 5, QueuePanel(controller: c));
       case 6:
-        return LyricsPanel(
-          controller: c,
-          jam: _jam,
-          shortcuts: ref.read(shortcutServiceProvider),
-          onClose: () => _navigate(0),
+        return _slushTabs(
+          c,
+          6,
+          LyricsPanel(
+            controller: c,
+            jam: _jam,
+            shortcuts: ref.read(shortcutServiceProvider),
+            onClose: () => _navigate(0),
+          ),
         );
       case 7:
         return _settings(c);
       case 8:
         return DjDiscoveryPage(controller: c, onSearch: () => _navigate(1));
       case 13:
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: EqualizerPanel(controller: c, onClose: () => _navigate(0)),
+        return _slushTabs(
+          c,
+          13,
+          SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: EqualizerPanel(controller: c, onClose: () => _navigate(0)),
+          ),
         );
       case 12:
         return ArtistsPage(

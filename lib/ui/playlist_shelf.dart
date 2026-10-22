@@ -145,32 +145,33 @@ class _PlaylistShelfState extends State<PlaylistShelf> {
         return SizedBox(
           width: 180,
           child: BrasaTile(
-            cover: photo(156, 6) ??
+            cover:
+                photo(156, 6) ??
                 (tracks.isEmpty
-                ? const SizedBox.square(
-                    dimension: 156,
-                    child: Icon(Icons.queue_music, size: 48),
-                  )
-                : tracks.length < 4
-                ? Artwork(
-                    track: tracks.first,
-                    artworkContext: ArtworkContext.card,
-                    radius: 6,
-                  )
-                : ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: Wrap(
-                      children: [
-                        for (final t in tracks)
-                          Artwork(
-                            track: t,
-                            artworkContext: ArtworkContext.mosaic,
-                            size: 78,
-                            radius: 0,
-                          ),
-                      ],
-                    ),
-                  )),
+                    ? const SizedBox.square(
+                        dimension: 156,
+                        child: Icon(Icons.queue_music, size: 48),
+                      )
+                    : tracks.length < 4
+                    ? Artwork(
+                        track: tracks.first,
+                        artworkContext: ArtworkContext.card,
+                        radius: 6,
+                      )
+                    : ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Wrap(
+                          children: [
+                            for (final t in tracks)
+                              Artwork(
+                                track: t,
+                                artworkContext: ArtworkContext.mosaic,
+                                size: 78,
+                                radius: 0,
+                              ),
+                          ],
+                        ),
+                      )),
             title: playlist.name,
             subtitle: '${playlist.trackIds.length} canciones',
             tooltip: 'Abrir ${playlist.name}',

@@ -114,59 +114,59 @@ class _BrasaSidebarPlaylistsState extends State<BrasaSidebarPlaylists> {
                         controller: widget.controller,
                         playlist: p,
                         child: Material(
-                        color: Colors.transparent,
-                        borderRadius: BorderRadius.circular(6),
-                        clipBehavior: Clip.antiAlias,
-                        child: InkWell(
-                          hoverColor: Brasa.graphite,
-                          onTap: () => widget.onPlaylist(p),
-                          child: Padding(
-                            padding: const EdgeInsets.all(6),
-                            child: Row(
-                              children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(4),
-                                  child: PlaylistCover(
-                                    playlist: p,
-                                    tracks: playlistCoverTracks(
-                                      widget.controller,
-                                      p,
+                          color: Colors.transparent,
+                          borderRadius: BorderRadius.circular(6),
+                          clipBehavior: Clip.antiAlias,
+                          child: InkWell(
+                            hoverColor: Brasa.graphite,
+                            onTap: () => widget.onPlaylist(p),
+                            child: Padding(
+                              padding: const EdgeInsets.all(6),
+                              child: Row(
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(4),
+                                    child: PlaylistCover(
+                                      playlist: p,
+                                      tracks: playlistCoverTracks(
+                                        widget.controller,
+                                        p,
+                                      ),
+                                      size: 44,
                                     ),
-                                    size: 44,
                                   ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        p.name,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w600,
-                                          color: Brasa.cream,
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          p.name,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            color: Brasa.cream,
+                                          ),
                                         ),
-                                      ),
-                                      Text(
-                                        n == 1 ? '1 canción' : '$n canciones',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          color: Brasa.steel,
+                                        Text(
+                                          n == 1 ? '1 canción' : '$n canciones',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            color: Brasa.steel,
+                                          ),
                                         ),
-                                      ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
-                        ),
                         ),
                       );
                     },
