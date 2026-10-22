@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../listenbrainz/listenbrainz_service.dart';
 import '../listenbrainz/scrobbler.dart';
+import '../theme/brasa_theme.dart';
 
 /// Ajustes de ListenBrainz: opcional, apagado por defecto. El token se pega en
 /// un campo oculto, se valida (solo se muestra el usuario) y se guarda en el
@@ -85,6 +86,8 @@ class _State extends State<ListenBrainzSettingsPanel> {
           ],
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
+            activeTrackColor: isBrasa(context) ? Brasa.cream : null,
+            activeThumbColor: isBrasa(context) ? Brasa.void_ : null,
             title: const Text('Enviar mi historial a ListenBrainz'),
             subtitle: Text(
               s.hasToken

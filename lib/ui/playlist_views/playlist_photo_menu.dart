@@ -1,0 +1,83 @@
+import 'package:flutter/material.dart';
+
+import '../../app_controller.dart';
+import '../../core/models.dart';
+
+/// Abre el selector y avisa con un SnackBar si falla; lo usan todos los puntos de entrada.
+Future<void> changePlaylistPhoto(
+  BuildContext context,
+  AppController controller,
+  MusicPlaylist playlist,
+) async {
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  final error = await controller.pickPlaylistPhoto(playlist);
+  if (error != null) messenger?.showSnackBar(SnackBar(content: Text(error)));
+}
+
+/// Menú «Cambiar foto» / «Quitar foto» en la posición indicada.
+Future<void> showPlaylistPhotoMenu(
+  BuildContext context,
+  AppController controller,
+  MusicPlaylist playlist,
+  Offset globalPosition,
+) async {
+  final latest =
+      controller.playlists
+          .where((item) => item.id == playlist.id)
+          .firstOrNull ??
+      playlist;
+  final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+  final choice = await showMenu<String>(
+    context: context,
+    position: RelativeRect.fromRect(
+      globalPosition & const Size(1, 1),
+      Offset.zero & overlay.size,
+    ),
+    items: [
+      const PopupMenuItem(
+        value: 'change',
+        child: ListTile(
+          leading: Icon(Icons.photo_camera_outlined),
+          title: Text('Cambiar foto'),
+        ),
+      ),
+      if (latest.photoPath != null)
+        const PopupMenuItem(
+          value: 'remove',
+          child: ListTile(
+            leading: Icon(Icons.hide_image_outlined),
+            title: Text('Quitar foto'),
+          ),
+        ),
+    ],
+  );
+  if (!context.mounted) return;
+  if (choice == 'change') {
+    await changePlaylistPhoto(context, controller, latest);
+  } else if (choice == 'remove') {
+    await controller.setPlaylistPhoto(latest, null);
+  }
+}
+
+/// Añade clic derecho y pulsación larga a [child] sin alterar su aspecto.
+class PlaylistPhotoMenu extends StatelessWidget {
+  const PlaylistPhotoMenu({
+    super.key,
+    required this.controller,
+    required this.playlist,
+    required this.child,
+  });
+  final AppController controller;
+  final MusicPlaylist playlist;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    behavior: HitTestBehavior.translucent,
+    onSecondaryTapUp: (d) =>
+        showPlaylistPhotoMenu(context, controller, playlist, d.globalPosition),
+    onLongPressStart: (d) =>
+        showPlaylistPhotoMenu(context, controller, playlist, d.globalPosition),
+    child: child,
+  );
+}

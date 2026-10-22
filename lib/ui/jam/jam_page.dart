@@ -8,6 +8,9 @@ import '../../jam/jam_qr.dart';
 import 'jam_flows.dart';
 import 'jam_scanner_dialog.dart';
 import 'jam_session_panel.dart';
+import '../../theme/modern_theme.dart';
+import '../../theme/modern_widgets.dart';
+import '../../theme/slush_theme.dart';
 
 class JamPage extends StatefulWidget {
   const JamPage({
@@ -43,6 +46,7 @@ class _JamPageState extends State<JamPage> {
   @override
   void initState() {
     super.initState();
+    _name.text = widget.controller.profileName.trim();
     if (widget.jam != null) {
       jam; // registra el oyente del controlador compartido
     }
@@ -61,9 +65,13 @@ class _JamPageState extends State<JamPage> {
     super.dispose();
   }
 
-  String _participantName({bool host = false}) => _name.text.trim().isEmpty
-      ? (host ? 'Anfitrión' : 'Invitado')
-      : _name.text.trim();
+  String _participantName({bool host = false}) {
+    final typed = _name.text.trim();
+    if (typed.isNotEmpty) return typed;
+    final profile = widget.controller.profileName.trim();
+    return profile.isNotEmpty ? profile : (host ? 'Anfitrión' : 'Invitado');
+  }
+
   Future<void> _join(String value) async {
     _inputError = null;
     await jam.join(value, _participantName());
@@ -128,7 +136,23 @@ class _JamPageState extends State<JamPage> {
     final colors = Theme.of(context).colorScheme;
     final message = _inputError ?? c?.error ?? session?.error;
     final header = <Widget>[
-      Text('Jam', style: Theme.of(context).textTheme.headlineLarge),
+      if (isSlush(context))
+        Text(
+          'JAM',
+          style: Theme.of(
+            context,
+          ).textTheme.displayLarge?.copyWith(fontSize: 96, height: .9),
+        )
+      else if (isModern(context)) ...[
+        const Align(alignment: Alignment.centerLeft, child: ModernBadge('Jam')),
+        const SizedBox(height: 12),
+        ModernHeadline(
+          before: active ? 'Una cola ' : 'Escuchen ',
+          emphasis: active ? 'compartida' : 'juntos',
+          size: 40,
+        ),
+      ] else
+        Text('Jam', style: Theme.of(context).textTheme.headlineLarge),
       const SizedBox(height: 8),
       Text(
         active
@@ -145,7 +169,7 @@ class _JamPageState extends State<JamPage> {
         const SizedBox(height: 16),
       ],
     ];
-    return Padding(
+    final page = Padding(
       padding: const EdgeInsets.all(24),
       child: Align(
         alignment: Alignment.topLeft,
@@ -168,6 +192,10 @@ class _JamPageState extends State<JamPage> {
         ),
       ),
     );
+    // Slush: Jam sobre fondo blanco.
+    return isSlush(context)
+        ? ColoredBox(color: Colors.white, child: page)
+        : page;
   }
 
   List<Widget> _idle(JamController? c, bool busy) => [

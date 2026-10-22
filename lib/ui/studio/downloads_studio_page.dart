@@ -5,6 +5,9 @@ import 'package:path/path.dart' as p;
 import '../../app_controller.dart';
 import '../../core/models.dart';
 import '../../library/local_file_metadata.dart';
+import '../../theme/brasa_theme.dart';
+import '../../theme/modern_theme.dart';
+import '../../theme/modern_widgets.dart';
 import '../artwork.dart';
 import 'studio_symbols.dart';
 
@@ -224,15 +227,25 @@ class _DownloadsStudioPageState extends State<DownloadsStudioPage> {
                         ),
                         const SizedBox(height: 12),
                         ClipRRect(
-                          borderRadius: BorderRadius.circular(3),
+                          borderRadius: BorderRadius.circular(
+                            isBrasa(context)
+                                ? 9999
+                                : isModern(context)
+                                ? 8
+                                : 3,
+                          ),
                           child: LinearProgressIndicator(
                             value: c.downloads.isEmpty
                                 ? 0
                                 : complete.length / c.downloads.length,
-                            minHeight: 10,
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.primaryContainer,
+                            minHeight: isBrasa(context) ? 4 : 10,
+                            color: isBrasa(context)
+                                ? Brasa.cream
+                                : isModern(context)
+                                ? Tracky.mint
+                                : Theme.of(
+                                    context,
+                                  ).colorScheme.primaryContainer,
                             backgroundColor: Theme.of(
                               context,
                             ).colorScheme.surfaceContainerHigh,
@@ -259,29 +272,80 @@ class _DownloadsStudioPageState extends State<DownloadsStudioPage> {
               runSpacing: 8,
               children: [
                 ChoiceChip(
+                  showCheckmark: !isModern(context) && !isBrasa(context),
+                  selectedColor: isBrasa(context)
+                      ? Brasa.cream
+                      : isModern(context)
+                      ? Tracky.navy
+                      : null,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(4),
+                    borderRadius: BorderRadius.circular(
+                      isBrasa(context)
+                          ? 9999
+                          : isModern(context)
+                          ? 8
+                          : 4,
+                    ),
                   ),
                   label: Text('Descargadas  ${complete.length}'),
                   selected: _tab == 0,
+                  labelStyle: isBrasa(context) && _tab == 0
+                      ? const TextStyle(color: Colors.black)
+                      : isModern(context) && _tab == 0
+                      ? const TextStyle(color: Colors.white)
+                      : null,
                   onSelected: (_) => setState(() => _tab = 0),
                 ),
                 ChoiceChip(
+                  showCheckmark: !isModern(context) && !isBrasa(context),
+                  selectedColor: isBrasa(context)
+                      ? Brasa.cream
+                      : isModern(context)
+                      ? Tracky.navy
+                      : null,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(4),
+                    borderRadius: BorderRadius.circular(
+                      isBrasa(context)
+                          ? 9999
+                          : isModern(context)
+                          ? 8
+                          : 4,
+                    ),
                   ),
                   label: Text('En progreso  ${active.length}'),
                   selected: _tab == 1,
+                  labelStyle: isBrasa(context) && _tab == 1
+                      ? const TextStyle(color: Colors.black)
+                      : isModern(context) && _tab == 1
+                      ? const TextStyle(color: Colors.white)
+                      : null,
                   onSelected: (_) => setState(() => _tab = 1),
                 ),
                 ChoiceChip(
+                  showCheckmark: !isModern(context) && !isBrasa(context),
+                  selectedColor: isBrasa(context)
+                      ? Brasa.cream
+                      : isModern(context)
+                      ? Tracky.navy
+                      : null,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(4),
+                    borderRadius: BorderRadius.circular(
+                      isBrasa(context)
+                          ? 9999
+                          : isModern(context)
+                          ? 8
+                          : 4,
+                    ),
                   ),
                   label: Text(
                     'Conflictos / Re-sincronizar  ${conflicts.length}',
                   ),
                   selected: _tab == 2,
+                  labelStyle: isBrasa(context) && _tab == 2
+                      ? const TextStyle(color: Colors.black)
+                      : isModern(context) && _tab == 2
+                      ? const TextStyle(color: Colors.white)
+                      : null,
                   onSelected: (_) => setState(() => _tab = 2),
                 ),
                 TextButton.icon(
@@ -499,7 +563,17 @@ class _DownloadsStudioPageState extends State<DownloadsStudioPage> {
                   const SizedBox(height: 8),
                   LinearProgressIndicator(
                     value: job.progress.clamp(0, 1),
-                    color: Theme.of(context).colorScheme.primaryContainer,
+                    minHeight: isBrasa(context) ? 4 : null,
+                    borderRadius: isBrasa(context)
+                        ? BorderRadius.circular(9999)
+                        : isModern(context)
+                        ? BorderRadius.circular(8)
+                        : null,
+                    color: isBrasa(context)
+                        ? Brasa.accent
+                        : isModern(context)
+                        ? Tracky.mint
+                        : Theme.of(context).colorScheme.primaryContainer,
                   ),
                 ],
                 if (job.localPath != null) ...[

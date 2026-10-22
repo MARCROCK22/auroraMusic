@@ -247,6 +247,9 @@ class ListenBrainzClient {
 
   static String? _str(Object? v) => v is String ? v : null;
 
+  /// GET autenticado con JSON decodificado (`null` en 204).
+  Future<Object?> getJson(String path, String token) => _get(path, token);
+
   Future<Object?> _get(String path, String token) async {
     final r = await _send('GET', path, token);
     if (r.status == 204) return null; // aún sin datos para este usuario

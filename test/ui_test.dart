@@ -297,12 +297,19 @@ void main() {
     await mount(tester, const Size(800, 900));
     await tester.tap(find.byIcon(Icons.tune).last);
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Reproducción').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Reproducción').first);
+    await tester.pumpAndSettle();
     final switchFinder = find.ancestor(
       of: find.text('Descargar mientras se reproduce').last,
       matching: find.byType(SwitchListTile),
     );
     expect(tester.widget<SwitchListTile>(switchFinder).value, isFalse);
     expect(tester.widget<SwitchListTile>(switchFinder).onChanged, isNotNull);
+    await tester.ensureVisible(
+      find.text('Descargar mientras se reproduce').last,
+    );
     await tester.tap(find.text('Descargar mientras se reproduce').last);
     await tester.pumpAndSettle();
 
@@ -501,7 +508,11 @@ void main() {
     expect(find.text('Madrugada acústica'), findsOneWidget);
     await tester.tap(find.byTooltip('Ajustes'));
     await tester.pumpAndSettle();
-    expect(find.text('Almacenamiento y biblioteca'), findsOneWidget);
+    await tester.ensureVisible(find.text('Cuenta y servicios').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cuenta y servicios').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Perfil'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -643,6 +654,10 @@ void main() {
       await mount(tester, const Size(320, 800), scale: 2);
       await tester.tap(find.byIcon(Icons.tune).last);
       await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Avanzado').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Avanzado').first);
+      await tester.pumpAndSettle();
       final settingsScroll = find.byType(ListView).first;
       await tester.dragUntilVisible(
         find.text('Sesión de YouTube opcional sin importar'),
@@ -780,6 +795,8 @@ void main() {
 
       await tester.tap(find.text('Todas las listas'));
       await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Mi lista'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Mi lista'));
       await tester.pumpAndSettle();
       expect(find.text(controller.tracks[1].title), findsOneWidget);
@@ -901,6 +918,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('60'), findsOneWidget);
     expect(find.text('12k'), findsOneWidget);
+    expect(find.text('Almacenamiento y biblioteca'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.tap(find.byTooltip('Cerrar ecualizador'));
     await tester.pumpAndSettle();

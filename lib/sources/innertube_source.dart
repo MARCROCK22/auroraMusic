@@ -147,14 +147,90 @@ class InnerTubeSource extends SourceBackend {
       'browseId': entry.browseId,
     });
     final album = entry.kind == SearchKind.albums;
-    return parseBrowseTracks(
+    final artist = album
+        ? entry.subtitle.split(' • ').skip(1).firstOrNull
+        : entry.title;
+    final tracks = parseBrowseTracks(
       data,
-      artist: album
-          ? entry.subtitle.split(' • ').skip(1).firstOrNull
-          : entry.title,
+      artist: artist,
       album: album ? entry.title : null,
       artwork: album ? entry.artworkUrl : null,
     );
+    if (album) return tracks;
+    // Perfil de artista: la página solo trae las destacadas; «Mostrar todo»
+    // (lista VL…) tiene el catálogo completo, con continuaciones.
+    try {
+      final all = await _artistAllSongs(data, artist);
+      final seen = tracks.map((t) => t.id).toSet();
+      return [...tracks, ...all.where((t) => seen.add(t.id))];
+    } catch (_) {
+      return tracks;
+    }
+  }
+
+  Future<List<Track>> _artistAllSongs(
+    Map<String, dynamic> page,
+    String? artist,
+  ) async {
+    String? listId;
+    void find(Object? node) {
+      if (listId != null) return;
+      if (node is Map) {
+        final shelf = node['musicShelfRenderer'];
+        if (shelf is Map) {
+          final id =
+              shelf['bottomEndpoint']?['browseEndpoint']?['browseId']
+                  as String? ??
+              (shelf['title']?['runs'] as List?)
+                  ?.map((r) => (r as Map)['navigationEndpoint'])
+                  .whereType<Map>()
+                  .map((e) => e['browseEndpoint']?['browseId'])
+                  .whereType<String>()
+                  .firstOrNull;
+          if (id != null && id.startsWith('VL')) {
+            listId = id;
+            return;
+          }
+        }
+        node.values.forEach(find);
+      } else if (node is List) {
+        node.forEach(find);
+      }
+    }
+
+    find(page);
+    if (listId == null) return const [];
+    var data = await _post('browse', {
+      'context': _context(),
+      'browseId': listId,
+    });
+    final out = <Track>[...parseBrowseTracks(data, artist: artist)];
+    for (var i = 0; i < 20; i++) {
+      String? token;
+      void next(Object? node) {
+        if (token != null) return;
+        if (node is Map) {
+          token =
+              node['nextContinuationData']?['continuation'] as String? ??
+              node['continuationItemRenderer']?['continuationEndpoint']?['continuationCommand']?['token']
+                  as String?;
+          node.values.forEach(next);
+        } else if (node is List) {
+          node.forEach(next);
+        }
+      }
+
+      next(data);
+      if (token == null) break;
+      data = await _post('browse', {
+        'context': _context(),
+        'continuation': token,
+      });
+      final more = parseBrowseTracks(data, artist: artist);
+      if (more.isEmpty) break;
+      out.addAll(more);
+    }
+    return out;
   }
 
   static SearchPage parseSearchPage(

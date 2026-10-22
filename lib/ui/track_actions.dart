@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
 
 import '../app_controller.dart';
 import '../core/models.dart';
@@ -28,6 +29,13 @@ class TrackActionsScope extends InheritedWidget {
 
   @override
   bool updateShouldNotify(TrackActionsScope old) => true;
+}
+
+/// Texto para compartir: «Título — Artista» y, si no es local, el enlace de YouTube Music.
+String shareText(Track t) {
+  final base = '${t.title} — ${t.artist}';
+  if (t.isLocal || t.id.isEmpty) return base;
+  return '$base\nhttps://music.youtube.com/watch?v=${Uri.encodeQueryComponent(t.id)}';
 }
 
 /// Entrada extra del menú (p. ej. «Quitar de esta lista» en una playlist).
@@ -95,6 +103,12 @@ class TrackActions {
           ? 'Añadida 1 canción a la cola'
           : 'Añadidas $n canciones a la cola',
     );
+  }
+
+  // shortcut: sin plugin de compartir nativo; portapapeles + aviso.
+  Future<void> share(Track track) async {
+    await Clipboard.setData(ClipboardData(text: shareText(track)));
+    _say('Copiado para compartir');
   }
 
   Future<void> playNext(Track track) async {
@@ -188,6 +202,7 @@ class TrackActions {
             : Icons.favorite_border,
         () => app.toggleFavorite(track),
       ),
+      item('Compartir', Icons.share_outlined, () => share(track)),
       if (_scope?.addToPlaylist != null)
         item(
           'Añadir a una lista',

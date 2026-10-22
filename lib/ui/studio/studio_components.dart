@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../../theme/brasa_theme.dart';
+import '../../theme/modern_theme.dart';
+import '../../theme/modern_widgets.dart';
+import '../../theme/slush_theme.dart';
+
 abstract final class StudioPalette {
   static const canvas = Color(0xff151312);
   static const well = Color(0xff100e0d);
@@ -12,6 +17,14 @@ abstract final class StudioPalette {
   static const parchment = Color(0xffa78b7f);
   static const orange = Color(0xffea6b29);
   static const peach = Color(0xffffb596);
+
+  /// Radio de las fundas: asimétrico en Atelier, 16 en Modern.
+  static BorderRadius of(BuildContext context) => isBrasa(context)
+      ? BorderRadius.circular(6)
+      : isModern(context)
+      ? BorderRadius.circular(16)
+      : sleeve;
+
   static const sleeve = BorderRadius.only(
     topLeft: Radius.circular(8),
     topRight: Radius.circular(2),
@@ -33,14 +46,28 @@ class StudioPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final modern = isModern(context);
+    final brasa = isBrasa(context);
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: recessed
+        // Modern: tarjeta blanca radio 16 con sombra cálida; el hueco usa el lienzo.
+        color: brasa
+            ? (recessed ? colors.surface : Brasa.obsidian)
+            : modern && recessed
+            ? colors.surfaceContainer
+            : recessed
             ? colors.surfaceContainerLowest
             : colors.surfaceContainerLow,
-        borderRadius: StudioPalette.sleeve,
-        boxShadow: const [BoxShadow(color: Colors.black, offset: Offset(3, 4))],
+        borderRadius: StudioPalette.of(context),
+        border: isSlush(context) ? Border.fromBorderSide(Slush.border) : null,
+        boxShadow: isSlush(context)
+            ? Slush.hardShadow
+            : brasa
+            ? (recessed ? null : Brasa.cardShadow)
+            : modern
+            ? Tracky.warmShadow
+            : const [BoxShadow(color: Colors.black, offset: Offset(3, 4))],
       ),
       // Own Material so ink (hover/selected/focus) paints above the panel fill.
       child: Material(type: MaterialType.transparency, child: child),
@@ -56,15 +83,31 @@ class StudioStamp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final brasa = isBrasa(context);
+    final modern = isModern(context) || brasa;
     final label = Text(
       text,
       style: TextStyle(
-        fontFamily: 'monospace',
-        fontSize: 10,
-        letterSpacing: .5,
+        fontFamily: modern ? null : 'monospace',
+        fontSize: modern ? 11 : 10,
+        fontWeight: modern ? FontWeight.w500 : null,
+        letterSpacing: modern ? 0 : .5,
         color: color ?? colors.onSurfaceVariant,
       ),
     );
+    if (brasa && filled) {
+      return DecoratedBox(
+        decoration: ShapeDecoration(
+          color: Brasa.graphite,
+          shape: const StadiumBorder(),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+          child: label,
+        ),
+      );
+    }
+    if (modern && filled) return ModernBadge(text);
     return filled
         ? ColoredBox(
             color: colors.surfaceContainerLowest,

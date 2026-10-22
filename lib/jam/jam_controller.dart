@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter/widgets.dart';
 import '../app_controller.dart';
 import '../core/models.dart';
@@ -164,9 +165,27 @@ class JamController extends ChangeNotifier with WidgetsBindingObserver {
       );
     }
   });
-  Future<void> host(String address, String name) => _run(() async {
+
+  /// Nombre efectivo: el explícito, si no el del perfil y si no [fallback].
+  String _nameOr(String? name, String fallback) {
+    final given = name?.trim() ?? '';
+    return given.isNotEmpty
+        ? given
+        : app.profileName.trim().isNotEmpty
+        ? app.profileName.trim()
+        : fallback;
+  }
+
+  /// Foto del perfil de [id]: la propia sale del perfil, el resto de la Jam.
+  Uint8List? avatarOf(String id) =>
+      id == service.participantId && app.profileAvatar != null
+      ? app.profileAvatar
+      : service.avatarOf(id);
+
+  Future<void> host(String address, String? name) => _run(() async {
     await bridge.disable();
-    await service.host(address: address, name: name);
+    service.localAvatar = app.profileAvatar;
+    await service.host(address: address, name: _nameOr(name, 'Anfitrión'));
     _startHostTimer();
     _startSuggestions();
     unawaited(_beginSession());
@@ -179,9 +198,10 @@ class JamController extends ChangeNotifier with WidgetsBindingObserver {
     });
   }
 
-  Future<void> hostOnline(String name) => _run(() async {
+  Future<void> hostOnline(String? name) => _run(() async {
     await bridge.disable();
-    await service.hostRemote(remote, name: name);
+    service.localAvatar = app.profileAvatar;
+    await service.hostRemote(remote, name: _nameOr(name, 'Anfitrión'));
     _startHostTimer();
     _startSuggestions();
     unawaited(_beginSession());
@@ -214,20 +234,24 @@ class JamController extends ChangeNotifier with WidgetsBindingObserver {
     _sessionChanged();
   }
 
-  Future<void> join(String code, String name) => _run(() async {
+  Future<void> join(String code, String? name) => _run(() async {
     _optOut = false;
     await bridge.disable();
+    service.localAvatar = app.profileAvatar;
+    final who = _nameOr(name, 'Invitado');
     if (jamRemoteCodeFrom(code) != null) {
-      await service.joinRemote(remote, code, name: name);
+      await service.joinRemote(remote, code, name: who);
       _startSuggestions();
     } else {
-      await service.join(JamInvite.decode(code), name: name);
+      await service.join(JamInvite.decode(code), name: who);
       _startSuggestions();
     }
   });
 
   /// Enlace `aurora://jam/CODIGO` recibido del sistema (Android/Windows).
   Future<void> joinFromLink(String link, String name) {
+    // El enlace del sistema llega con el nombre genérico: manda el del perfil.
+    if (name.trim() == 'Invitado') name = '';
     final code = jamRemoteCodeFrom(link);
     if (code == null) {
       error = 'El enlace de Jam no es válido.';

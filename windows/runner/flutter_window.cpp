@@ -1,5 +1,9 @@
 #include "flutter_window.h"
 
+#include <dwmapi.h>
+#include <windowsx.h>
+#include <commctrl.h>
+#include <algorithm>
 #include <optional>
 #include <thread>
 #include <flutter/standard_method_codec.h>
@@ -23,6 +27,37 @@ enum TrayCommand {
 };
 }  // namespace
 
+// Sin marco nativo: el redimensionado se resuelve en los bordes de la ventana.
+static LRESULT EdgeHit(HWND host, LPARAM lparam) {
+  RECT r;
+  GetWindowRect(host, &r);
+  const int b = std::max(6, MulDiv(6, static_cast<int>(GetDpiForWindow(host)), 96));
+  const POINT p{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+  const bool l = p.x < r.left + b, rt = p.x >= r.right - b;
+  const bool t = p.y < r.top + b, bt = p.y >= r.bottom - b;
+  if (t && l) return HTTOPLEFT;
+  if (t && rt) return HTTOPRIGHT;
+  if (bt && l) return HTBOTTOMLEFT;
+  if (bt && rt) return HTBOTTOMRIGHT;
+  if (l) return HTLEFT;
+  if (rt) return HTRIGHT;
+  if (t) return HTTOP;
+  if (bt) return HTBOTTOM;
+  return HTCLIENT;
+}
+
+// La vista de Flutter cubre toda la ventana: en los bordes cede el ratón al host.
+static LRESULT CALLBACK EdgeSubclassProc(HWND h, UINT msg, WPARAM w, LPARAM l,
+                                         UINT_PTR, DWORD_PTR) {
+  if (msg == WM_NCHITTEST) {
+    HWND host = GetParent(h);
+    if (host && !IsZoomed(host) && EdgeHit(host, l) != HTCLIENT) {
+      return HTTRANSPARENT;
+    }
+  }
+  return DefSubclassProc(h, msg, w, l);
+}
+
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
 
@@ -45,6 +80,8 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+  SetWindowSubclass(flutter_controller_->view()->GetNativeWindow(),
+                    EdgeSubclassProc, 1, 0);
 
   // The supplied studio design includes its own Flutter title bar. Keep native
   // resizing while removing the duplicate OS caption; all controls use Win32.
@@ -52,15 +89,25 @@ bool FlutterWindow::OnCreate() {
   SetWindowLongPtr(host, GWL_STYLE, GetWindowLongPtr(host, GWL_STYLE) & ~WS_CAPTION);
   SetWindowPos(host, nullptr, 0, 0, 0, 0,
                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+  // Windows 11: sin el borde de 1 px que DWM pinta claro al activar.
+  const DWORD no_border = 0xFFFFFFFE;  // DWMWA_COLOR_NONE
+  DwmSetWindowAttribute(host, 34 /* DWMWA_BORDER_COLOR */, &no_border,
+                        sizeof(no_border));
 
   // Posicion/tamano de la sesion anterior (validados contra los monitores).
   SavedGeometry saved;
   if (LoadGeometry(&saved)) {
     has_saved_geometry_ = true;
     saved_maximized_ = saved.maximized;
-    SetWindowPos(host, nullptr, saved.rect.left, saved.rect.top,
-                 saved.rect.right - saved.rect.left,
-                 saved.rect.bottom - saved.rect.top,
+    // Geometrias guardadas con el marco antiguo pueden asomar fuera del area util.
+    RECT r = saved.rect;
+    MONITORINFO mi{sizeof(mi)};
+    if (GetMonitorInfo(MonitorFromRect(&r, MONITOR_DEFAULTTONEAREST), &mi) &&
+        r.top < mi.rcWork.top) {
+      r.bottom += mi.rcWork.top - r.top;
+      r.top = mi.rcWork.top;
+    }
+    SetWindowPos(host, nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top,
                  SWP_NOZORDER | SWP_NOACTIVATE);
   }
   GetWindowRect(host, &normal_rect_);
@@ -91,6 +138,18 @@ bool FlutterWindow::OnCreate() {
         } else if (name == "guardClose") {
           const auto* enabled = args ? std::get_if<bool>(args) : nullptr;
           close_guard_enabled_ = enabled && *enabled;
+        } else if (name == "setBackground") {
+          // Color del tema (RGB): fondo de la ventana mientras se redimensiona.
+          const auto* rgb = args ? std::get_if<int32_t>(args) : nullptr;
+          if (rgb) {
+            HBRUSH brush = CreateSolidBrush(RGB((*rgb >> 16) & 0xFF,
+                                                (*rgb >> 8) & 0xFF, *rgb & 0xFF));
+            HBRUSH old = reinterpret_cast<HBRUSH>(
+                SetClassLongPtr(host, GCLP_HBRBACKGROUND,
+                                reinterpret_cast<LONG_PTR>(brush)));
+            if (old) DeleteObject(old);
+            InvalidateRect(host, nullptr, TRUE);
+          }
         } else if (name == "drag") {
           ReleaseCapture();
           PostMessage(host, WM_NCLBUTTONDOWN, HTCAPTION, GetMessagePos());
@@ -390,8 +449,23 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   } else if (message == WM_GETMINMAXINFO) {
     FillMinMaxInfo(hwnd, reinterpret_cast<MINMAXINFO*>(lparam));
     return 0;
-  } else if (message == WM_NCCALCSIZE && wparam && IsZoomed(hwnd)) {
-    // Maximizada: el cliente ocupa todo el rectangulo (= area de trabajo).
+  } else if (message == WM_ERASEBKGND) {
+    RECT area;
+    GetClientRect(hwnd, &area);
+    FillRect(reinterpret_cast<HDC>(wparam), &area,
+             reinterpret_cast<HBRUSH>(GetClassLongPtr(hwnd, GCLP_HBRBACKGROUND)));
+    return 1;
+  } else if (message == WM_NCACTIVATE) {
+    // Activar (un simple clic) no debe repintar el marco: lParam = -1 lo evita.
+    return DefWindowProc(hwnd, message, wparam, -1);
+  } else if (message == WM_NCPAINT) {
+    return 0;  // no hay marco no cliente que pintar
+  } else if (message == WM_NCHITTEST && !IsZoomed(hwnd)) {
+    const LRESULT hit = DefWindowProc(hwnd, message, wparam, lparam);
+    return hit != HTCLIENT ? hit : EdgeHit(hwnd, lparam);
+  } else if (message == WM_NCCALCSIZE && wparam) {
+    // El cliente ocupa toda la ventana: sin marco nativo no hay franja blanca
+    // (ni arriba ni a los lados) que DWM pinte al activar o redimensionar.
     return 0;
   } else if ((message == WM_MOVE || message == WM_SIZE) && IsWindowVisible(hwnd) &&
              !IsZoomed(hwnd) && !IsIconic(hwnd)) {

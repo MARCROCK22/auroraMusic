@@ -6,7 +6,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/models.dart';
 import '../dj/suggestions_api.dart';
 import '../metadata/youtube_match.dart';
+import 'dart:convert';
+
 import 'lb_recs.dart';
+import 'lb_stats.dart';
 import 'listen_storage.dart';
 import 'listenbrainz_client.dart';
 import 'scrobbler.dart';
@@ -247,6 +250,46 @@ class ListenBrainzService extends ChangeNotifier {
       return list;
     } on Object {
       return cached?.$2 ?? const [];
+    }
+  }
+
+  /// Estadísticas de escucha con caché en preferencias (1 h). Lanza si no hay
+  /// sesión activa o la red falla sin caché.
+  Future<ListenStats> stats(StatsRange range, {bool force = false}) async {
+    final user = username;
+    final key = 'listenbrainz.stats.$user.${range.api}';
+    ListenStats? cached;
+    DateTime? at;
+    try {
+      final raw = preferences.getString(key);
+      if (raw != null) {
+        final j = jsonDecode(raw) as Map;
+        at = DateTime.fromMillisecondsSinceEpoch(j['at'] as int);
+        cached = ListenStats.fromJson(j['d']);
+      }
+    } on Object {
+      cached = null;
+    }
+    if (!force &&
+        cached != null &&
+        at != null &&
+        _now().difference(at) < const Duration(hours: 1)) {
+      return cached;
+    }
+    final token = await _readToken();
+    if (!active || user == null || token == null) {
+      throw ListenBrainzException('ListenBrainz no está activo.');
+    }
+    try {
+      final s = await client.userStats(user, range, token);
+      await preferences.setString(
+        key,
+        jsonEncode({'at': _now().millisecondsSinceEpoch, 'd': s.toJson()}),
+      );
+      return s;
+    } on Object {
+      if (cached != null) return cached;
+      rethrow;
     }
   }
 

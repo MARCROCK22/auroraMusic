@@ -86,10 +86,26 @@ class MusicPlaylist {
     required this.id,
     required this.name,
     this.trackIds = const [],
+    this.photoPath,
   });
   final String id;
   final String name;
   final List<String> trackIds;
+
+  /// Foto elegida por el usuario. No va en la tabla: el controlador la guarda
+  /// en un mapa de preferencias y la inyecta al cargar/reemplazar.
+  final String? photoPath;
+
+  MusicPlaylist copyWith({String? name, List<String>? trackIds}) =>
+      MusicPlaylist(
+        id: id,
+        name: name ?? this.name,
+        trackIds: trackIds ?? this.trackIds,
+        photoPath: photoPath,
+      );
+
+  MusicPlaylist withPhoto(String? path) =>
+      MusicPlaylist(id: id, name: name, trackIds: trackIds, photoPath: path);
 }
 
 class DownloadJob {

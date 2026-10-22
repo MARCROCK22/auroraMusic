@@ -2,6 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
 import '../core/models.dart';
+import '../dj/recommendations.dart';
+import '../follow/follow_models.dart';
+import '../follow/follow_service.dart';
+import '../theme/brasa_theme.dart';
+import '../theme/modern_theme.dart';
+import '../theme/modern_widgets.dart';
+import '../theme/slush_theme.dart';
 import 'artwork.dart';
 import 'studio/home_introduction.dart';
 import 'studio/studio_components.dart';
@@ -22,16 +29,18 @@ class HomeMusicPage extends StatelessWidget {
     required this.onOpenPlaylist,
     this.onVinyl,
     this.onSearchQuery,
+    this.follow,
   });
   final AppController controller;
   final VoidCallback onSearch, onDownloads, onLikes;
   final ValueChanged<MusicPlaylist> onOpenPlaylist;
   final VoidCallback? onVinyl;
   final ValueChanged<String>? onSearchQuery;
+  final FollowService? follow;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: controller,
+    listenable: Listenable.merge([controller, follow]),
     builder: (context, _) {
       final c = controller;
       final recommendations = c.recommendations;
@@ -42,28 +51,29 @@ class HomeMusicPage extends StatelessWidget {
           c.playlists.any((p) => p.trackIds.any(libraryIds.contains)) ||
           c.recentTracks.isNotEmpty;
       final text = MediaQuery.textScalerOf(context);
-      final artists = <String, List<Track>>{};
-      final albums = <(String, String), List<Track>>{};
-      for (final track in c.tracks) {
-        final artist = track.artist.trim();
-        if (artist.isEmpty) continue;
-        (artists[artist.toLowerCase()] ??= []).add(track);
-        final album = track.album?.trim();
-        if (album != null && album.isNotEmpty) {
-          (albums[(artist.toLowerCase(), album.toLowerCase())] ??= []).add(
-            track,
-          );
-        }
+      final modern = isModern(context);
+      final gap = modern ? 56.0 : 28.0;
+      // Solo los artistas que el usuario sigue (no los deducidos de la biblioteca).
+      final followed = follow?.artists ?? const <FollowedArtist>[];
+      if (isBrasa(context)) {
+        return _brasa(
+          context,
+          c,
+          recommendations,
+          recommendedTracks,
+          personalized,
+          followed,
+        );
       }
-      final artistGroups = artists.values.toList();
-      final albumGroups = albums.values.toList();
       return LayoutBuilder(
         builder: (context, bounds) {
-          final recentWidth = bounds.maxWidth >= 560
+          final recentWidth = modern
+              ? 220.0
+              : bounds.maxWidth >= 560
               ? (bounds.maxWidth - 64) / 2
               : 260.0;
           return ListView(
-            padding: const EdgeInsets.all(24),
+            padding: EdgeInsets.all(modern ? 32 : 24),
             children: [
               StudioHomeIntroduction(
                 controller: c,
@@ -80,19 +90,29 @@ class HomeMusicPage extends StatelessWidget {
                     avatar: const Icon(Icons.download_outlined, size: 18),
                     label: const Text('Descargas locales'),
                     onPressed: onDownloads,
+                    side: modern ? BorderSide.none : null,
+                    backgroundColor: modern
+                        ? Theme.of(context).colorScheme.surfaceContainerLow
+                        : null,
                   ),
                   ActionChip(
                     avatar: const Icon(Icons.favorite_border, size: 18),
                     label: const Text('Favoritos'),
                     onPressed: onLikes,
+                    side: modern ? BorderSide.none : null,
+                    backgroundColor: modern
+                        ? Theme.of(context).colorScheme.surfaceContainerLow
+                        : null,
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
+              SizedBox(height: modern ? 48 : 24),
               if (c.recentTracks.isNotEmpty)
                 HorizontalMusicRow(
                   key: const ValueKey('home-recent'),
-                  title: 'Escuchados recientemente',
+                  title: isSlush(context)
+                      ? 'Hace poco'
+                      : 'Escuchados recientemente',
                   subtitle: 'Continúa donde lo dejaste',
                   itemWidth: recentWidth,
                   itemCount: c.recentTracks.length,
@@ -105,7 +125,7 @@ class HomeMusicPage extends StatelessWidget {
                         _play(context, c.recentTracks[index], c.recentTracks),
                   ),
                 ),
-              const SizedBox(height: 28),
+              SizedBox(height: gap),
               if (recommendations.isNotEmpty)
                 HorizontalMusicRow(
                   key: const ValueKey('home-recommendations'),
@@ -114,6 +134,7 @@ class HomeMusicPage extends StatelessWidget {
                       ? 'Basado en tus favoritos, listas y escucha reciente'
                       : 'Aún no hay señales personales; elegimos de tu biblioteca',
                   itemCount: recommendations.length,
+                  itemWidth: modern ? 220 : 200,
                   itemHeight: 228 + text.scale(136),
                   itemBuilder: (context, index) => _TrackCard(
                     controller: c,
@@ -145,6 +166,7 @@ class HomeMusicPage extends StatelessWidget {
                   title: 'Encontradas en YouTube',
                   subtitle: 'Búsqueda solicitada por ti',
                   itemCount: c.discoveredRecommendations.length,
+                  itemWidth: modern ? 220 : 200,
                   itemHeight: 220 + text.scale(72),
                   itemBuilder: (context, index) => _TrackCard(
                     controller: c,
@@ -159,55 +181,26 @@ class HomeMusicPage extends StatelessWidget {
                   ),
                 ),
               ],
-              const SizedBox(height: 28),
+              SizedBox(height: gap),
               if (c.playlists.isNotEmpty) ...[
                 PlaylistShelf(
                   controller: c,
                   horizontal: true,
                   onOpen: onOpenPlaylist,
                 ),
-                const SizedBox(height: 28),
+                SizedBox(height: gap),
               ],
-              if (artistGroups.length > 1) ...[
+              if (followed.isNotEmpty) ...[
                 HorizontalMusicRow(
                   key: const ValueKey('home-artists'),
                   title: 'Tus artistas',
-                  itemCount: artistGroups.length,
+                  itemCount: followed.length,
+                  itemWidth: modern ? 220 : 200,
                   itemHeight: 228 + text.scale(120),
-                  itemBuilder: (context, index) {
-                    final tracks = artistGroups[index];
-                    final artist = tracks.first.artist.trim();
-                    return _GroupCard(
-                      title: artist,
-                      tracks: tracks,
-                      artist: true,
-                      tooltip: 'Escuchar artista $artist',
-                      onPlay: () => _play(context, tracks.first, tracks),
-                    );
-                  },
+                  itemBuilder: (context, index) =>
+                      _followedCard(c, followed[index]),
                 ),
-                const SizedBox(height: 28),
-              ],
-              if (albumGroups.length > 1) ...[
-                HorizontalMusicRow(
-                  key: const ValueKey('home-albums'),
-                  title: 'Álbumes de tu biblioteca',
-                  itemCount: albumGroups.length,
-                  itemHeight: 228 + text.scale(136),
-                  itemBuilder: (context, index) {
-                    final tracks = albumGroups[index];
-                    final album = tracks.first.album!.trim();
-                    final artist = tracks.first.artist.trim();
-                    return _GroupCard(
-                      title: album,
-                      subtitle: artist,
-                      tracks: tracks,
-                      tooltip: 'Escuchar álbum $album de $artist',
-                      onPlay: () => _play(context, tracks.first, tracks),
-                    );
-                  },
-                ),
-                const SizedBox(height: 28),
+                SizedBox(height: gap),
               ],
               if (c.tracks.isNotEmpty)
                 HorizontalMusicRow(
@@ -216,6 +209,7 @@ class HomeMusicPage extends StatelessWidget {
                   subtitle:
                       '${c.tracks.length} canciones · ${c.playlists.length} listas',
                   itemCount: c.tracks.length,
+                  itemWidth: modern ? 220 : 200,
                   itemHeight: 220 + text.scale(72),
                   itemBuilder: (context, index) => _TrackCard(
                     controller: c,
@@ -239,6 +233,193 @@ class HomeMusicPage extends StatelessWidget {
       );
     },
   );
+
+  Widget _brasa(
+    BuildContext context,
+    AppController c,
+    List<TrackRecommendation> recommendations,
+    List<Track> recommendedTracks,
+    bool personalized,
+    List<FollowedArtist> followed,
+  ) {
+    const gap = SizedBox(height: 32);
+    Widget chip(String label, IconData icon, VoidCallback? onTap) => ActionChip(
+      avatar: Icon(
+        icon,
+        size: 18,
+        color: onTap == null ? Colors.black : Brasa.cream,
+      ),
+      label: Text(label),
+      onPressed: onTap ?? () {},
+      side: BorderSide.none,
+      shape: const StadiumBorder(),
+      backgroundColor: onTap == null ? Brasa.cream : Brasa.graphite,
+      labelStyle: TextStyle(
+        color: onTap == null ? Colors.black : Brasa.cream,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        StudioHomeIntroduction(
+          controller: c,
+          onSearch: onSearch,
+          onSearchQuery: onSearchQuery,
+          onVinyl: onVinyl ?? onSearch,
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            chip('Todo', Icons.home_outlined, null),
+            chip('Descargas locales', Icons.download_outlined, onDownloads),
+            chip('Favoritos', Icons.favorite_border, onLikes),
+          ],
+        ),
+        gap,
+        if (c.recentTracks.isNotEmpty) ...[
+          HorizontalMusicRow(
+            key: const ValueKey('home-recent'),
+            title: 'Escuchados recientemente',
+            subtitle: 'Continúa donde lo dejaste',
+            itemCount: c.recentTracks.length,
+            itemHeight: 0,
+            itemBuilder: (context, index) => _RecentSleeve(
+              controller: c,
+              track: c.recentTracks[index],
+              actionLabel: 'Reanudar',
+              onPlay: () =>
+                  _play(context, c.recentTracks[index], c.recentTracks),
+            ),
+          ),
+          gap,
+        ],
+        if (recommendations.isNotEmpty)
+          HorizontalMusicRow(
+            key: const ValueKey('home-recommendations'),
+            title: 'Para ti',
+            subtitle: personalized
+                ? 'Basado en tus favoritos, listas y escucha reciente'
+                : 'Aún no hay señales personales; elegimos de tu biblioteca',
+            itemCount: recommendations.length,
+            itemHeight: 0,
+            itemBuilder: (context, index) => _TrackCard(
+              controller: c,
+              track: recommendations[index].track,
+              reason: recommendations[index].reason,
+              actionLabel: 'Reproducir',
+              onPlay: () => _play(
+                context,
+                recommendations[index].track,
+                recommendedTracks,
+                replaceQueue: false,
+              ),
+            ),
+          )
+        else ...[
+          Text('Para ti', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          Text(
+            c.tracks.isEmpty
+                ? 'Añade canciones reproducibles y aparecerán recomendaciones aquí.'
+                : 'No hay recomendaciones disponibles con tus filtros y escucha actual.',
+          ),
+        ],
+        gap,
+        DjPanel(controller: c, showRecommendations: false),
+        if (c.discoveredRecommendations.isNotEmpty) ...[
+          gap,
+          HorizontalMusicRow(
+            title: 'Encontradas en YouTube',
+            subtitle: 'Búsqueda solicitada por ti',
+            itemCount: c.discoveredRecommendations.length,
+            itemHeight: 0,
+            itemBuilder: (context, index) => _TrackCard(
+              controller: c,
+              track: c.discoveredRecommendations[index],
+              actionLabel: 'Reproducir',
+              onPlay: () => _play(
+                context,
+                c.discoveredRecommendations[index],
+                c.discoveredRecommendations,
+                replaceQueue: false,
+              ),
+            ),
+          ),
+        ],
+        if (c.playlists.isNotEmpty) ...[
+          gap,
+          PlaylistShelf(
+            controller: c,
+            horizontal: true,
+            onOpen: onOpenPlaylist,
+          ),
+        ],
+        if (followed.isNotEmpty) ...[
+          gap,
+          HorizontalMusicRow(
+            key: const ValueKey('home-artists'),
+            title: 'Tus artistas',
+            itemCount: followed.length,
+            itemHeight: 0,
+            itemBuilder: (context, index) => _followedCard(c, followed[index]),
+          ),
+        ],
+        gap,
+        if (c.tracks.isNotEmpty)
+          HorizontalMusicRow(
+            key: const ValueKey('home-library'),
+            title: 'Tu colección',
+            subtitle:
+                '${c.tracks.length} canciones · ${c.playlists.length} listas',
+            itemCount: c.tracks.length,
+            itemHeight: 0,
+            itemBuilder: (context, index) => _TrackCard(
+              controller: c,
+              track: c.tracks[index],
+              actionLabel: 'Escuchar',
+              onPlay: () => _play(context, c.tracks[index], c.tracks),
+            ),
+          )
+        else
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: c.importFiles,
+              icon: const Icon(Icons.add),
+              label: const Text('Añadir música a tu biblioteca'),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _followedCard(AppController c, FollowedArtist a) {
+    final name = a.name.trim();
+    final key = name.toLowerCase();
+    final own = c.tracks
+        .where((t) => t.artist.trim().toLowerCase() == key)
+        .where((t) => t.artworkUrl?.isNotEmpty == true)
+        .firstOrNull;
+    final cover = a.imageUrl?.isNotEmpty == true
+        ? Track(
+            id: 'follow:$key',
+            title: name,
+            artist: name,
+            artworkUrl: a.imageUrl,
+          )
+        : own ?? Track(id: 'follow:$key', title: name, artist: name);
+    return _GroupCard(
+      title: name,
+      tracks: [cover],
+      countLabel: 'Artista seguido',
+      artist: true,
+      tooltip: 'Abrir artista $name',
+      onPlay: () => c.openArtist(name),
+    );
+  }
 
   Future<void> _play(
     BuildContext context,
@@ -266,11 +447,11 @@ class _GroupCard extends StatelessWidget {
     required this.tracks,
     required this.tooltip,
     required this.onPlay,
-    this.subtitle,
+    this.countLabel,
     this.artist = false,
   });
   final String title, tooltip;
-  final String? subtitle;
+  final String? countLabel;
   final List<Track> tracks;
   final VoidCallback onPlay;
   final bool artist;
@@ -282,11 +463,39 @@ class _GroupCard extends StatelessWidget {
             .where((track) => track.artworkUrl?.isNotEmpty == true)
             .firstOrNull ??
         tracks.first;
+    final count =
+        countLabel ??
+        '${tracks.length} ${tracks.length == 1 ? 'canción' : 'canciones'}';
+    if (isBrasa(context)) {
+      return BrasaTile(
+        cover: Artwork(
+          track: cover,
+          artworkContext: ArtworkContext.card,
+          radius: artist ? 90 : 6,
+        ),
+        title: title,
+        subtitle: count,
+        round: artist,
+        tooltip: tooltip,
+        onPlay: onPlay,
+      );
+    }
+    if (isModern(context)) {
+      return _ModernTile(
+        track: cover,
+        title: title,
+        subtitle: count,
+        round: artist,
+        tooltip: tooltip,
+        icon: StudioSymbols.playArrow,
+        onPlay: onPlay,
+      );
+    }
     return Material(
       color: Theme.of(context).colorScheme.surfaceContainerLow,
-      borderRadius: StudioPalette.sleeve,
+      borderRadius: StudioPalette.of(context),
       child: InkWell(
-        borderRadius: StudioPalette.sleeve,
+        borderRadius: StudioPalette.of(context),
         onTap: onPlay,
         child: Padding(
           padding: const EdgeInsets.all(12),
@@ -322,18 +531,9 @@ class _GroupCard extends StatelessWidget {
                   height: 1.1,
                 ),
               ),
-              if (subtitle != null) ...[
-                const SizedBox(height: 4),
-                Text(
-                  subtitle!,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-              ],
               const SizedBox(height: 4),
               Text(
-                '${tracks.length} ${tracks.length == 1 ? 'canción' : 'canciones'}',
+                count,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.bodyMedium,
@@ -364,75 +564,108 @@ class _TrackCard extends StatelessWidget {
   Widget build(BuildContext context) => TrackActionsRegion(
     controller: controller,
     track: track,
-    builder: (context, _) => Material(
-      color: Theme.of(context).colorScheme.surfaceContainerLow,
-      borderRadius: StudioPalette.sleeve,
-      child: InkWell(
-        borderRadius: StudioPalette.sleeve,
-        onTap: onPlay,
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Stack(
-                children: [
-                  Artwork(
-                    track: track,
-                    artworkContext: ArtworkContext.card,
-                    radius: 2,
-                  ),
-                  Positioned(
-                    right: 8,
-                    bottom: 8,
-                    child: IconButton.filled(
-                      tooltip: track.isPendingSpotifyMatch
-                          ? 'Elegir audio para ${track.title}'
-                          : '$actionLabel ${track.title}',
-                      onPressed: onPlay,
-                      icon: Icon(
-                        track.isPendingSpotifyMatch
-                            ? Icons.link
-                            : StudioSymbols.playArrow,
+    builder: (context, _) => isBrasa(context)
+        ? BrasaTile(
+            cover: Artwork(
+              track: track,
+              artworkContext: ArtworkContext.card,
+              radius: 6,
+            ),
+            title: track.title,
+            subtitle: track.artist,
+            caption: reason,
+            playing: controller.currentTrack?.id == track.id,
+            tooltip: track.isPendingSpotifyMatch
+                ? 'Elegir audio para ${track.title}'
+                : '$actionLabel ${track.title}',
+            icon: track.isPendingSpotifyMatch
+                ? Icons.link
+                : Icons.play_arrow_rounded,
+            onPlay: onPlay,
+          )
+        : isModern(context)
+        ? _ModernTile(
+            track: track,
+            title: track.title,
+            subtitle: track.artist,
+            caption: reason,
+            tooltip: track.isPendingSpotifyMatch
+                ? 'Elegir audio para ${track.title}'
+                : '$actionLabel ${track.title}',
+            icon: track.isPendingSpotifyMatch
+                ? Icons.link
+                : StudioSymbols.playArrow,
+            onPlay: onPlay,
+          )
+        : Material(
+            color: Theme.of(context).colorScheme.surfaceContainerLow,
+            borderRadius: StudioPalette.of(context),
+            child: InkWell(
+              borderRadius: StudioPalette.of(context),
+              onTap: onPlay,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Stack(
+                      children: [
+                        Artwork(
+                          track: track,
+                          artworkContext: ArtworkContext.card,
+                          radius: 2,
+                        ),
+                        Positioned(
+                          right: 8,
+                          bottom: 8,
+                          child: IconButton.filled(
+                            tooltip: track.isPendingSpotifyMatch
+                                ? 'Elegir audio para ${track.title}'
+                                : '$actionLabel ${track.title}',
+                            onPressed: onPlay,
+                            icon: Icon(
+                              track.isPendingSpotifyMatch
+                                  ? Icons.link
+                                  : StudioSymbols.playArrow,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      track.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontFamily: 'Newsreader',
+                        fontSize: 24,
+                        height: 1.1,
                       ),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                track.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontFamily: 'Newsreader',
-                  fontSize: 24,
-                  height: 1.1,
+                    const SizedBox(height: 4),
+                    Text(
+                      track.artist,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    if (reason != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        reason!,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ],
+                  ],
                 ),
               ),
-              const SizedBox(height: 4),
-              Text(
-                track.artist,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-              if (reason != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  reason!,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-              ],
-            ],
+            ),
           ),
-        ),
-      ),
-    ),
   );
 }
 
@@ -451,64 +684,177 @@ class _RecentSleeve extends StatelessWidget {
   Widget build(BuildContext context) => TrackActionsRegion(
     controller: controller,
     track: track,
-    builder: (context, _) => Material(
-      color: Theme.of(context).colorScheme.surfaceContainerLow,
-      borderRadius: StudioPalette.sleeve,
-      child: InkWell(
-        borderRadius: StudioPalette.sleeve,
-        onTap: onPlay,
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Stack(
+    builder: (context, _) => isBrasa(context)
+        ? BrasaTile(
+            cover: Artwork(
+              track: track,
+              artworkContext: ArtworkContext.card,
+              radius: 6,
+            ),
+            title: track.title,
+            subtitle: track.artist,
+            playing: controller.currentTrack?.id == track.id,
+            tooltip: '$actionLabel ${track.title}',
+            onPlay: onPlay,
+          )
+        : isModern(context)
+        ? _ModernTile(
+            track: track,
+            title: track.title,
+            subtitle: track.artist,
+            tooltip: '$actionLabel ${track.title}',
+            icon: StudioSymbols.playArrow,
+            onPlay: onPlay,
+          )
+        : Material(
+            color: Theme.of(context).colorScheme.surfaceContainerLow,
+            borderRadius: StudioPalette.of(context),
+            child: InkWell(
+              borderRadius: StudioPalette.of(context),
+              onTap: onPlay,
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Center(
-                      child: Artwork(
-                        track: track,
-                        artworkContext: ArtworkContext.cardDetail,
-                        radius: 2,
+                    Expanded(
+                      child: Stack(
+                        children: [
+                          Center(
+                            child: Artwork(
+                              track: track,
+                              artworkContext: ArtworkContext.cardDetail,
+                              radius: 2,
+                            ),
+                          ),
+                          Positioned(
+                            right: 0,
+                            bottom: 0,
+                            child: IconButton.filled(
+                              tooltip: '$actionLabel ${track.title}',
+                              onPressed: onPlay,
+                              icon: const Icon(StudioSymbols.playArrow),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    Positioned(
-                      right: 0,
-                      bottom: 0,
-                      child: IconButton.filled(
-                        tooltip: '$actionLabel ${track.title}',
-                        onPressed: onPlay,
-                        icon: const Icon(StudioSymbols.playArrow),
+                    const SizedBox(height: 16),
+                    Text(
+                      track.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontFamily: 'Newsreader',
+                        fontSize: 24,
+                        height: 1.1,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      track.artist,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
-              Text(
-                track.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontFamily: 'Newsreader',
-                  fontSize: 24,
-                  height: 1.1,
+            ),
+          ),
+  );
+}
+
+/// Tarjeta Modern de estante: portada radio 12, título Inter 600, play menta.
+class _ModernTile extends StatelessWidget {
+  const _ModernTile({
+    required this.track,
+    required this.title,
+    required this.subtitle,
+    required this.tooltip,
+    required this.icon,
+    required this.onPlay,
+    this.caption,
+    this.round = false,
+  });
+  final Track track;
+  final String title, subtitle, tooltip;
+  final String? caption;
+  final IconData icon;
+  final VoidCallback onPlay;
+  final bool round;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return RepaintBoundary(
+      child: ModernCard(
+        onTap: onPlay,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Stack(
+              children: [
+                Artwork(
+                  track: track,
+                  artworkContext: ArtworkContext.card,
+                  radius: round ? 88 : 12,
                 ),
+                Positioned(
+                  right: 8,
+                  bottom: 8,
+                  child: Tooltip(
+                    message: tooltip,
+                    child: Material(
+                      color: Tracky.mint,
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: onPlay,
+                        child: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Icon(icon, size: 22, color: Tracky.navy),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text(
+              title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
+                height: 1.25,
+                letterSpacing: -.16,
               ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+            ),
+            if (caption != null) ...[
               const SizedBox(height: 6),
               Text(
-                track.artist,
-                maxLines: 1,
+                caption!,
+                maxLines: 3,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
               ),
             ],
-          ),
+          ],
         ),
       ),
-    ),
-  );
+    );
+  }
 }

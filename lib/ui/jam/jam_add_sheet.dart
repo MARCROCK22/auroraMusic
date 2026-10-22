@@ -3,6 +3,7 @@ import '../../core/models.dart';
 import '../../jam/jam_controller.dart';
 import '../../jam/jam_models.dart';
 import '../artwork.dart';
+import '../undo_snackbar.dart';
 import 'jam_session_panel.dart';
 import 'jam_widgets.dart';
 
@@ -13,6 +14,7 @@ Future<void> showJamAddSheet(BuildContext context, JamController jam) {
     isScrollControlled: true,
     showDragHandle: true,
     useSafeArea: true,
+    shape: jamSheetShape(context),
     constraints: BoxConstraints(maxWidth: 640, maxHeight: height * .9),
     builder: (_) => JamAddSheet(jam: jam),
   );
@@ -44,7 +46,7 @@ class _JamAddSheetState extends State<JamAddSheet> {
 
   void _say(String text) => ScaffoldMessenger.maybeOf(
     context,
-  )?.showSnackBar(SnackBar(content: Text(text)));
+  )?.showSnackBar(auroraSnackBar(context, Text(text)));
 
   void _addOne(Track t) {
     final ok = jam.addTracks([t]);
@@ -198,7 +200,11 @@ class _JamAddSheetState extends State<JamAddSheet> {
             ),
             subtitle: Row(
               children: [
-                JamAvatar(name: s.forName, size: 18),
+                JamAvatar(
+                  name: s.forName,
+                  size: 18,
+                  image: jam.avatarOf(s.forId),
+                ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(

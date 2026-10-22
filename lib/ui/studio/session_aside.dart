@@ -7,6 +7,9 @@ import '../jam/jam_flows.dart';
 import '../jam/jam_add_sheet.dart';
 import '../jam/jam_qr_code.dart';
 import '../jam/jam_widgets.dart';
+import '../../theme/brasa_theme.dart';
+import '../../theme/modern_theme.dart';
+import '../../theme/modern_widgets.dart';
 import 'equalizer_panel.dart';
 import 'studio_components.dart';
 import 'studio_symbols.dart';
@@ -37,13 +40,32 @@ class StudioSessionAside extends StatelessWidget {
               .take(3)
               .toList()
         : null;
+    final brasa = isBrasa(context);
+    final modern = isModern(context) || brasa;
+    Widget panel(Widget child) => brasa
+        ? DecoratedBox(
+            decoration: BoxDecoration(
+              color: Brasa.obsidian,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Padding(padding: const EdgeInsets.all(16), child: child),
+          )
+        : modern
+        ? ModernCard(child: child)
+        : StudioPanel(child: child);
+    final titleFont = modern ? 'Inter' : 'Newsreader';
+    final titleWeight = brasa
+        ? FontWeight.w700
+        : modern
+        ? FontWeight.w600
+        : FontWeight.w500;
     return SizedBox(
       width: 340,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(8, 16, 24, 24),
         children: [
-          StudioPanel(
-            child: Column(
+          panel(
+            Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
@@ -61,10 +83,10 @@ class StudioSessionAside extends StatelessWidget {
                         connected
                             ? 'Sesión Compartida Activa'
                             : 'Sesión Compartida',
-                        style: const TextStyle(
-                          fontFamily: 'Newsreader',
+                        style: TextStyle(
+                          fontFamily: titleFont,
                           fontSize: 16,
-                          fontWeight: FontWeight.w500,
+                          fontWeight: titleWeight,
                         ),
                       ),
                     ),
@@ -204,9 +226,9 @@ class StudioSessionAside extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 24),
-          StudioPanel(
-            child: Column(
+          SizedBox(height: modern ? 20 : 24),
+          panel(
+            Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
@@ -216,9 +238,10 @@ class StudioSessionAside extends StatelessWidget {
                     Expanded(
                       child: Text(
                         'En Cola (Próximas ${shared?.length ?? personal.length})',
-                        style: const TextStyle(
-                          fontFamily: 'Newsreader',
+                        style: TextStyle(
+                          fontFamily: titleFont,
                           fontSize: 16,
+                          fontWeight: modern ? FontWeight.w600 : null,
                         ),
                       ),
                     ),
@@ -266,8 +289,8 @@ class StudioSessionAside extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 24),
-          StudioPanel(child: EqualizerPanel(controller: c)),
+          SizedBox(height: modern ? 20 : 24),
+          panel(EqualizerPanel(controller: c)),
         ],
       ),
     );

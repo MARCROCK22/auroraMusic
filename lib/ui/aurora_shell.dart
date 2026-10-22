@@ -5,6 +5,10 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'aurora_states.dart';
+import '../theme/brasa_theme.dart';
+import '../theme/slush_theme.dart';
+import '../theme/modern_theme.dart';
+import '../theme/modern_widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -15,7 +19,9 @@ import '../core/source_backend.dart';
 import '../core/desktop_shell.dart';
 import '../core/window_controls.dart';
 import '../jam/jam_protocol.dart';
+import '../profile/profile_settings.dart';
 import 'desktop_settings_tiles.dart';
+import 'playlist_views/playlist_view_mode_tile.dart';
 import 'listenbrainz_settings_panel.dart';
 import '../jam/jam_controller.dart';
 import 'studio/equalizer_panel.dart';
@@ -34,6 +40,11 @@ import 'jam/jam_flows.dart';
 import 'jam/jam_page.dart';
 import 'jam/jam_widgets.dart';
 import 'playlist_shelf.dart';
+import 'playlist_views/playlist_cover.dart';
+import 'playlist_views/playlist_photo_menu.dart';
+import 'playlist_views/playlist_view_mode.dart';
+import 'playlist_detail_tools.dart';
+import 'profile_page.dart';
 import '../dj/ai_dj.dart';
 import '../metadata/spotify/spotify_metadata_provider.dart';
 import '../metadata/spotify_recs.dart';
@@ -46,6 +57,7 @@ import 'spotify_import_dialog.dart';
 import 'spotify_match_dialog.dart';
 import 'vinyl_player.dart';
 import 'queue_panel.dart';
+import 'settings_layout.dart';
 import 'offline_settings_panel.dart';
 import '../youtube_music/youtube_music_page.dart';
 import 'video_downloads_page.dart';
@@ -72,6 +84,7 @@ const _sections = [
   'YouTube Music',
   'Descargar vídeos',
   'Artistas',
+  'Ecualizador',
 ];
 const _icons = [
   Icons.home_outlined,
@@ -87,6 +100,7 @@ const _icons = [
   Icons.music_video_outlined,
   Icons.video_file_outlined,
   Icons.mic_none_rounded,
+  Icons.equalizer,
 ];
 const _primarySections = [0, 1, 8, 2, 3];
 
@@ -214,8 +228,12 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   void _startFollow() {
     final follow = ref.read(followServiceProvider);
     // Enganche del DJ: refuerzo suave a pistas de artistas seguidos.
-    ref.read(controllerProvider).followedArtistKeys = () =>
-        follow.followedArtistKeys;
+    final controller = ref.read(controllerProvider);
+    controller.followedArtistKeys = () => follow.followedArtistKeys;
+    controller.artistNavigator = (name) async {
+      await _navigate(1);
+      if (mounted) await controller.openArtistProfile(name);
+    };
     unawaited(
       follow
           .load()
@@ -533,6 +551,10 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
               final wide = size.maxWidth >= 900;
               final desktop = size.maxWidth >= 1200;
               final rail = size.maxWidth >= 600;
+              final brasa = isBrasa(context);
+              final jamOn =
+                  _jam?.service.connected == true ||
+                  _jam?.service.reconnecting == true;
               return Scaffold(
                 body: SafeArea(
                   child: Column(
@@ -540,9 +562,20 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                       if (rail || WindowControls.supported)
                         StudioTitleBar(
                           onNavigate: _navigate,
-                          sessionText:
-                              (_jam?.service.connected == true ||
-                                  _jam?.service.reconnecting == true)
+                          avatar: c.profileAvatar,
+                          searchController: brasa && rail ? _search : null,
+                          searchFocus: _searchFocus,
+                          onSearch: (q) {
+                            _spotifySearch = false;
+                            _navigate(1);
+                            _submitSearch(c, q);
+                          },
+                          onSearchChanged: (_) => setState(() {}),
+                          sessionText: brasa
+                              ? (jamOn
+                                    ? 'Jam · ${_jam!.peopleCount} ${_jam!.peopleCount == 1 ? 'persona' : 'personas'}'
+                                    : 'Iniciar una Jam')
+                              : jamOn
                               ? 'JAM · ${_jam!.peopleCount} ${_jam!.peopleCount == 1 ? 'PERSONA' : 'PERSONAS'} · ${_jam!.roleLabel.toUpperCase()}'
                               : 'INICIAR UNA JAM',
                           activeSession:
@@ -561,7 +594,8 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                             Expanded(
                               child: Column(
                                 children: [
-                                  if (!wide || ![0, 3, 6].contains(_section))
+                                  if (!(brasa && rail) &&
+                                      (!wide || ![0, 3, 6].contains(_section)))
                                     _header(c, rail),
                                   if (!c.ready || c.busy)
                                     const LinearProgressIndicator(minHeight: 2),
@@ -570,7 +604,29 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                                     controller: _updates,
                                     isPlaying: () => c.audio.isPlaying,
                                   ),
-                                  Expanded(child: _content(c)),
+                                  Expanded(
+                                    child: isModern(context)
+                                        ? Align(
+                                            alignment: Alignment.topCenter,
+                                            child: ConstrainedBox(
+                                              constraints: BoxConstraints(
+                                                maxWidth:
+                                                    const [
+                                                      4,
+                                                      5,
+                                                      6,
+                                                      9,
+                                                      10,
+                                                      11,
+                                                    ].contains(_section)
+                                                    ? double.infinity
+                                                    : 1600,
+                                              ),
+                                              child: _content(c),
+                                            ),
+                                          )
+                                        : _content(c),
+                                  ),
                                 ],
                               ),
                             ),
@@ -581,6 +637,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                                 _section != 5 &&
                                 _section != 6 &&
                                 _section != 7 &&
+                                _section != 13 &&
                                 _section != 10 &&
                                 _section != 11)
                               StudioSessionAside(
@@ -626,10 +683,25 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                             _navigate(_primarySections[index]),
                         labelBehavior:
                             NavigationDestinationLabelBehavior.onlyShowSelected,
+                        backgroundColor: brasa
+                            ? Brasa.void_
+                            : isSlush(context)
+                            ? Slush.ink
+                            : isModern(context)
+                            ? Theme.of(context).colorScheme.surfaceContainerLow
+                            : null,
+                        indicatorColor: brasa ? Brasa.cream : null,
+                        elevation: isModern(context) || brasa ? 0 : null,
                         destinations: List.generate(
                           _primarySections.length,
                           (i) => NavigationDestination(
                             icon: Icon(_icons[_primarySections[i]]),
+                            selectedIcon: brasa
+                                ? Icon(
+                                    _icons[_primarySections[i]],
+                                    color: Brasa.void_,
+                                  )
+                                : null,
                             label: _primarySections[i] == 3
                                 ? 'Descargas'
                                 : _sections[_primarySections[i]],
@@ -721,18 +793,22 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         selected: _section,
         onNavigate: _navigate,
         onPlaylist: (playlist) => _openLibrary(playlist: playlist),
+        onCreatePlaylist: () => _createPlaylist(c),
         shortcuts: ref.watch(shortcutServiceProvider),
       );
     }
     final colors = Theme.of(context).colorScheme;
+    final modern = isModern(context);
     return Container(
       width: wide ? 216 : 76,
       decoration: BoxDecoration(
-        border: Border(
-          right: BorderSide(
-            color: colors.outlineVariant.withValues(alpha: .35),
-          ),
-        ),
+        border: modern
+            ? null
+            : Border(
+                right: BorderSide(
+                  color: colors.outlineVariant.withValues(alpha: .35),
+                ),
+              ),
       ),
       child: Column(
         children: [
@@ -741,12 +817,31 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.graphic_eq, color: colors.primary, size: 26),
+                if (modern)
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Tracky.navy,
+                      shape: BoxShape.circle,
+                    ),
+                    child: SizedBox.square(
+                      dimension: 34,
+                      child: Icon(
+                        Icons.play_arrow_rounded,
+                        color: Colors.white,
+                        size: 22,
+                      ),
+                    ),
+                  )
+                else
+                  Icon(Icons.graphic_eq, color: colors.primary, size: 26),
                 if (wide) ...[
                   const SizedBox(width: 8),
-                  const Text(
+                  Text(
                     'Aurora',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                    style: TextStyle(
+                      fontSize: modern ? 18 : 20,
+                      fontWeight: modern ? FontWeight.w600 : FontWeight.w700,
+                    ),
                   ),
                 ],
               ],
@@ -758,7 +853,8 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                 children: [
                   for (final i in _primarySections) _navItem(i, wide),
                   const Divider(indent: 20, endIndent: 20, height: 18),
-                  for (final i in [12, 10, 11, 9, 4, 5, 6]) _navItem(i, wide),
+                  for (final i in [12, 10, 11, 9, 4, 5, 6, 13])
+                    _navItem(i, wide),
                   if (wide && c.playlists.isNotEmpty) ...[
                     const Divider(indent: 20, endIndent: 20, height: 18),
                     for (final playlist in c.playlists)
@@ -789,18 +885,21 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   Widget _navItem(int index, bool wide) {
     final colors = Theme.of(context).colorScheme;
     final active = _section == index;
+    final modern = isModern(context);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       child: Tooltip(
         message: _sections[index],
         child: Material(
-          color: active
+          color: modern
+              ? (active ? colors.primary : Colors.transparent)
+              : active
               ? colors.primary.withValues(alpha: .12)
               : Theme.of(context).colorScheme.surface.withValues(alpha: 0),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(modern ? 999 : 8),
           child: InkWell(
             onTap: () => _navigate(index),
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(modern ? 999 : 8),
             child: SizedBox(
               height: 42,
               child: Row(
@@ -812,7 +911,11 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                   Icon(
                     _icons[index],
                     size: 19,
-                    color: active ? colors.primary : colors.onSurfaceVariant,
+                    color: modern
+                        ? (active ? colors.onPrimary : colors.onSurfaceVariant)
+                        : active
+                        ? colors.primary
+                        : colors.onSurfaceVariant,
                   ),
                   if (wide) ...[
                     const SizedBox(width: 12),
@@ -823,6 +926,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 13,
+                          color: modern && active ? colors.onPrimary : null,
                           fontWeight: active
                               ? FontWeight.w600
                               : FontWeight.w400,
@@ -840,8 +944,30 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     );
   }
 
+  Widget _modernTitle(String title) {
+    final words = title.split(' ');
+    final (before, emphasis) = _section == 0 && _playlist == null
+        ? ('Tu ', 'música')
+        : _playlist != null || words.length < 2
+        ? (title, '')
+        : ('${words.sublist(0, words.length - 1).join(' ')} ', words.last);
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: ModernHeadline(before: before, emphasis: emphasis, size: 28),
+      ),
+    );
+  }
+
   Widget _header(AppController c, bool rail) => Padding(
-    padding: EdgeInsets.fromLTRB(rail ? 32 : 20, 18, rail ? 32 : 20, 12),
+    padding: EdgeInsets.fromLTRB(
+      rail ? 32 : 20,
+      isModern(context) ? 28 : 18,
+      rail ? 32 : 20,
+      isModern(context) ? 20 : 12,
+    ),
     child: Row(
       children: [
         if (!rail) ...[
@@ -849,18 +975,31 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
           const SizedBox(width: 10),
         ],
         Expanded(
-          child: Text(
-            (_playlist == null
-                    ? null
-                    : c.playlists
-                          .where((p) => p.id == _playlist!.id)
-                          .firstOrNull
-                          ?.name) ??
-                _sections[_section],
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
-          ),
+          child: isModern(context)
+              ? _modernTitle(
+                  (_playlist == null
+                          ? null
+                          : c.playlists
+                                .where((p) => p.id == _playlist!.id)
+                                .firstOrNull
+                                ?.name) ??
+                      _sections[_section],
+                )
+              : Text(
+                  (_playlist == null
+                          ? null
+                          : c.playlists
+                                .where((p) => p.id == _playlist!.id)
+                                .firstOrNull
+                                ?.name) ??
+                      _sections[_section],
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
         ),
         IconButton(
           tooltip: 'Importar archivos de audio',
@@ -933,57 +1072,117 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                   title: Text('Letras'),
                 ),
               ),
+              PopupMenuItem(
+                value: 13,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.equalizer),
+                  title: Text('Ecualizador'),
+                ),
+              ),
             ],
           ),
         if (rail)
           Padding(
             padding: const EdgeInsets.only(left: 4),
-            child: Text(
-              ref
-                  .watch(shortcutServiceProvider)
-                  .labelOf(ShortcutId.searchFocus),
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
+            child: isModern(context)
+                ? ModernBadge(
+                    ref
+                        .watch(shortcutServiceProvider)
+                        .labelOf(ShortcutId.searchFocus),
+                  )
+                : Text(
+                    ref
+                        .watch(shortcutServiceProvider)
+                        .labelOf(ShortcutId.searchFocus),
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
           ),
       ],
     ),
   );
 
-  Widget _errorBanner(AppController c) => Material(
-    color: Theme.of(context).colorScheme.errorContainer,
-    child: Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 8, 8),
-      child: Row(
-        children: [
-          Icon(
-            Icons.error_outline,
-            color: Theme.of(context).colorScheme.onErrorContainer,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              c.error!,
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onErrorContainer,
+  Widget _errorBanner(AppController c) => isBrasa(context)
+      ? Padding(
+          padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+          child: Material(
+            color: Brasa.graphite,
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    size: 20,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      c.error!,
+                      style: const TextStyle(fontSize: 14, color: Brasa.cream),
+                    ),
+                  ),
+                  if (_webAudio?.needsWebsiteAccess == true)
+                    FilledButton(
+                      onPressed: () => _webAudio?.setWebsiteVisible(true),
+                      child: const Text('Revisar sitio'),
+                    ),
+                  IconButton(
+                    tooltip: 'Cerrar aviso',
+                    onPressed: c.clearError,
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
               ),
             ),
           ),
-          if (_webAudio?.needsWebsiteAccess == true)
-            TextButton(
-              onPressed: () => _webAudio?.setWebsiteVisible(true),
-              child: const Text('Revisar sitio'),
+        )
+      : isModern(context)
+      ? ModernBanner(
+          message: c.error!,
+          actionLabel: _webAudio?.needsWebsiteAccess == true
+              ? 'Revisar sitio'
+              : null,
+          onAction: () => _webAudio?.setWebsiteVisible(true),
+          onClose: c.clearError,
+        )
+      : Material(
+          color: Theme.of(context).colorScheme.errorContainer,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 8, 8),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.error_outline,
+                  color: Theme.of(context).colorScheme.onErrorContainer,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    c.error!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onErrorContainer,
+                    ),
+                  ),
+                ),
+                if (_webAudio?.needsWebsiteAccess == true)
+                  TextButton(
+                    onPressed: () => _webAudio?.setWebsiteVisible(true),
+                    child: const Text('Revisar sitio'),
+                  ),
+                IconButton(
+                  tooltip: 'Cerrar aviso',
+                  onPressed: c.clearError,
+                  icon: const Icon(Icons.close),
+                ),
+              ],
             ),
-          IconButton(
-            tooltip: 'Cerrar aviso',
-            onPressed: c.clearError,
-            icon: const Icon(Icons.close),
           ),
-        ],
-      ),
-    ),
-  );
+        );
 
   Widget _content(AppController c) => Stack(
     fit: StackFit.expand,
@@ -1047,6 +1246,11 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         return _settings(c);
       case 8:
         return DjDiscoveryPage(controller: c, onSearch: () => _navigate(1));
+      case 13:
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: EqualizerPanel(controller: c, onClose: () => _navigate(0)),
+        );
       case 12:
         return ArtistsPage(
           controller: c,
@@ -1069,6 +1273,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   }
 
   Widget _home(AppController c) => HomeMusicPage(
+    follow: ref.read(followServiceProvider),
     onSearchQuery: (query) {
       _search.text = query;
       _spotifySearch = false;
@@ -1094,7 +1299,15 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   Widget _sectionTitle(String title, String subtitle) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text(title, style: Theme.of(context).textTheme.titleLarge),
+      Text(
+        title,
+        style: isModern(context)
+            ? Theme.of(context).textTheme.titleLarge?.copyWith(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              )
+            : Theme.of(context).textTheme.titleLarge,
+      ),
       const SizedBox(height: 6),
       Text(
         subtitle,
@@ -1102,6 +1315,51 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       ),
     ],
   );
+
+  /// ChoiceChip; en Modern: 8 px de radio, activo en azul marino.
+  Widget _chip(String label, bool selected, VoidCallback onSelected) {
+    if (isBrasa(context)) {
+      return ChoiceChip(
+        label: Text(label),
+        selected: selected,
+        showCheckmark: false,
+        selectedColor: Brasa.cream,
+        backgroundColor: Brasa.graphite,
+        side: BorderSide.none,
+        shape: const StadiumBorder(),
+        labelStyle: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+          color: selected ? Brasa.void_ : Brasa.cream,
+        ),
+        onSelected: (_) => onSelected(),
+      );
+    }
+    // Slush y el tema base usan el chip del tema (contorno, color vivo).
+    if (!isModern(context) || isSlush(context)) {
+      return ChoiceChip(
+        label: Text(label),
+        selected: selected,
+        showCheckmark: isSlush(context) ? false : null,
+        onSelected: (_) => onSelected(),
+      );
+    }
+    final colors = Theme.of(context).colorScheme;
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      showCheckmark: false,
+      selectedColor: colors.primary,
+      backgroundColor: colors.surfaceContainerHigh,
+      side: BorderSide(color: colors.outline),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      labelStyle: TextStyle(
+        fontWeight: FontWeight.w500,
+        color: selected ? colors.onPrimary : colors.onSurface,
+      ),
+      onSelected: (_) => onSelected(),
+    );
+  }
 
   Widget _searchPage(AppController c) => Column(
     children: [
@@ -1112,19 +1370,17 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
           child: Wrap(
             spacing: 8,
             children: [
-              ChoiceChip(
-                label: Text(
-                  c.usesOfficialYouTubeMusic
-                      ? 'Biblioteca local'
-                      : 'Audio · YouTube',
-                ),
-                selected: !_spotifySearch,
-                onSelected: (_) => setState(() => _spotifySearch = false),
+              _chip(
+                c.usesOfficialYouTubeMusic
+                    ? 'Biblioteca local'
+                    : 'Audio · YouTube',
+                !_spotifySearch,
+                () => setState(() => _spotifySearch = false),
               ),
-              ChoiceChip(
-                label: const Text('Metadatos · Spotify'),
-                selected: _spotifySearch,
-                onSelected: (_) => setState(() => _spotifySearch = true),
+              _chip(
+                'Metadatos · Spotify',
+                _spotifySearch,
+                () => setState(() => _spotifySearch = true),
               ),
               if (c.usesOfficialYouTubeMusic)
                 ActionChip(
@@ -1146,30 +1402,39 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
 
   Widget _audioSearchPage(AppController c) => Column(
     children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
-        child: TextField(
-          controller: _search,
-          focusNode: _searchFocus,
-          textInputAction: TextInputAction.search,
-          decoration: InputDecoration(
-            labelText: c.usesOfficialYouTubeMusic
-                ? 'Buscar en tu biblioteca'
-                : c.usesYouTubeWebAudio
-                ? 'Canción, artista o enlace de YouTube Music'
-                : 'Canción, artista o enlace',
-            prefixIcon: const Icon(Icons.search),
-            suffixIcon: IconButton(
-              tooltip: 'Buscar',
-              icon: const Icon(Icons.arrow_forward),
-              onPressed: () => _submitSearch(c, _search.text),
+      // Brasa en pantalla ancha: la búsqueda vive en la barra superior.
+      if (!(isBrasa(context) && MediaQuery.sizeOf(context).width >= 600))
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
+          child: TextField(
+            controller: _search,
+            focusNode: _searchFocus,
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              labelText: c.usesOfficialYouTubeMusic
+                  ? 'Buscar en tu biblioteca'
+                  : c.usesYouTubeWebAudio
+                  ? 'Canción, artista o enlace de YouTube Music'
+                  : 'Canción, artista o enlace',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: IconButton(
+                tooltip: 'Buscar',
+                icon: const Icon(Icons.arrow_forward),
+                onPressed: () => _submitSearch(c, _search.text),
+              ),
+              border: isBrasa(context)
+                  ? OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(9999),
+                      borderSide: BorderSide.none,
+                    )
+                  : isModern(context)
+                  ? null
+                  : const OutlineInputBorder(),
             ),
-            border: const OutlineInputBorder(),
+            onSubmitted: (query) => _submitSearch(c, query),
+            onChanged: (_) => setState(() {}),
           ),
-          onSubmitted: (query) => _submitSearch(c, query),
-          onChanged: (_) => setState(() {}),
         ),
-      ),
       if (!c.usesOfficialYouTubeMusic && !c.usesYouTubeWebAudio)
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -1184,10 +1449,10 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                   (SearchKind.artists, 'Artistas'),
                   (SearchKind.videos, 'Vídeos'),
                 ])
-                  ChoiceChip(
-                    label: Text(label),
-                    selected: c.searchKind == kind,
-                    onSelected: (_) => c.setSearchKind(kind),
+                  _chip(
+                    label,
+                    c.searchKind == kind,
+                    () => c.setSearchKind(kind),
                   ),
               ],
             ),
@@ -1491,64 +1756,101 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                 .toList();
       return Column(
         children: [
-          Flexible(
-            child: SingleChildScrollView(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    TextButton.icon(
-                      onPressed: () => setState(() {
-                        _playlist = null;
-                        _likesSelected = false;
-                      }),
-                      icon: const Icon(Icons.arrow_back),
-                      label: const Text('Todas las listas'),
-                    ),
-                    if (_likesSelected)
-                      Text(
-                        'Me gusta',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                    FilledButton.icon(
-                      onPressed: items.isEmpty
-                          ? null
-                          : () => c.playTrack(items.first, context: items),
-                      icon: const Icon(Icons.play_arrow),
-                      label: const Text('Reproducir'),
-                    ),
-                    if (items.isNotEmpty)
-                      TrackBatchButtons(controller: c, tracks: items),
-                    if (playlist != null) ...[
-                      OutlinedButton(
-                        onPressed: () async {
-                          final name = await _askText(
-                            'Renombrar lista',
-                            'Nombre',
-                            initial: playlist.name,
-                          );
-                          if (name != null) c.renamePlaylist(playlist, name);
-                        },
-                        child: const Text('Renombrar'),
-                      ),
-                      TextButton(
-                        onPressed: () async {
-                          if (await _confirm(
-                            'Eliminar lista',
-                            'Se eliminará «${playlist.name}». Tus archivos permanecerán en la biblioteca.',
-                          )) {
-                            c.deletePlaylist(playlist);
-                            setState(() => _playlist = null);
-                          }
-                        },
-                        child: const Text('Eliminar'),
-                      ),
-                    ],
-                  ],
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                TextButton.icon(
+                  onPressed: () => setState(() {
+                    _playlist = null;
+                    _likesSelected = false;
+                  }),
+                  icon: const Icon(Icons.arrow_back),
+                  label: const Text('Todas las listas'),
                 ),
-              ),
+                if (_likesSelected)
+                  Text(
+                    'Me gusta',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                if (items.isNotEmpty)
+                  TrackBatchButtons(controller: c, tracks: items),
+                if (playlist != null) ...[
+                  PlaylistPhotoMenu(
+                    controller: c,
+                    playlist: playlist,
+                    child: Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: PlaylistCover(
+                            playlist: playlist,
+                            tracks: playlistCoverTracks(c, playlist),
+                            size: 72,
+                          ),
+                        ),
+                        Positioned(
+                          right: 2,
+                          bottom: 2,
+                          child: Tooltip(
+                            message: 'Cambiar foto',
+                            child: GestureDetector(
+                              key: const ValueKey('playlist-cover-camera'),
+                              onTap: () => changePlaylistPhoto(context, c, playlist),
+                              child: const CircleAvatar(
+                                radius: 12,
+                                backgroundColor: Colors.black54,
+                                child: Icon(
+                                  Icons.photo_camera,
+                                  size: 14,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    key: const ValueKey('playlist-change-photo'),
+                    onPressed: () => changePlaylistPhoto(context, c, playlist),
+                    icon: const Icon(Icons.photo_outlined),
+                    label: const Text('Cambiar foto'),
+                  ),
+                  if (playlist.photoPath != null)
+                    TextButton(
+                      key: const ValueKey('playlist-remove-photo'),
+                      onPressed: () => c.setPlaylistPhoto(playlist, null),
+                      child: const Text('Quitar foto'),
+                    ),
+                  OutlinedButton(
+                    onPressed: () async {
+                      final name = await _askText(
+                        'Renombrar lista',
+                        'Nombre',
+                        initial: playlist.name,
+                      );
+                      if (name != null) c.renamePlaylist(playlist, name);
+                    },
+                    child: const Text('Renombrar'),
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      if (await _confirm(
+                        'Eliminar lista',
+                        'Se eliminará «${playlist.name}». Tus archivos permanecerán en la biblioteca.',
+                      )) {
+                        c.deletePlaylist(playlist);
+                        setState(() => _playlist = null);
+                      }
+                    },
+                    child: const Text('Eliminar'),
+                  ),
+                ],
+              ],
             ),
           ),
           Expanded(
@@ -1562,24 +1864,34 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                         ? 'Marca una canción con Me gusta para verla aquí.'
                         : 'Añade canciones desde el menú de cualquier resultado o canción.',
                   )
-                : playlist == null
-                ? ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: items.length,
-                    itemBuilder: (_, i) => _trackTile(c, items[i], items),
-                  )
-                : ReorderableListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: items.length,
-                    onReorder: (oldIndex, newIndex) =>
-                        c.reorderPlaylist(playlist, oldIndex, newIndex),
-                    itemBuilder: (_, i) => _trackTile(
-                      c,
-                      items[i],
-                      items,
-                      key: ValueKey('${playlist.id}-${items[i].id}'),
-                      playlist: playlist,
-                    ),
+                : PlaylistDetailTools(
+                    tracks: items,
+                    onPlay: (v) => c.playTrack(v.first, context: v),
+                    builder: (v, canReorder) => playlist == null || !canReorder
+                        ? ListView.builder(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            itemCount: v.length,
+                            itemBuilder: (_, i) => _trackTile(
+                              c,
+                              v[i],
+                              v,
+                              key: ValueKey('${playlist?.id}-${v[i].id}'),
+                              playlist: playlist,
+                            ),
+                          )
+                        : ReorderableListView.builder(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            itemCount: v.length,
+                            onReorder: (oldIndex, newIndex) =>
+                                c.reorderPlaylist(playlist, oldIndex, newIndex),
+                            itemBuilder: (_, i) => _trackTile(
+                              c,
+                              v[i],
+                              v,
+                              key: ValueKey('${playlist.id}-${v[i].id}'),
+                              playlist: playlist,
+                            ),
+                          ),
                   ),
           ),
         ],
@@ -1768,8 +2080,56 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
 
   Widget _downloads(AppController c) => DownloadsStudioPage(controller: c);
 
+  static const _settingsTabs = [
+    'Apariencia',
+    'Reproducción',
+    'Biblioteca',
+    'Cuenta y servicios',
+    'Avanzado',
+  ];
+  int _settingsTab = 0;
+
+  // Por título; lo no listado (herramientas y diagnóstico) cae en Avanzado.
+  int _settingsTabOf(String title) => switch (title) {
+    'Identidad y tema' || 'Color de acento' || 'Movimiento' => 0,
+    'Reproducción' ||
+    'Reproducción experimental' ||
+    'Ecualizador' ||
+    'Sueño' => 1,
+    'Almacenamiento y biblioteca' ||
+    'Vista de playlists' ||
+    'Música sin conexión' => 2,
+    'Perfil' || 'Actualizaciones' || 'ListenBrainz' => 3,
+    _ => 4,
+  };
+
   Widget _settings(AppController c) {
-    final sections = <({String title, String subtitle, List<Widget> children})>[
+    final allSections = <({String title, String subtitle, List<Widget> children})>[
+      (
+        title: 'Perfil',
+        subtitle: 'Tu foto y nombre en la Jam',
+        children: [
+          ProfileSettings(controller: c),
+          ListTile(
+            leading: const Icon(Icons.query_stats_rounded),
+            title: const Text('Estadísticas de escucha'),
+            subtitle: const Text('Canción, artista y género más escuchados'),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => Scaffold(
+                  appBar: AppBar(title: const Text('Perfil')),
+                  body: ProfilePage(controller: c),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+      (
+        title: 'Vista de playlists',
+        subtitle: 'Cómo se muestran tus listas',
+        children: [PlaylistViewModeTile(controller: c)],
+      ),
       (
         title: 'Almacenamiento y biblioteca',
         subtitle: 'Tu música y descargas en este dispositivo',
@@ -1911,33 +2271,79 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
           ],
         ),
       (
-        title: 'Identidad y tema',
-        subtitle: 'Ajusta la apariencia de Aurora',
+        title: 'Reproducción',
+        subtitle: 'Cola y reproducción automática',
         children: [
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Autoplay: rellenar la cola automáticamente'),
+            subtitle: const Text(
+              'Al acabarse la cola, Aurora añade canciones afines a tus gustos.',
+            ),
+            value: c.autoRefill,
+            onChanged: c.setAutoRefill,
+          ),
+        ],
+      ),
+      (
+        title: 'Identidad y tema',
+        subtitle: 'Tema y modo de Aurora',
+        children: [
+          Text('Temas', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 4),
+          const Text(
+            'Atelier es el clásico; Modern, limpio y luminoso; Brasa, oscuro y cálido en carriles; Slush, pegatinas y colores planos.',
+          ),
+          const SizedBox(height: 8),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (final entry in {
-                ThemeMode.system: 'Sistema',
-                ThemeMode.dark: 'Oscuro',
-                ThemeMode.light: 'Claro',
+              for (final entry in const {
+                'atelier': 'Atelier',
+                'modern': 'Modern',
+                'brasa': 'Brasa',
+                'slush': 'Slush',
               }.entries)
-                ChoiceChip(
-                  label: Text(entry.value),
-                  selected: c.themeMode == entry.key,
-                  onSelected: (_) => c.setThemeMode(entry.key),
+                _chip(
+                  entry.value,
+                  c.themeKind == entry.key,
+                  () => c.setThemeKind(entry.key),
                 ),
             ],
           ),
-          const SizedBox(height: 12),
-          Text(
-            'Color de acento',
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
-          const SizedBox(height: 4),
-          const Text('Automático toma el color de la portada actual.'),
+          const SizedBox(height: 16),
+          Text('Modo', style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 8),
+          if (c.themeKind == 'brasa' || c.themeKind == 'slush')
+            Text(
+              c.themeKind == 'slush'
+                  ? 'Slush es siempre claro.'
+                  : 'Brasa es siempre oscuro.',
+            )
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final entry in {
+                  ThemeMode.system: 'Sistema',
+                  ThemeMode.dark: 'Oscuro',
+                  ThemeMode.light: 'Claro',
+                }.entries)
+                  _chip(
+                    entry.value,
+                    c.themeMode == entry.key,
+                    () => c.setThemeMode(entry.key),
+                  ),
+              ],
+            ),
+        ],
+      ),
+      (
+        title: 'Color de acento',
+        subtitle: 'Automático toma el color de la portada actual',
+        children: [
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -1949,29 +2355,25 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                 'forest': 'Verde bosque',
                 'purple': 'Morado',
               }.entries)
-                ChoiceChip(
-                  label: Text(entry.value),
-                  selected: c.accentPalette == entry.key,
-                  onSelected: (_) => c.setAccentPalette(entry.key),
+                _chip(
+                  entry.value,
+                  c.accentPalette == entry.key,
+                  () => c.setAccentPalette(entry.key),
                 ),
             ],
           ),
-          const SizedBox(height: 12),
+        ],
+      ),
+      (
+        title: 'Movimiento',
+        subtitle: 'Animaciones de la interfaz',
+        children: [
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('Reducir movimiento'),
             subtitle: const Text('Una experiencia visual más tranquila.'),
             value: c.reducedMotion,
             onChanged: c.setReducedMotion,
-          ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Autoplay: rellenar la cola automáticamente'),
-            subtitle: const Text(
-              'Al acabarse la cola, Aurora añade canciones afines a tus gustos.',
-            ),
-            value: c.autoRefill,
-            onChanged: c.setAutoRefill,
           ),
         ],
       ),
@@ -2135,52 +2537,81 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         ],
       ),
     ];
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final compact = constraints.maxWidth < 700;
-        Widget card(int i) => Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: Material(
-            color: Theme.of(context).colorScheme.surfaceContainerLow,
-            borderRadius: BorderRadius.circular(12),
-            child: Padding(
-              padding: EdgeInsets.all(compact ? 16 : 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _sectionTitle(sections[i].title, sections[i].subtitle),
-                  const SizedBox(height: 14),
-                  ...sections[i].children,
-                ],
-              ),
-            ),
-          ),
-        );
-        if (compact) {
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: [for (var i = 0; i < sections.length; i++) card(i)],
-          );
-        }
-        Widget column(int offset) => Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (var i = offset; i < sections.length; i += 2) card(i),
-            ],
-          ),
-        );
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1100),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [column(0), const SizedBox(width: 20), column(1)],
-              ),
-            ),
-          ),
+    final sections = [
+      for (final s in allSections)
+        if (_settingsTabOf(s.title) == _settingsTab) s,
+    ];
+    final modern = isModern(context);
+    final brasa = isBrasa(context);
+    return SettingsLayout(
+      tabs: _settingsTabs,
+      icons: const [
+        Icons.palette_outlined,
+        Icons.play_circle_outline,
+        Icons.library_music_outlined,
+        Icons.manage_accounts_outlined,
+        Icons.tune_rounded,
+      ],
+      descriptions: const [
+        'Tema, modo, color de acento y movimiento.',
+        'Ecualizador, sueño y autoplay.',
+        'Carpetas, descargas y vista de playlists.',
+        'Perfil, actualizaciones y ListenBrainz.',
+        'Ventana, atajos, herramientas y diagnóstico.',
+      ],
+      selected: _settingsTab,
+      onSelect: (i) => setState(() => _settingsTab = i),
+      cardCount: sections.length,
+      chip: _chip,
+      card: (i, compact) {
+        return Padding(
+          padding: EdgeInsets.only(bottom: brasa ? 16 : (modern ? 24 : 16)),
+          child: brasa
+              ? DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Brasa.obsidian,
+                    borderRadius: BorderRadius.circular(6),
+                    boxShadow: Brasa.cardShadow,
+                  ),
+                  child: Padding(
+                    padding: EdgeInsets.all(compact ? 16 : 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _sectionTitle(sections[i].title, sections[i].subtitle),
+                        const SizedBox(height: 14),
+                        ...sections[i].children,
+                      ],
+                    ),
+                  ),
+                )
+              : modern
+              ? ModernCard(
+                  padding: EdgeInsets.all(compact ? 16 : 20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _sectionTitle(sections[i].title, sections[i].subtitle),
+                      const SizedBox(height: 14),
+                      ...sections[i].children,
+                    ],
+                  ),
+                )
+              : Material(
+                  color: Theme.of(context).colorScheme.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: EdgeInsets.all(compact ? 16 : 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _sectionTitle(sections[i].title, sections[i].subtitle),
+                        const SizedBox(height: 14),
+                        ...sections[i].children,
+                      ],
+                    ),
+                  ),
+                ),
         );
       },
     );
@@ -2460,6 +2891,12 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                                 ),
                               ),
                               IconButton(
+                                tooltip: 'Compartir',
+                                onPressed: () =>
+                                    TrackActions(context, player).share(t),
+                                icon: const Icon(Icons.share_outlined),
+                              ),
+                              IconButton(
                                 tooltip: 'Añadir a una lista',
                                 onPressed: () => _addToPlaylist(player, t),
                                 icon: const Icon(Icons.playlist_add),
@@ -2660,7 +3097,21 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
 
   Future<void> _createPlaylist(AppController c) async {
     final name = await _askText('Crear lista', 'Nombre de la lista');
-    if (name != null) c.createPlaylist(name);
+    if (name == null) return;
+    await c.createPlaylist(name);
+    final created = c.playlists.where((p) => p.name == name.trim()).lastOrNull;
+    if (created == null || !mounted) return;
+    // Paso opcional: ofrecer la foto justo al crear.
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('Lista «${created.name}» creada'),
+        action: SnackBarAction(
+          label: 'Añadir foto',
+          onPressed: () => changePlaylistPhoto(context, c, created),
+        ),
+      ),
+    );
   }
 
   Future<void> _addToPlaylist(AppController c, Track t) async {

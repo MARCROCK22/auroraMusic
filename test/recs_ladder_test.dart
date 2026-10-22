@@ -83,40 +83,30 @@ void main() {
     expect(sum(d.pickedByBucket), d.picked);
   });
 
-  test(
-    'adapter con YouTube caído usa api.sources antes que lo local',
-    () async {
-      final api = SuggestionsApi(
-        memory: RecsMemory(persist: false),
-        sources: [
-          RecSource(
-            RecBucket.discovery,
-            (c, n) async => [
-              for (var i = 0; i < 12; i++)
-                DjCandidate(
-                  tr('src$i', 'Otra $i'),
-                  'Descubrimiento',
-                  prior: 0.5,
-                ),
-            ],
-          ),
-        ],
-      );
-      final adapter = JamSuggestionAdapter(
-        api: api,
-        related: (_) async => throw 'YouTube caído',
-        seeds: () => [tr('r1', 'R1'), tr('r2', 'R2')],
-        local: () => [for (var i = 0; i < 6; i++) tr('loc$i', 'Local $i')],
-      );
-      final out = await adapter.build(current: tr('cur', 'Actual'));
-      expect(out, isNotEmpty);
-      // La exploración es aleatoria: se garantiza que las fuentes entran, no la mayoría.
-      expect(
-        out.where((s) => s.track.artist.startsWith('Otra')),
-        isNotEmpty,
-      );
-    },
-  );
+  test('adapter con YouTube caído usa api.sources antes que lo local', () async {
+    final api = SuggestionsApi(
+      memory: RecsMemory(persist: false),
+      sources: [
+        RecSource(
+          RecBucket.discovery,
+          (c, n) async => [
+            for (var i = 0; i < 12; i++)
+              DjCandidate(tr('src$i', 'Otra $i'), 'Descubrimiento', prior: 0.5),
+          ],
+        ),
+      ],
+    );
+    final adapter = JamSuggestionAdapter(
+      api: api,
+      related: (_) async => throw 'YouTube caído',
+      seeds: () => [tr('r1', 'R1'), tr('r2', 'R2')],
+      local: () => [for (var i = 0; i < 6; i++) tr('loc$i', 'Local $i')],
+    );
+    final out = await adapter.build(current: tr('cur', 'Actual'));
+    expect(out, isNotEmpty);
+    // La exploración es aleatoria: se garantiza que las fuentes entran, no la mayoría.
+    expect(out.where((s) => s.track.artist.startsWith('Otra')), isNotEmpty);
+  });
 
   test(
     'adapter: semillas deduplicadas (actual + recientes + favoritas)',

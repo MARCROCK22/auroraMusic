@@ -8,7 +8,12 @@ import '../core/models.dart';
 import '../jam/jam_controller.dart';
 import '../lyrics/lyrics_service.dart';
 import '../shortcuts/shortcut_service.dart';
+import '../theme/brasa_theme.dart';
+import '../theme/modern_theme.dart';
+import '../theme/modern_widgets.dart';
 import 'artwork.dart';
+import 'lyrics_brasa.dart';
+import 'lyrics_modern.dart';
 import 'studio/studio_symbols.dart';
 import 'studio/studio_transport.dart';
 
@@ -64,6 +69,8 @@ class _LyricsPanelState extends State<LyricsPanel> {
   Duration? _scrubPosition;
   String? _scrubTrackId;
   final Map<int, GlobalKey> _lineKeys = {};
+  final _scroll = ScrollController();
+  bool _firstReveal = true;
   @override
   void initState() {
     super.initState();
@@ -266,6 +273,7 @@ class _LyricsPanelState extends State<LyricsPanel> {
     widget.controller.removeListener(_changed);
     _scrubPosition = null;
     _scrubTrackId = null;
+    _scroll.dispose();
     _service.dispose();
     super.dispose();
   }
@@ -336,20 +344,27 @@ class _LyricsPanelState extends State<LyricsPanel> {
                 children: [
                   Expanded(
                     child: Container(
-                      decoration: BoxDecoration(
-                        color: colors.surfaceContainerLowest,
-                        border: Border(
-                          left: BorderSide(color: colors.outlineVariant),
-                          right: BorderSide(color: colors.outlineVariant),
-                        ),
-                        boxShadow: const [
-                          BoxShadow(color: Colors.black, offset: Offset(3, 4)),
-                        ],
-                      ),
+                      decoration: isBrasa(context)
+                          ? const BoxDecoration()
+                          : isModern(context)
+                          ? modernLyricsBackdrop(context)
+                          : BoxDecoration(
+                              color: colors.surfaceContainerLowest,
+                              border: Border(
+                                left: BorderSide(color: colors.outlineVariant),
+                                right: BorderSide(color: colors.outlineVariant),
+                              ),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Colors.black,
+                                  offset: Offset(3, 4),
+                                ),
+                              ],
+                            ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          if (desktop)
+                          if (desktop && !isBrasa(context))
                             Padding(
                               padding: const EdgeInsets.all(20),
                               child: Wrap(
@@ -358,20 +373,28 @@ class _LyricsPanelState extends State<LyricsPanel> {
                                 runSpacing: 8,
                                 children: [
                                   Text(
-                                    _result?.kind == LyricsKind.synced
+                                    isBrasa(context)
+                                        ? (_result?.kind == LyricsKind.synced
+                                              ? 'Letras sincronizadas'
+                                              : 'Estudio de letras')
+                                        : _result?.kind == LyricsKind.synced
                                         ? 'LETRAS SINCRONIZADAS'
                                         : 'ESTUDIO DE LETRAS',
                                     style: TextStyle(
                                       fontSize: 12,
-                                      letterSpacing: .8,
+                                      letterSpacing: isBrasa(context) ? 0 : .8,
                                       color: colors.onSurfaceVariant,
                                     ),
                                   ),
                                   Text(
-                                    _sourceLabel().toUpperCase(),
+                                    isBrasa(context)
+                                        ? _sourceLabel()
+                                        : _sourceLabel().toUpperCase(),
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: colors.primary,
+                                      color: isBrasa(context)
+                                          ? Brasa.steel
+                                          : colors.primary,
                                     ),
                                   ),
                                 ],
@@ -416,39 +439,74 @@ class _LyricsPanelState extends State<LyricsPanel> {
                               if (track != null) ...[
                                 Container(
                                   padding: const EdgeInsets.all(16),
-                                  decoration: BoxDecoration(
-                                    color: colors.surfaceContainerLow,
-                                    border: Border.all(
-                                      color: colors.outlineVariant,
-                                    ),
-                                    boxShadow: const [
-                                      BoxShadow(
-                                        color: Colors.black,
-                                        offset: Offset(3, 4),
-                                      ),
-                                    ],
-                                  ),
+                                  decoration: isBrasa(context)
+                                      ? const BoxDecoration(
+                                          color: Brasa.obsidian,
+                                          borderRadius: BorderRadius.all(
+                                            Radius.circular(6),
+                                          ),
+                                          boxShadow: Brasa.cardShadow,
+                                        )
+                                      : isModern(context)
+                                      ? BoxDecoration(
+                                          color: colors.surfaceContainerLow,
+                                          borderRadius: BorderRadius.circular(
+                                            16,
+                                          ),
+                                          boxShadow: Tracky.warmShadow,
+                                        )
+                                      : BoxDecoration(
+                                          color: colors.surfaceContainerLow,
+                                          border: Border.all(
+                                            color: colors.outlineVariant,
+                                          ),
+                                          boxShadow: const [
+                                            BoxShadow(
+                                              color: Colors.black,
+                                              offset: Offset(3, 4),
+                                            ),
+                                          ],
+                                        ),
                                   child: Artwork(
                                     track: track,
                                     artworkContext: ArtworkContext.playerDetail,
-                                    radius: 4,
+                                    radius: isBrasa(context)
+                                        ? 6
+                                        : (isModern(context) ? 8 : 4),
                                   ),
                                 ),
                                 const SizedBox(height: 20),
                                 Text(
                                   track.title,
-                                  style: const TextStyle(
-                                    fontFamily: 'Newsreader',
-                                    fontSize: 36,
-                                    height: 1.12,
-                                  ),
+                                  style: isBrasa(context)
+                                      ? const TextStyle(
+                                          fontFamily: 'Inter',
+                                          fontSize: 24,
+                                          fontWeight: FontWeight.w700,
+                                          height: 1.2,
+                                          color: Brasa.cream,
+                                        )
+                                      : isModern(context)
+                                      ? const TextStyle(
+                                          fontFamily: 'Bagel Fat One',
+                                          fontSize: 32,
+                                          letterSpacing: 32 * .03,
+                                          height: 1.15,
+                                        )
+                                      : const TextStyle(
+                                          fontFamily: 'Newsreader',
+                                          fontSize: 36,
+                                          height: 1.12,
+                                        ),
                                 ),
                                 const SizedBox(height: 12),
                                 Text(
                                   '${track.artist}${track.album == null ? '' : ' · ${track.album}'}',
                                   style: TextStyle(
-                                    fontSize: 18,
-                                    color: colors.primary,
+                                    fontSize: isBrasa(context) ? 14 : 18,
+                                    color: isBrasa(context)
+                                        ? Brasa.cloud
+                                        : colors.primary,
                                   ),
                                 ),
                                 const SizedBox(height: 24),
@@ -463,10 +521,9 @@ class _LyricsPanelState extends State<LyricsPanel> {
                               const SizedBox(height: 8),
                               _modes(),
                               const SizedBox(height: 24),
-                              Container(
-                                padding: const EdgeInsets.all(16),
-                                color: colors.surfaceContainerLow,
-                                child: Column(
+                              _noteBox(
+                                context,
+                                Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
@@ -530,6 +587,24 @@ class _LyricsPanelState extends State<LyricsPanel> {
       },
     );
   }
+
+  Widget _noteBox(BuildContext context, Widget child) => isBrasa(context)
+      ? Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Brasa.obsidian,
+            borderRadius: BorderRadius.circular(6),
+            boxShadow: Brasa.cardShadow,
+          ),
+          child: child,
+        )
+      : isModern(context)
+      ? ModernCard(child: child)
+      : Container(
+          padding: const EdgeInsets.all(16),
+          color: Theme.of(context).colorScheme.surfaceContainerLow,
+          child: child,
+        );
 
   String _sourceLabel() {
     final r = _result;
@@ -831,11 +906,13 @@ class _LyricsPanelState extends State<LyricsPanel> {
                   : result.text,
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontFamily: [
-                  'Newsreader',
-                  'Plus Jakarta Sans',
-                  'monospace',
-                ][_typeface],
+                fontFamily: isBrasa(context)
+                    ? 'Inter'
+                    : const [
+                        'Newsreader',
+                        'Plus Jakarta Sans',
+                        'monospace',
+                      ][_typeface],
                 fontSize: 24 * _sizes[_size],
                 height: 1.65,
               ),
@@ -844,23 +921,64 @@ class _LyricsPanelState extends State<LyricsPanel> {
         ),
       );
     }
+    void seekTo(LyricLine l) => widget.controller.seek(
+      Duration(
+        milliseconds: (l.at.inMilliseconds - _offsetMs).clamp(0, 1 << 60),
+      ),
+    );
+    if (isBrasa(context)) {
+      return BrasaLyricsList(
+        key: ValueKey(track.id),
+        lines: lines,
+        active: active,
+        onSeek: seekTo,
+        fontFamily: _typeface == 2 ? 'monospace' : 'Inter',
+        animate: !media.disableAnimations,
+      );
+    }
     if (active >= 0 && active != _lastActive) {
       _lastActive = active;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+      final instant = _firstReveal;
+      _firstReveal = false;
+      void reveal({bool retry = true}) {
         final context = _lineKeys[active]?.currentContext;
-        if (mounted && context != null) {
+        if (!mounted) return;
+        if (context != null) {
           Scrollable.ensureVisible(
             context,
-            duration: media.disableAnimations
+            duration: instant || media.disableAnimations
                 ? Duration.zero
                 : const Duration(milliseconds: 220),
             alignment: .5,
           );
+        } else if (retry && _scroll.hasClients) {
+          // La lista de Atelier es perezosa: la línea aún no existe, así que
+          // saltamos a su zona aproximada y reintentamos al construirse.
+          _scroll.jumpTo(
+            (active * 56.0).clamp(0.0, _scroll.position.maxScrollExtent),
+          );
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => reveal(retry: false),
+          );
         }
-      });
+      }
+
+      WidgetsBinding.instance.addPostFrameCallback((_) => reveal());
+    }
+    if (isModern(context)) {
+      return ModernLyricsList(
+        key: ValueKey(track.id),
+        lines: lines,
+        active: active,
+        keyFor: (i) => _lineKeys.putIfAbsent(i, GlobalKey.new),
+        onSeek: seekTo,
+        fontFamily: _typeface == 2 ? 'monospace' : 'Inter',
+        animate: !media.disableAnimations,
+      );
     }
     return ListView.builder(
       key: ValueKey(track.id),
+      controller: _scroll,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       itemCount: lines.length + 1,
       itemBuilder: (context, index) {
@@ -887,16 +1005,25 @@ class _LyricsPanelState extends State<LyricsPanel> {
             liveRegion: highlighted,
             label: '${_formatTime(line.at)} ${line.text}',
             child: Container(
-              decoration: BoxDecoration(
-                border: Border(
-                  left: BorderSide(
-                    width: highlighted ? 6 : 0,
-                    color: highlighted
-                        ? Theme.of(context).colorScheme.primaryContainer
-                        : Colors.transparent,
-                  ),
-                ),
-              ),
+              decoration: isBrasa(context)
+                  ? null
+                  : isModern(context)
+                  ? BoxDecoration(
+                      color: highlighted
+                          ? Tracky.mint.withValues(alpha: .35)
+                          : null,
+                      borderRadius: BorderRadius.circular(12),
+                    )
+                  : BoxDecoration(
+                      border: Border(
+                        left: BorderSide(
+                          width: highlighted ? 6 : 0,
+                          color: highlighted
+                              ? Theme.of(context).colorScheme.primaryContainer
+                              : Colors.transparent,
+                        ),
+                      ),
+                    ),
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
@@ -931,32 +1058,66 @@ class _LyricsPanelState extends State<LyricsPanel> {
                             ),
                           ),
                           Expanded(
-                            child: Center(
+                            child: Align(
+                              alignment: isBrasa(context)
+                                  ? Alignment.centerLeft
+                                  : Alignment.center,
                               child: AnimatedDefaultTextStyle(
                                 duration: media.disableAnimations
                                     ? Duration.zero
                                     : const Duration(milliseconds: 180),
                                 curve: Curves.easeOut,
-                                style: TextStyle(
-                                  fontFamily: [
-                                    'Newsreader',
-                                    'Plus Jakarta Sans',
-                                    'monospace',
-                                  ][_typeface],
-                                  fontSize: highlighted ? 38 : 28,
-                                  fontStyle: highlighted
-                                      ? FontStyle.italic
-                                      : FontStyle.normal,
-                                  height: 1.45,
-                                  fontWeight: highlighted
-                                      ? FontWeight.w700
-                                      : FontWeight.w400,
-                                  color: highlighted
-                                      ? Theme.of(context).colorScheme.primary
-                                      : Theme.of(
-                                          context,
-                                        ).colorScheme.onSurfaceVariant,
-                                ),
+                                style: isBrasa(context)
+                                    ? TextStyle(
+                                        fontFamily: _typeface == 2
+                                            ? 'monospace'
+                                            : 'Inter',
+                                        fontSize: 28,
+                                        height: 1.35,
+                                        fontWeight: FontWeight.w700,
+                                        color: highlighted
+                                            ? Brasa.cream
+                                            : Brasa.steel,
+                                      )
+                                    : isModern(context)
+                                    ? TextStyle(
+                                        fontFamily: _typeface == 2
+                                            ? 'monospace'
+                                            : 'Inter',
+                                        fontSize: highlighted ? 34 : 26,
+                                        height: 1.4,
+                                        letterSpacing: -.01 * 30,
+                                        fontWeight: highlighted
+                                            ? FontWeight.w700
+                                            : FontWeight.w400,
+                                        color: highlighted
+                                            ? Theme.of(
+                                                context,
+                                              ).colorScheme.onSurface
+                                            : Tracky.slate,
+                                      )
+                                    : TextStyle(
+                                        fontFamily: [
+                                          'Newsreader',
+                                          'Plus Jakarta Sans',
+                                          'monospace',
+                                        ][_typeface],
+                                        fontSize: highlighted ? 38 : 28,
+                                        fontStyle: highlighted
+                                            ? FontStyle.italic
+                                            : FontStyle.normal,
+                                        height: 1.45,
+                                        fontWeight: highlighted
+                                            ? FontWeight.w700
+                                            : FontWeight.w400,
+                                        color: highlighted
+                                            ? Theme.of(
+                                                context,
+                                              ).colorScheme.primary
+                                            : Theme.of(
+                                                context,
+                                              ).colorScheme.onSurfaceVariant,
+                                      ),
                                 child: Text(
                                   line.text,
                                   textAlign: TextAlign.left,

@@ -4,6 +4,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
+import '../theme/brasa_theme.dart';
+import '../theme/modern_theme.dart';
+import '../theme/modern_widgets.dart';
 import '../core/source_backend.dart';
 import '../sources/yt_dlp_source.dart';
 
@@ -233,6 +236,17 @@ class _VideoDownloadsPageState extends State<VideoDownloadsPage> {
                   if (job.active) ...[
                     LinearProgressIndicator(
                       value: job.progress == 0 ? null : job.progress,
+                      minHeight: isBrasa(context) ? 4 : null,
+                      color: isBrasa(context)
+                          ? Brasa.accent
+                          : isModern(context)
+                          ? Tracky.mint
+                          : null,
+                      borderRadius: isBrasa(context)
+                          ? BorderRadius.circular(9999)
+                          : isModern(context)
+                          ? BorderRadius.circular(8)
+                          : null,
                     ),
                     Align(
                       alignment: Alignment.centerRight,

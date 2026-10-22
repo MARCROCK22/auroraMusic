@@ -22,7 +22,9 @@ import 'core/source_backend.dart';
 import 'import/spotify_import.dart';
 import 'follow/follow_boost.dart';
 import 'library/library_database.dart';
+import 'jam/jam_models.dart' show jamCleanName;
 import 'listenbrainz/listenbrainz_service.dart';
+import 'profile/avatar_image.dart';
 import 'dj/ai_dj.dart';
 import 'dj/dj_modes.dart';
 import 'dj/recommendations.dart';
@@ -240,7 +242,15 @@ class AppController extends ChangeNotifier {
     final matcher = YoutubeMatcher(
       search: (q, k) => source.searchPage(q, k).then((p) => p.tracks),
     );
+    // Con token de ListenBrainz activo, sus recomendaciones lideran (DJ y Jam).
+    final mix = {...defaultRecMix};
+    void syncMix() => mix[RecBucket.listenbrainz] = listenBrainz?.active == true
+        ? 0.40
+        : defaultRecMix[RecBucket.listenbrainz]!;
+    syncMix();
+    listenBrainz?.addListener(syncMix);
     return _suggestionsApi = SuggestionsApi(
+      mix: mix,
       sources: source is InnerTubeSource
           ? [
               ...spotifyRecSources(
@@ -524,6 +534,15 @@ class AppController extends ChangeNotifier {
   };
   bool reducedMotion = false;
   ThemeMode themeMode = ThemeMode.dark;
+
+  /// 'atelier' (por defecto), 'modern', 'brasa' o 'slush'.
+  String themeKind = 'atelier';
+
+  /// Perfil local del usuario (lo usa la Jam). Vacío = sin nombre elegido.
+  String profileName = '';
+
+  /// Miniatura cuadrada del avatar (JPEG/PNG de 128 px, <= 24 KB) o null.
+  Uint8List? profileAvatar;
   Color accentColor = const Color(0xffe86927);
   Timer? _sleepTimer;
   DateTime? _sleepEnd;
@@ -1168,6 +1187,7 @@ class AppController extends ChangeNotifier {
       tracks = await database.readTracks();
       favoriteIds = await database.readFavorites();
       playlists = await database.readPlaylists();
+      _loadPlaylistPhotos();
       downloads = await database.readDownloads();
       final legacyRoot = Directory(p.join(supportDirectory.path, 'downloads'));
       await legacyRoot.create(recursive: true);
@@ -1216,10 +1236,31 @@ class AppController extends ChangeNotifier {
           experimentalProgressivePlayback,
         );
       }
+      themeKind =
+          const {
+            'modern',
+            'brasa',
+            'slush',
+          }.contains(preferences.getString('themeKind'))
+          ? preferences.getString('themeKind')!
+          : 'atelier';
       themeMode = ThemeMode.values.firstWhere(
         (mode) => mode.name == preferences.getString('themeMode'),
         orElse: () => ThemeMode.dark,
       );
+      profileName = jamCleanName(
+        preferences.getString('profileName') ?? '',
+        fallback: '',
+      );
+      try {
+        final file = File(p.join(supportDirectory.path, 'profile_avatar.bin'));
+        if (await file.exists()) {
+          final bytes = await file.readAsBytes();
+          if (bytes.isNotEmpty && bytes.length <= avatarMaxOutputBytes) {
+            profileAvatar = bytes;
+          }
+        }
+      } catch (_) {}
       eq.load();
       queue = _lookup(preferences.getStringList('queue') ?? []);
       queueIndex = queue.isEmpty
@@ -1368,10 +1409,33 @@ class AppController extends ChangeNotifier {
     if (audio.isPlaying &&
         DateTime.now().difference(_lastSnapshot).inSeconds >= 5) {
       _lastSnapshot = DateTime.now();
-      unawaited(_saveQueue());
+      unawaited(_saveQueue().catchError((Object _) {}));
     }
+    // Solo cambió la posición: los widgets de progreso escuchan a `audio`,
+    // el resto del árbol no necesita reconstruirse 5 veces por segundo.
+    final sig = Object.hash(
+      currentTrack?.id,
+      audio.isPlaying,
+      audio.lastError,
+      busy,
+      _usingRemote,
+    );
+    final now = DateTime.now();
+    if (sig == _audioSig &&
+        now.difference(_lastAudioNotify) < const Duration(seconds: 1)) {
+      return;
+    }
+    _audioSig = sig;
+    _lastAudioNotify = now;
     _notify();
   }
+
+  int _failedSkips = 0;
+
+  /// true solo cuando `next(fromCompletion)` lleva a la pista que va a sonar.
+  bool _autoAdvance = false;
+  int? _audioSig;
+  DateTime _lastAudioNotify = DateTime.fromMillisecondsSinceEpoch(0);
 
   /// Warms the next queue item's URL once; shuffle and repeat-one skip it.
   void _maybePrefetchNext() {
@@ -1645,6 +1709,30 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  /// Lo fija el shell: cambia a Buscar y abre el perfil.
+  Future<void> Function(String name)? artistNavigator;
+
+  void openArtist(String name) {
+    final n = name.split(RegExp(r'\s*(?:,|&| x | feat\.?| ft\.?)\s*')).first;
+    if (n.trim().isNotEmpty) unawaited(artistNavigator?.call(n.trim()));
+  }
+
+  /// Busca al artista por nombre y abre su perfil con todas sus canciones.
+  Future<void> openArtistProfile(String name) async {
+    try {
+      final page = await source.searchPage(name, SearchKind.artists);
+      final entry = page.entries.firstOrNull;
+      if (entry == null) {
+        error = 'No encontré el perfil de $name.';
+        _notify();
+        return;
+      }
+      await openSearchEntry(entry);
+    } catch (exception) {
+      _report(exception);
+    }
+  }
+
   Future<void> openSearchEntry(SearchEntry? entry) async {
     final generation = ++_searchDetailGeneration;
     searchDetail = entry;
@@ -1787,6 +1875,8 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> _playCurrent({bool fromRecovery = false}) async {
+    final autoAdvance = _autoAdvance;
+    _autoAdvance = false;
     if (_jamPlaybackActive) return;
     if (!_audioInitialized) {
       _playIntent = false;
@@ -1932,9 +2022,22 @@ class AppController extends ChangeNotifier {
             .then((_) {}, onError: (Object _) {}),
       );
       await _saveQueue();
+      _failedSkips = 0;
       unawaited(_updateAccent(track));
     } catch (exception) {
-      if (generation == _playGeneration) _report(exception);
+      if (generation == _playGeneration) {
+        _report(exception);
+        // Una pista que no resuelve no debe dejar la cola parada (a menudo
+        // viene del DJ); salta a la siguiente, con tope para no hacer bucle.
+        if (_playIntent &&
+            autoAdvance &&
+            !fromRecovery &&
+            _failedSkips < 3 &&
+            queueIndex < queue.length - 1) {
+          _failedSkips++;
+          unawaited(next(fromCompletion: true));
+        }
+      }
     } finally {
       if (generation == _playGeneration) {
         _pendingResolveVideoId = null;
@@ -2182,6 +2285,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> next({bool fromCompletion = false}) async {
+    _autoAdvance = fromCompletion;
     if (_jamPlaybackActive) return;
     if (_youtubeMusicActive) return;
     if (queue.isEmpty) return;
@@ -2501,13 +2605,95 @@ class AppController extends ChangeNotifier {
   Future<void> deletePlaylist(MusicPlaylist playlist) async {
     await database.deletePlaylist(playlist.id);
     playlists.removeWhere((item) => item.id == playlist.id);
+    await _setPlaylistPhotoPath(playlist.id, null);
     _notify();
+  }
+
+  // Fotos de playlist: mapa id→ruta en preferencias (sin migrar la tabla, y
+  // renombrar/reordenar no la tocan porque _replacePlaylist la reinyecta).
+  Map<String, String> _playlistPhotos = {};
+
+  void _loadPlaylistPhotos() {
+    try {
+      final raw = preferences.getString('playlistPhotos');
+      _playlistPhotos = raw == null
+          ? {}
+          : (jsonDecode(raw) as Map).cast<String, String>();
+    } catch (_) {
+      _playlistPhotos = {};
+    }
+    final ids = playlists.map((item) => item.id).toSet();
+    _playlistPhotos.removeWhere(
+      (id, path) => !ids.contains(id) || !File(path).existsSync(),
+    );
+    playlists = [
+      for (final item in playlists) item.withPhoto(_playlistPhotos[item.id]),
+    ];
+  }
+
+  Future<void> _setPlaylistPhotoPath(String id, String? path) async {
+    final old = _playlistPhotos[id];
+    if (path == null) {
+      _playlistPhotos.remove(id);
+    } else {
+      _playlistPhotos[id] = path;
+    }
+    if (old != null && old != path) {
+      try {
+        await File(old).delete();
+      } catch (_) {}
+    }
+    try {
+      await preferences.setString('playlistPhotos', jsonEncode(_playlistPhotos));
+    } catch (_) {}
+    final index = playlists.indexWhere((item) => item.id == id);
+    if (index >= 0) playlists[index] = playlists[index].withPhoto(path);
+  }
+
+  Future<void> setPlaylistPhoto(MusicPlaylist playlist, Uint8List? bytes) async {
+    String? path;
+    if (bytes != null) {
+      final dir = Directory(p.join(supportDirectory.path, 'playlist_covers'));
+      await dir.create(recursive: true);
+      // Nombre nuevo cada vez: así FileImage no sirve la foto anterior de caché.
+      path = p.join(
+        dir.path,
+        '${playlist.id}_${DateTime.now().millisecondsSinceEpoch}.png',
+      );
+      await File(path).writeAsBytes(bytes, flush: true);
+    }
+    await _setPlaylistPhotoPath(playlist.id, path);
+    _notify();
+  }
+
+  /// Igual que [pickProfileAvatar] pero con miniatura mayor; error legible o null.
+  Future<String?> pickPlaylistPhoto(MusicPlaylist playlist) async {
+    try {
+      final result = await FilePicker.pickFiles(type: FileType.image);
+      final path = result.isEmpty ? null : result.first.path;
+      if (path == null) return null;
+      final file = File(path);
+      if (await file.length() > avatarMaxInputBytes) {
+        return 'La imagen pesa más de 8 MB.';
+      }
+      final bytes = await makeAvatarThumbnail(
+        await file.readAsBytes(),
+        sizes: const [512, 384, 256],
+        maxBytes: 400 * 1024,
+      );
+      await setPlaylistPhoto(playlist, bytes);
+      return null;
+    } on AvatarException catch (e) {
+      return e.message;
+    } catch (_) {
+      return 'No se pudo abrir la imagen.';
+    }
   }
 
   Future<void> _replacePlaylist(MusicPlaylist playlist) async {
     final index = playlists.indexWhere((item) => item.id == playlist.id);
     if (index < 0) return;
-    playlists[index] = playlist;
+    playlists[index] = playlist.withPhoto(_playlistPhotos[playlist.id]);
     await database.savePlaylist(playlist);
     _notify();
   }
@@ -3309,6 +3495,58 @@ class AppController extends ChangeNotifier {
     experimentalProgressivePlayback = value;
     source.setExperimentalProgressivePlayback(value);
     unawaited(preferences.setBool('experimentalProgressivePlayback', value));
+    _notify();
+  }
+
+  Future<void> setProfileName(String value) async {
+    var clean = jamCleanName(value, fallback: '');
+    if (clean.length > 24) clean = clean.substring(0, 24).trim();
+    if (clean == profileName) return;
+    profileName = clean;
+    _notify();
+    try {
+      await preferences.setString('profileName', clean);
+    } catch (_) {}
+  }
+
+  Future<void> setProfileAvatar(Uint8List? bytes) async {
+    profileAvatar = bytes;
+    _notify();
+    try {
+      final file = File(p.join(supportDirectory.path, 'profile_avatar.bin'));
+      if (bytes == null) {
+        if (await file.exists()) await file.delete();
+      } else {
+        await file.writeAsBytes(bytes, flush: true);
+      }
+    } catch (_) {}
+  }
+
+  /// Abre el selector de imágenes; devuelve un error legible o null si fue bien.
+  Future<String?> pickProfileAvatar() async {
+    try {
+      final result = await FilePicker.pickFiles(type: FileType.image);
+      final path = result.isEmpty ? null : result.first.path;
+      if (path == null) return null;
+      final file = File(path);
+      if (await file.length() > avatarMaxInputBytes) {
+        return 'La imagen pesa más de 8 MB.';
+      }
+      final bytes = await file.readAsBytes();
+      await setProfileAvatar(await makeAvatarThumbnail(bytes));
+      return null;
+    } on AvatarException catch (e) {
+      return e.message;
+    } catch (_) {
+      return 'No se pudo abrir la imagen.';
+    }
+  }
+
+  void setThemeKind(String value) {
+    themeKind = const {'modern', 'brasa', 'slush'}.contains(value)
+        ? value
+        : 'atelier';
+    unawaited(preferences.setString('themeKind', themeKind));
     _notify();
   }
 

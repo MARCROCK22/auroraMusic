@@ -1,8 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/material.dart';
+import 'theme/brasa_theme.dart';
+import 'theme/slush_theme.dart';
+import 'theme/modern_theme.dart';
 import 'ui/aurora_states.dart';
 import 'core/window_controls.dart';
 import 'jam/jam_protocol.dart';
@@ -25,8 +29,22 @@ import 'terms/terms_screen.dart';
 import 'ui/aurora_shell.dart';
 
 Future<void> main(List<String> args) async {
+  // Errores async sin capturar (unawaited) no deben dejar la app inconsistente.
+  await runZonedGuarded(
+    () => _main(args),
+    (e, s) => debugPrint('Error no capturado: $e\n$s'),
+  );
+}
+
+Future<void> _main(List<String> args) async {
   WindowControls.launchArguments = args;
   WidgetsFlutterBinding.ensureInitialized();
+  FlutterError.onError = (d) =>
+      debugPrint('FlutterError: ${d.exceptionAsString()}');
+  PlatformDispatcher.instance.onError = (e, s) {
+    debugPrint('Error de plataforma: $e\n$s');
+    return true;
+  };
   // Puerta de términos: sin aceptar no arranca protocolo, audio, proxy ni red.
   final terms = TermsAcceptance(await SharedPreferences.getInstance());
   if (terms.isAccepted) {
@@ -172,20 +190,35 @@ class AuroraApp extends ConsumerWidget {
           controller.themeMode,
           controller.accentColor,
           controller.reducedMotion,
+          controller.themeKind,
         ),
       ),
     );
+    final build = switch (settings.$4) {
+      'modern' => modernTheme,
+      'brasa' => brasaTheme,
+      'slush' => slushTheme,
+      _ => auroraTheme,
+    };
     return MaterialApp(
       title: 'Aurora',
       debugShowCheckedModeBanner: false,
-      themeMode: settings.$1,
-      theme: auroraTheme(Brightness.light, settings.$2),
-      darkTheme: auroraTheme(Brightness.dark, settings.$2),
+      themeMode: settings.$4 == 'brasa'
+          ? ThemeMode.dark
+          : settings.$4 == 'slush'
+          ? ThemeMode.light
+          : settings.$1,
+      theme: build(
+        settings.$4 == 'brasa' ? Brightness.dark : Brightness.light,
+        settings.$2,
+      ),
+      darkTheme: build(Brightness.dark, settings.$2),
       themeAnimationDuration: settings.$3
           ? Duration.zero
           : const Duration(milliseconds: 300),
       builder: (context, child) {
         final media = MediaQuery.of(context);
+        WindowControls.setBackground(Theme.of(context).colorScheme.surface);
         return MediaQuery(
           data: media.copyWith(
             disableAnimations: media.disableAnimations || settings.$3,

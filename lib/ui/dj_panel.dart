@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../app_controller.dart';
 import '../dj/dj_modes.dart';
+import '../theme/brasa_theme.dart';
+import '../theme/modern_theme.dart';
+import '../theme/modern_widgets.dart';
 import 'artwork.dart';
 import 'track_actions.dart';
 import 'dj_filters_panel.dart';
@@ -298,6 +301,7 @@ class _DjSessionCardState extends State<DjSessionCard> {
       final theme = Theme.of(context);
       final active = c.personalDjActive;
       final jam = c.jamPlaybackActive;
+      final brasa = isBrasa(context);
       final next = c.personalDjNextReason;
       final note = jam
           ? 'Hay una Jam en curso: el DJ queda en pausa hasta que termine.'
@@ -306,9 +310,21 @@ class _DjSessionCardState extends State<DjSessionCard> {
           : null;
       return Card(
         key: const ValueKey('dj-session-card'),
-        margin: const EdgeInsets.symmetric(vertical: 12),
-        color: theme.colorScheme.surfaceContainerLow,
-        child: Padding(
+        margin: EdgeInsets.symmetric(
+          vertical: brasa
+              ? 0
+              : isModern(context)
+              ? 24
+              : 12,
+        ),
+        color: brasa
+            ? Colors.transparent
+            : theme.colorScheme.surfaceContainerLow,
+        clipBehavior: brasa ? Clip.antiAlias : Clip.none,
+        child: Container(
+          decoration: brasa
+              ? const BoxDecoration(gradient: Brasa.banner)
+              : null,
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -332,6 +348,11 @@ class _DjSessionCardState extends State<DjSessionCard> {
                         style: theme.textTheme.titleMedium,
                       ),
                     ),
+                    if (isModern(context))
+                      ModernBadge(
+                        active ? 'ACTIVO' : 'DETENIDO',
+                        tone: active ? ModernTone.mint : ModernTone.butter,
+                      ),
                   ],
                 ),
               ),
@@ -342,7 +363,11 @@ class _DjSessionCardState extends State<DjSessionCard> {
                           ? 'La cola no termina: el DJ sigue sumando canciones.'
                           : 'A continuación: $next')
                     : 'Empieza una sesión sin fin con tu perfil, tus favoritos y recomendaciones de YouTube.',
-                style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+                style: TextStyle(
+                  color: brasa
+                      ? Brasa.cream
+                      : theme.colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 12),
               Wrap(
@@ -354,6 +379,25 @@ class _DjSessionCardState extends State<DjSessionCard> {
                       label: Text(mode.label),
                       selected: c.djMode == mode,
                       onSelected: (_) => c.setDjMode(mode),
+                      showCheckmark: !isModern(context) && !brasa,
+                      side: isModern(context) || brasa ? BorderSide.none : null,
+                      shape: brasa ? const StadiumBorder() : null,
+                      backgroundColor: brasa ? Brasa.graphite : null,
+                      selectedColor: brasa
+                          ? Brasa.cream
+                          : isModern(context)
+                          ? Tracky.navy
+                          : null,
+                      labelStyle: brasa
+                          ? TextStyle(
+                              color: c.djMode == mode
+                                  ? Colors.black
+                                  : Brasa.cream,
+                              fontWeight: FontWeight.w600,
+                            )
+                          : isModern(context) && c.djMode == mode
+                          ? const TextStyle(color: Colors.white)
+                          : null,
                     ),
                 ],
               ),

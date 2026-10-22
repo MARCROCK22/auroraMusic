@@ -3,6 +3,10 @@ import 'package:flutter/material.dart';
 import '../app_controller.dart';
 import '../core/models.dart';
 import '../follow/follow_service.dart';
+import '../theme/brasa_theme.dart';
+import '../theme/modern_theme.dart';
+import 'horizontal_music_row.dart';
+import '../theme/modern_widgets.dart';
 import 'follow_widgets.dart';
 import 'artwork.dart';
 import 'studio/studio_components.dart';
@@ -35,6 +39,8 @@ class ArtistsPage extends StatefulWidget {
 class _ArtistsPageState extends State<ArtistsPage> {
   _Artist? _selectedArtist;
 
+  void _back() => setState(() => _selectedArtist = null);
+
   List<_Artist> _artists() {
     final groups = <String, List<Track>>{};
     for (final track in widget.tracks) {
@@ -42,13 +48,47 @@ class _ArtistsPageState extends State<ArtistsPage> {
       if (name.isEmpty) continue;
       (groups[name.toLowerCase()] ??= []).add(track);
     }
-    final artists = groups.values.map(_Artist.new).toList()
-      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    final follow = widget.follow;
+    // Con seguimiento disponible solo se listan los artistas seguidos, aunque
+    // no tengan canciones en la biblioteca.
+    final artists =
+        follow != null
+              ? follow.artists
+                    .map(
+                      (a) => _Artist(
+                        groups[a.name.toLowerCase().trim()] ?? const [],
+                        name: a.name.trim(),
+                        imageUrl: a.imageUrl,
+                      ),
+                    )
+                    .toList()
+              : groups.values.map(_Artist.new).toList()
+          ..sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+          );
     return artists;
   }
 
   @override
   Widget build(BuildContext context) {
+    final follow = widget.follow;
+    if (follow == null) return _content(context);
+    return ListenableBuilder(
+      listenable: follow,
+      builder: (context, _) => _content(context),
+    );
+  }
+
+  void _open(_Artist artist) {
+    final c = widget.controller;
+    if (widget.follow != null && c != null) {
+      c.openArtist(artist.name);
+    } else if (artist.tracks.isNotEmpty) {
+      setState(() => _selectedArtist = artist);
+    }
+  }
+
+  Widget _content(BuildContext context) {
     final artists = _artists();
     final selected = _selectedArtist;
     if (selected != null) {
@@ -80,13 +120,17 @@ class _ArtistsPageState extends State<ArtistsPage> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'Todavía no hay artistas',
+                    widget.follow != null
+                        ? 'Aún no sigues a ningún artista'
+                        : 'Todavía no hay artistas',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Busca música para encontrar artistas y añadir canciones a tu biblioteca.',
+                    widget.follow != null
+                        ? 'Sigue a un artista desde su perfil o desde el reproductor con el botón Seguir.'
+                        : 'Busca música para encontrar artistas y añadir canciones a tu biblioteca.',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -106,98 +150,386 @@ class _ArtistsPageState extends State<ArtistsPage> {
       );
     }
 
-    return ListView(
-      padding: const EdgeInsets.all(24),
-      children: [
-        Text('Artistas', style: Theme.of(context).textTheme.headlineMedium),
-        const SizedBox(height: 8),
-        Text(
-          '${artists.length} ${artists.length == 1 ? 'artista' : 'artistas'} en tu biblioteca',
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
+    final modern = isModern(context);
+    final brasa = isBrasa(context);
+    final count = widget.follow != null
+        ? '${artists.length} ${artists.length == 1 ? 'artista que sigues' : 'artistas que sigues'}'
+        : '${artists.length} ${artists.length == 1 ? 'artista' : 'artistas'} en tu biblioteca';
+    final subtitle = Text(
+      count,
+      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
+    );
+    if (brasa) {
+      return CustomScrollView(
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+            sliver: SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Artistas',
+                    style: Theme.of(context).textTheme.headlineMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  subtitle,
+                ],
+              ),
+            ),
           ),
-        ),
-        const SizedBox(height: 16),
-        for (final artist in artists) ...[
-          _ArtistTile(
-            artist: artist,
-            onTap: () => setState(() => _selectedArtist = artist),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+            sliver: SliverGrid.builder(
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 196,
+                mainAxisExtent: 250,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+              ),
+              itemCount: artists.length,
+              itemBuilder: (context, i) {
+                final artist = artists[i];
+                return BrasaTile(
+                  cover: Artwork(
+                    track: artist.cover,
+                    artworkContext: ArtworkContext.card,
+                    radius: 90,
+                  ),
+                  title: artist.name,
+                  subtitle: artist.countLabel,
+                  round: true,
+                  tooltip: 'Abrir ${artist.name}',
+                  onPlay: () => _open(artist),
+                );
+              },
+            ),
           ),
-          const SizedBox(height: 8),
         ],
-      ],
+      );
+    }
+    return ListView.builder(
+      padding: EdgeInsets.all(modern ? 32 : 24),
+      itemCount: artists.length + 1,
+      itemBuilder: (context, i) {
+        if (i == 0) {
+          return Padding(
+            padding: EdgeInsets.only(bottom: modern ? 32 : 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (modern)
+                  const ModernHeadline(before: 'Tus ', emphasis: 'artistas')
+                else
+                  Text(
+                    'Artistas',
+                    style: Theme.of(context).textTheme.headlineMedium,
+                  ),
+                const SizedBox(height: 8),
+                subtitle,
+              ],
+            ),
+          );
+        }
+        final artist = artists[i - 1];
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: _ArtistTile(artist: artist, onTap: () => _open(artist)),
+        );
+      },
     );
   }
 
   Widget _artistDetail(_Artist artist) {
-    final cover =
-        artist.tracks
-            .where((track) => track.artworkUrl?.isNotEmpty == true)
-            .firstOrNull ??
-        artist.tracks.first;
-    return ListView(
-      padding: const EdgeInsets.all(24),
-      children: [
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: () => setState(() => _selectedArtist = null),
-            icon: const Icon(Icons.arrow_back),
-            label: const Text('Todos los artistas'),
-          ),
+    final modern = isModern(context);
+    final cover = artist.cover;
+    if (isBrasa(context)) return _brasaDetail(artist);
+    final header = <Widget>[
+      Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          onPressed: () => setState(() => _selectedArtist = null),
+          icon: const Icon(Icons.arrow_back),
+          label: const Text('Todos los artistas'),
         ),
-        const SizedBox(height: 12),
+      ),
+      const SizedBox(height: 12),
+      Center(
+        child: Artwork(
+          track: cover,
+          artworkContext: ArtworkContext.card,
+          radius: 88,
+        ),
+      ),
+      const SizedBox(height: 16),
+      if (modern)
         Center(
-          child: Artwork(
-            track: cover,
-            artworkContext: ArtworkContext.card,
-            radius: 88,
+          child: ModernHeadline(
+            before: artist.name,
+            size: 40,
+            align: TextAlign.center,
           ),
-        ),
-        const SizedBox(height: 16),
+        )
+      else
         Text(
           artist.name,
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.headlineMedium,
         ),
-        const SizedBox(height: 4),
-        Text(
-          '${artist.tracks.length} ${artist.tracks.length == 1 ? 'canción' : 'canciones'}',
-          textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
+      const SizedBox(height: 4),
+      Text(
+        '${artist.tracks.length} ${artist.tracks.length == 1 ? 'canción' : 'canciones'}',
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      ),
+      if (widget.follow != null) ...[
+        const SizedBox(height: 12),
+        Center(
+          child: FollowButton(service: widget.follow!, name: artist.name),
+        ),
+      ],
+      SizedBox(height: modern ? 32 : 20),
+      if (widget.controller != null) ...[
+        TrackBatchButtons(
+          controller: widget.controller!,
+          tracks: artist.tracks,
+        ),
+        const SizedBox(height: 8),
+      ],
+    ];
+    // Todas las canciones del artista, construidas bajo demanda.
+    return ListView.builder(
+      padding: EdgeInsets.all(modern ? 32 : 24),
+      itemCount: header.length + artist.tracks.length,
+      itemBuilder: (context, i) {
+        if (i < header.length) return header[i];
+        final track = artist.tracks[i - header.length];
+        return _TrackTile(
+          track: track,
+          controller: widget.controller,
+          onPlay: () => widget.onPlay(track),
+        );
+      },
+    );
+  }
+}
+
+extension on _ArtistsPageState {
+  /// Perfil Brasa: cabecera grande, play ámbar y todas las canciones en filas.
+  Widget _brasaDetail(_Artist artist) {
+    final c = widget.controller;
+    final tracks = artist.tracks;
+    final head = <Widget>[
+      Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          onPressed: _back,
+          icon: const Icon(Icons.arrow_back),
+          label: const Text('Todos los artistas'),
+        ),
+      ),
+      const SizedBox(height: 12),
+      Wrap(
+        spacing: 24,
+        runSpacing: 16,
+        crossAxisAlignment: WrapCrossAlignment.end,
+        children: [
+          Artwork(
+            track: artist.cover,
+            artworkContext: ArtworkContext.card,
+            radius: 90,
+          ),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  artist.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 48,
+                    height: 1.1,
+                    fontWeight: FontWeight.w700,
+                    color: Brasa.cream,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '${tracks.length} ${tracks.length == 1 ? 'canción' : 'canciones'}',
+                  style: const TextStyle(fontSize: 14, color: Brasa.cloud),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 24),
+      Wrap(
+        spacing: 16,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          if (tracks.isNotEmpty)
+            Tooltip(
+              message: 'Reproducir ${artist.name}',
+              child: Material(
+                color: Brasa.accent,
+                shape: const CircleBorder(),
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: () => widget.onPlay(tracks.first),
+                  child: const Padding(
+                    padding: EdgeInsets.all(14),
+                    child: Icon(
+                      Icons.play_arrow_rounded,
+                      size: 32,
+                      color: Colors.black,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (widget.follow != null)
+            FollowButton(service: widget.follow!, name: artist.name),
+          if (c != null) TrackBatchButtons(controller: c, tracks: tracks),
+        ],
+      ),
+      const SizedBox(height: 24),
+    ];
+    // Todas las canciones, construidas bajo demanda.
+    return ListView.builder(
+      padding: const EdgeInsets.all(24),
+      itemCount: head.length + tracks.length,
+      itemBuilder: (context, i) {
+        if (i < head.length) return head[i];
+        final n = i - head.length;
+        return _BrasaTrackRow(
+          index: n + 1,
+          track: tracks[n],
+          controller: c,
+          onPlay: () => widget.onPlay(tracks[n]),
+        );
+      },
+    );
+  }
+}
+
+class _BrasaTrackRow extends StatelessWidget {
+  const _BrasaTrackRow({
+    required this.index,
+    required this.track,
+    required this.onPlay,
+    this.controller,
+  });
+  final int index;
+  final Track track;
+  final VoidCallback onPlay;
+  final AppController? controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final playing = controller?.currentTrack?.id == track.id;
+    final d = track.duration;
+    final time =
+        '${d.inMinutes}:${(d.inSeconds % 60).toString().padLeft(2, '0')}';
+    Widget row(BuildContext context, bool hot) => Tooltip(
+      message: 'Reproducir ${track.title}',
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(6),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          hoverColor: Brasa.graphite,
+          onTap: onPlay,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 28,
+                  child: Text(
+                    '$index',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: playing ? Brasa.accent : Brasa.steel,
+                    ),
+                  ),
+                ),
+                Artwork(track: track, size: 40, radius: 4),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    track.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: playing ? Brasa.accent : Brasa.cream,
+                    ),
+                  ),
+                ),
+                Text(
+                  time,
+                  style: const TextStyle(fontSize: 14, color: Brasa.steel),
+                ),
+                if (controller != null)
+                  TrackMenuButton(
+                    controller: controller!,
+                    track: track,
+                    quickAdd: true,
+                    quickAddVisible: hot,
+                  ),
+              ],
+            ),
           ),
         ),
-        if (widget.follow != null) ...[
-          const SizedBox(height: 12),
-          Center(
-            child: FollowButton(service: widget.follow!, name: artist.name),
-          ),
-        ],
-        const SizedBox(height: 20),
-        if (widget.controller != null) ...[
-          TrackBatchButtons(
-            controller: widget.controller!,
-            tracks: artist.tracks,
-          ),
-          const SizedBox(height: 8),
-        ],
-        for (final track in artist.tracks)
-          _TrackTile(
-            track: track,
-            controller: widget.controller,
-            onPlay: () => widget.onPlay(track),
-          ),
-      ],
+      ),
+    );
+    return RepaintBoundary(
+      child: controller == null
+          ? row(context, true)
+          : TrackActionsRegion(
+              controller: controller!,
+              track: track,
+              builder: row,
+            ),
     );
   }
 }
 
 class _Artist {
-  _Artist(this.tracks);
+  _Artist(this.tracks, {String? name, this.imageUrl}) : _name = name;
 
   final List<Track> tracks;
-  String get name => tracks.first.artist.trim();
+  final String? _name;
+  final String? imageUrl;
+  String get name => _name ?? tracks.first.artist.trim();
+
+  /// Foto del artista seguido o, si no hay, la portada de una canción suya.
+  Track get cover {
+    if (imageUrl?.isNotEmpty == true) {
+      return Track(
+        id: 'follow:$key',
+        title: name,
+        artist: name,
+        artworkUrl: imageUrl,
+      );
+    }
+    return tracks.where((t) => t.artworkUrl?.isNotEmpty == true).firstOrNull ??
+        tracks.firstOrNull ??
+        Track(id: 'follow:$key', title: name, artist: name);
+  }
+
+  String get countLabel => tracks.isEmpty
+      ? 'Siguiendo'
+      : '${tracks.length} ${tracks.length == 1 ? 'canción' : 'canciones'}';
   String get key => name.toLowerCase();
 }
 
@@ -209,17 +541,50 @@ class _ArtistTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cover =
-        artist.tracks
-            .where((track) => track.artworkUrl?.isNotEmpty == true)
-            .firstOrNull ??
-        artist.tracks.first;
+    final cover = artist.cover;
+    if (isModern(context)) {
+      return ModernCard(
+        onTap: onTap,
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Artwork(
+              track: cover,
+              artworkContext: ArtworkContext.thumbnailDetail,
+              radius: 32,
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    artist.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    artist.countLabel,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right),
+          ],
+        ),
+      );
+    }
     return Material(
       color: Theme.of(context).colorScheme.surfaceContainerLow,
-      borderRadius: StudioPalette.sleeve,
+      borderRadius: StudioPalette.of(context),
       child: InkWell(
         onTap: onTap,
-        borderRadius: StudioPalette.sleeve,
+        borderRadius: StudioPalette.of(context),
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Row(
@@ -242,7 +607,7 @@ class _ArtistTile extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${artist.tracks.length} ${artist.tracks.length == 1 ? 'canción' : 'canciones'}',
+                      artist.countLabel,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
@@ -272,7 +637,23 @@ class _TrackTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final modern = isModern(context);
+    final playIcon = modern
+        ? Icon(Icons.play_arrow_rounded, color: Tracky.navy)
+        : const Icon(Icons.play_arrow_rounded);
+    final playStyle = modern
+        ? IconButton.styleFrom(
+            backgroundColor: Tracky.mint,
+            hoverColor: Tracky.mint.withValues(alpha: .7),
+          )
+        : null;
     Widget tile(BuildContext context, bool hot) => ListTile(
+      shape: modern
+          ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
+          : null,
+      hoverColor: modern
+          ? Theme.of(context).colorScheme.surfaceContainerLow
+          : null,
       contentPadding: const EdgeInsets.symmetric(horizontal: 4),
       leading: Artwork(
         track: track,
@@ -292,7 +673,8 @@ class _TrackTile extends StatelessWidget {
           ? IconButton(
               tooltip: 'Reproducir ${track.title}',
               onPressed: onPlay,
-              icon: const Icon(Icons.play_arrow_rounded),
+              style: playStyle,
+              icon: playIcon,
             )
           : Row(
               mainAxisSize: MainAxisSize.min,
@@ -300,7 +682,8 @@ class _TrackTile extends StatelessWidget {
                 IconButton(
                   tooltip: 'Reproducir ${track.title}',
                   onPressed: onPlay,
-                  icon: const Icon(Icons.play_arrow_rounded),
+                  style: playStyle,
+                  icon: playIcon,
                 ),
                 TrackMenuButton(
                   controller: controller!,

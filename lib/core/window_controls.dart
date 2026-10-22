@@ -66,6 +66,16 @@ abstract final class WindowControls {
   /// actualizador antes de lanzar el instalador. No hace nada fuera de Windows.
   static Future<bool> requestHardExit() => invoke('hardExit');
 
+  static int? _background;
+
+  /// Fondo nativo de la ventana (sin franjas blancas al redimensionar/mover).
+  static void setBackground(Color color) {
+    final rgb = color.toARGB32() & 0xFFFFFF;
+    if (_background == rgb) return;
+    _background = rgb;
+    invoke('setBackground', rgb);
+  }
+
   static Future<bool> query(String operation) async {
     if (!Platform.isWindows) return false;
     try {

@@ -3,8 +3,12 @@ import '../../core/models.dart';
 import '../../jam/jam_controller.dart';
 import '../../jam/jam_models.dart';
 import '../../jam/jam_service.dart';
+import '../../theme/brasa_theme.dart';
+import '../../theme/modern_theme.dart';
+import '../../theme/modern_widgets.dart';
 import '../artwork.dart';
 import '../studio/studio_components.dart';
+import '../undo_snackbar.dart';
 import 'jam_add_sheet.dart';
 import 'jam_flows.dart';
 import 'jam_widgets.dart';
@@ -46,7 +50,7 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
     if (mounted) {
       ScaffoldMessenger.maybeOf(
         context,
-      )?.showSnackBar(SnackBar(content: Text(text)));
+      )?.showSnackBar(auroraSnackBar(context, Text(text)));
     }
   }
 
@@ -71,24 +75,33 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
     ),
   );
 
-  Widget _title(String text, {Widget? trailing}) => Padding(
-    padding: const EdgeInsets.only(bottom: 8),
-    child: Row(
-      children: [
-        Expanded(
-          child: Text(
-            text,
-            style: const TextStyle(
-              fontFamily: 'Newsreader',
-              fontSize: 20,
-              fontWeight: FontWeight.w600,
+  Widget _title(BuildContext context, String text, {Widget? trailing}) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                text,
+                style: isBrasa(context)
+                    ? const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)
+                    : isModern(context)
+                    ? const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -.18,
+                      )
+                    : const TextStyle(
+                        fontFamily: 'Newsreader',
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600,
+                      ),
+              ),
             ),
-          ),
+            ?trailing,
+          ],
         ),
-        ?trailing,
-      ],
-    ),
-  );
+      );
 
   Widget _header(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
@@ -102,14 +115,30 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
               const Icon(Icons.groups_outlined),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  s.connected ? 'Jam activa' : 'Sin conexión con la Jam',
-                  style: const TextStyle(
-                    fontFamily: 'Newsreader',
-                    fontSize: 22,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                child: isBrasa(context)
+                    ? Text(
+                        s.connected ? 'Jam activa' : 'Sin conexión con la Jam',
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      )
+                    : isModern(context)
+                    ? ModernHeadline(
+                        before: s.connected
+                            ? 'Jam '
+                            : 'Sin conexión con la Jam',
+                        emphasis: s.connected ? 'activa' : '',
+                        size: 24,
+                      )
+                    : Text(
+                        s.connected ? 'Jam activa' : 'Sin conexión con la Jam',
+                        style: const TextStyle(
+                          fontFamily: 'Newsreader',
+                          fontSize: 22,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
               ),
             ],
           ),
@@ -120,32 +149,45 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               StudioStamp('${c.peopleCount} EN LA JAM', filled: true),
-              Chip(
-                avatar: const Icon(Icons.badge_outlined, size: 16),
-                label: Text(c.roleLabel),
-                visualDensity: VisualDensity.compact,
-              ),
-              Chip(
-                avatar: Icon(
-                  c.listeningTogether
-                      ? Icons.headphones_outlined
-                      : Icons.queue_music,
-                  size: 16,
+              if (isModern(context)) ...[
+                ModernBadge(c.roleLabel),
+                ModernBadge(
+                  c.modeLabel,
+                  tone: c.listeningTogether
+                      ? ModernTone.mint
+                      : ModernTone.neutral,
                 ),
-                label: Text(c.modeLabel),
-                visualDensity: VisualDensity.compact,
-              ),
-              if (invite != null && invite.isRemote)
+                if (invite != null && invite.isRemote) ModernBadge(invite.code),
+              ] else ...[
                 Chip(
-                  label: Text(
-                    invite.code,
-                    style: const TextStyle(
-                      fontFamily: 'monospace',
-                      letterSpacing: 2,
-                    ),
-                  ),
+                  avatar: const Icon(Icons.badge_outlined, size: 16),
+                  label: Text(c.roleLabel),
                   visualDensity: VisualDensity.compact,
                 ),
+                Chip(
+                  avatar: Icon(
+                    c.listeningTogether
+                        ? Icons.headphones_outlined
+                        : Icons.queue_music,
+                    size: 16,
+                  ),
+                  label: Text(c.modeLabel),
+                  visualDensity: VisualDensity.compact,
+                ),
+                if (invite != null && invite.isRemote)
+                  Chip(
+                    label: Text(
+                      invite.code,
+                      style: isBrasa(context)
+                          ? const TextStyle(letterSpacing: 1)
+                          : const TextStyle(
+                              fontFamily: 'monospace',
+                              letterSpacing: 2,
+                            ),
+                    ),
+                    visualDensity: VisualDensity.compact,
+                  ),
+              ],
             ],
           ),
           const SizedBox(height: 12),
@@ -249,7 +291,7 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _title('Sonando ahora'),
+        _title(context, 'Sonando ahora'),
         if (entry == null)
           jamNotice(
             context,
@@ -297,6 +339,13 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
                 Row(
                   children: [
                     IconButton(
+                      style: isModern(context)
+                          ? IconButton.styleFrom(
+                              backgroundColor: Tracky.mint,
+                              foregroundColor: Tracky.navy,
+                              disabledBackgroundColor: Tracky.stone,
+                            )
+                          : null,
                       tooltip: c.canPause
                           ? (playing ? 'Pausar la Jam' : 'Reanudar la Jam')
                           : lock,
@@ -339,8 +388,8 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
                     if (duration > 0)
                       Text(
                         '${_duration(position.toInt())} / ${_duration(duration)}',
-                        style: const TextStyle(
-                          fontFamily: 'monospace',
+                        style: TextStyle(
+                          fontFamily: isBrasa(context) ? null : 'monospace',
                           fontSize: 11,
                         ),
                       ),
@@ -372,7 +421,11 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        JamAvatar(name: who, size: 20),
+        JamAvatar(
+          name: who,
+          size: 20,
+          image: c.avatarOf(suggested ? e.suggestedFor! : e.addedBy),
+        ),
         const SizedBox(width: 6),
         Flexible(
           child: Text(
@@ -400,6 +453,7 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _title(
+          context,
           'Cola · ${shown.length}',
           trailing: TextButton.icon(
             onPressed: c.canAdd ? () => showJamAddSheet(context, c) : null,
@@ -447,6 +501,14 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
       padding: const EdgeInsets.only(bottom: 4),
       child: Material(
         color: Theme.of(context).colorScheme.surfaceContainerLowest,
+        borderRadius: isBrasa(context)
+            ? BorderRadius.circular(6)
+            : isModern(context)
+            ? BorderRadius.circular(8)
+            : null,
+        clipBehavior: isModern(context) || isBrasa(context)
+            ? Clip.antiAlias
+            : Clip.none,
         child: Row(
           children: [
             if (c.canReorder)
@@ -477,10 +539,15 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
                     e.track.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontFamily: 'Newsreader',
-                      fontSize: 15,
-                    ),
+                    style: isModern(context) || isBrasa(context)
+                        ? const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          )
+                        : const TextStyle(
+                            fontFamily: 'Newsreader',
+                            fontSize: 15,
+                          ),
                   ),
                   Text(
                     e.track.artist,
@@ -569,29 +636,54 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _title('Participantes · ${c.peopleCount}'),
-        for (final p in people)
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            minVerticalPadding: 4,
-            leading: JamAvatar(name: p.name, size: 36),
-            title: Text(
-              p.id == s.participantId ? '${p.name} (tú)' : p.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+        _title(context, 'Participantes · ${c.peopleCount}'),
+        _peopleCard(context, [
+          for (final p in people)
+            ListTile(
+              contentPadding: isModern(context)
+                  ? const EdgeInsets.symmetric(horizontal: 8)
+                  : EdgeInsets.zero,
+              minVerticalPadding: 4,
+              leading: JamAvatar(
+                name: p.name,
+                size: 36,
+                image: c.avatarOf(p.id),
+              ),
+              title: Text(
+                p.id == s.participantId ? '${p.name} (tú)' : p.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Text(
+                [
+                  jamRoleLabel(p.role),
+                  if (!p.connected) 'Desconectado',
+                  if (p.muted) 'Silenciado',
+                ].join(' · '),
+              ),
+              trailing: s.isHost && p.id != 'host' && p.id != s.participantId
+                  ? _personMenu(p)
+                  : null,
             ),
-            subtitle: Text(
-              [
-                jamRoleLabel(p.role),
-                if (!p.connected) 'Desconectado',
-                if (p.muted) 'Silenciado',
-              ].join(' · '),
-            ),
-            trailing: s.isHost && p.id != 'host' && p.id != s.participantId
-                ? _personMenu(p)
-                : null,
-          ),
+        ]),
       ],
+    );
+  }
+
+  /// Modern: participantes en una tarjeta con filas de radio 8; Atelier, lista plana.
+  Widget _peopleCard(BuildContext context, List<Widget> rows) {
+    if (!isModern(context)) return Column(children: rows);
+    return ModernCard(
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        children: [
+          for (final row in rows)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: row,
+            ),
+        ],
+      ),
     );
   }
 
@@ -749,7 +841,7 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _title('Ajustes de la Jam'),
+        _title(context, 'Ajustes de la Jam'),
         sw(
           'Permitir que otros cambien lo que suena',
           'Los invitados podrán pausar y saltar. Si no, solo añaden canciones.',
@@ -856,24 +948,41 @@ Widget jamNotice(
   String message,
   IconData icon, {
   Widget? action,
-}) => Container(
-  width: double.infinity,
-  padding: const EdgeInsets.all(16),
-  decoration: BoxDecoration(
-    color: Theme.of(context).colorScheme.surfaceContainerHigh,
-    borderRadius: BorderRadius.circular(12),
-  ),
-  child: Wrap(
-    spacing: 12,
-    runSpacing: 8,
-    crossAxisAlignment: WrapCrossAlignment.center,
-    children: [
-      Icon(icon, size: 22),
-      ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 760),
-        child: Text(message),
+}) {
+  final modern = isModern(context);
+  return Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: modern
+          ? Tracky.butter
+          : Theme.of(context).colorScheme.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(
+        isBrasa(context)
+            ? 6
+            : modern
+            ? 16
+            : 12,
       ),
-      ?action,
-    ],
-  ),
-);
+    ),
+    child: DefaultTextStyle.merge(
+      style: TextStyle(color: modern ? Tracky.navy : null),
+      child: IconTheme.merge(
+        data: IconThemeData(color: modern ? Tracky.navy : null),
+        child: Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Icon(icon, size: 22),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: Text(message),
+            ),
+            ?action,
+          ],
+        ),
+      ),
+    ),
+  );
+}

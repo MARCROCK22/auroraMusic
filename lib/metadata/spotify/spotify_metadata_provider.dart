@@ -136,13 +136,24 @@ class SpotifyMetadataProvider {
       List<dynamic> raw;
       int total;
       if (entity.type == SpotifyEntityType.artist) {
-        final tracks = _requiredItems(
+        final top = _requiredItems(
           _requiredMap(
             _requiredMap(detail['discography'])['topTracks'],
           )['items'],
         );
-        total = tracks.length;
-        raw = tracks.skip(offset).take(limit).toList();
+        // topTracks son solo 10: el catálogo sale de sus álbumes y sencillos.
+        final all = _artistCatalog[uri] ??= await _artistTracks(detail, top);
+        final page = all.skip(offset).take(limit).toList();
+        final bio = spotifyMap(
+          spotifyMap(detail['profile'])['biography'],
+        )['text'];
+        return SpotifyMetadataDetails(
+          entity: mapped,
+          description: bio is String ? bio : '',
+          tracks: page,
+          total: all.length,
+          nextOffset: _next(offset, page.length, all.length),
+        );
       } else {
         final section = _requiredMap(
           detail[entity.type == SpotifyEntityType.album
@@ -186,6 +197,58 @@ class SpotifyMetadataProvider {
         'Spotify cambió el formato de sus metadatos.',
       );
     }
+  }
+
+  final Map<String, List<Track>> _artistCatalog = {};
+  static const _maxReleases = 30;
+
+  /// Destacadas + pistas de álbumes, sencillos y populares (sin recopilatorios).
+  Future<List<Track>> _artistTracks(
+    Map<String, dynamic> detail,
+    List<dynamic> top,
+  ) async {
+    if (_artistCatalog.length > 20) _artistCatalog.clear();
+    final out = <Track>[];
+    final seen = <String>{};
+    void add(Track? t) {
+      if (t != null && seen.add(t.id)) out.add(t);
+    }
+
+    for (final item in top) {
+      var data = spotifyMap(item);
+      if (data.containsKey('track')) data = spotifyMap(data['track']);
+      add(mapSpotifyEntity(data, SpotifyEntityType.track)?.track);
+    }
+    final discography = spotifyMap(detail['discography']);
+    final releases = <SpotifyMetadataEntity>[];
+    final uris = <String>{};
+    for (final key in const ['albums', 'singles', 'popularReleasesAlbums']) {
+      for (final group in spotifyItems(spotifyMap(discography[key])['items'])) {
+        final nested = spotifyMap(spotifyMap(group)['releases'])['items'];
+        for (final release in nested == null ? [group] : spotifyItems(nested)) {
+          final album = mapSpotifyEntity(release, SpotifyEntityType.album);
+          if (album != null && uris.add(album.uri)) releases.add(album);
+        }
+      }
+    }
+    final wanted = releases.take(_maxReleases).toList();
+    for (var i = 0; i < wanted.length && !_closed; i += 4) {
+      final batch = await Future.wait(
+        wanted
+            .skip(i)
+            .take(4)
+            .map(
+              (album) => details(album, limit: 50).then<List<Track>>(
+                (d) => d.tracks,
+                onError: (Object _) => const <Track>[],
+              ),
+            ),
+      );
+      for (final tracks in batch) {
+        tracks.forEach(add);
+      }
+    }
+    return out;
   }
 
   Future<Map<String, dynamic>> _query(

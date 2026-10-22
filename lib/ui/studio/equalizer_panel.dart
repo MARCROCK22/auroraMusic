@@ -7,6 +7,9 @@ import 'package:flutter/services.dart';
 import '../../app_controller.dart';
 import '../../audio/eq_model.dart';
 import '../../audio/equalizer_controller.dart';
+import '../../theme/brasa_theme.dart';
+import '../../theme/modern_theme.dart';
+import '../../theme/modern_widgets.dart';
 import 'studio_components.dart';
 import 'studio_symbols.dart';
 
@@ -111,7 +114,21 @@ class _EqualizerPanelState extends State<EqualizerPanel> {
   }
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
+  Widget build(BuildContext context) => isBrasa(context)
+      ? DecoratedBox(
+          decoration: BoxDecoration(
+            color: Brasa.obsidian,
+            borderRadius: BorderRadius.circular(6),
+            boxShadow: Brasa.cardShadow,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: _panel(context),
+          ),
+        )
+      : _panel(context);
+
+  Widget _panel(BuildContext context) => ListenableBuilder(
     listenable: _eq,
     builder: (context, _) {
       final eq = _eq;
@@ -139,13 +156,27 @@ class _EqualizerPanelState extends State<EqualizerPanel> {
                   runSpacing: 4,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    const Text(
+                    Text(
                       'Ecualizador',
-                      style: TextStyle(
-                        fontFamily: 'Newsreader',
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                      ),
+                      style: isBrasa(context)
+                          ? const TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Brasa.cream,
+                            )
+                          : isModern(context)
+                          ? const TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 16,
+                              letterSpacing: -.16,
+                              fontWeight: FontWeight.w600,
+                            )
+                          : const TextStyle(
+                              fontFamily: 'Newsreader',
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
                     ),
                     StudioStamp(status, filled: true),
                   ],
@@ -362,10 +393,18 @@ class _BandColumn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final brasa = isBrasa(context);
+    final modern = isModern(context) || brasa;
     final style = TextStyle(
-      fontFamily: 'monospace',
-      fontSize: 9,
-      color: selected ? colors.primary : colors.onSurfaceVariant,
+      fontFamily: modern ? 'Inter' : 'monospace',
+      fontSize: modern ? 10 : 9,
+      color: brasa
+          ? (selected ? Brasa.cream : Brasa.steel)
+          : modern
+          ? (selected ? Tracky.navy : Tracky.slate)
+          : selected
+          ? colors.primary
+          : colors.onSurfaceVariant,
       fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
     );
     return Column(
@@ -406,14 +445,25 @@ class _BandColumn extends StatelessWidget {
         ),
         InkWell(
           onTap: onSelect,
+          borderRadius: modern ? BorderRadius.circular(8) : null,
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 28),
-            child: Center(
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  eqFrequencyLabel(band.frequency, short: true),
-                  style: style,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: brasa && selected
+                    ? Brasa.graphite
+                    : modern && !brasa && selected
+                    ? Tracky.mint.withValues(alpha: .5)
+                    : null,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Center(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    eqFrequencyLabel(band.frequency, short: true),
+                    style: style,
+                  ),
                 ),
               ),
             ),

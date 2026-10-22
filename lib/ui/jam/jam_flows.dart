@@ -3,12 +3,17 @@ import 'package:flutter/services.dart';
 import '../../core/models.dart';
 import '../../jam/jam_controller.dart';
 import '../studio/studio_components.dart';
+import '../../theme/brasa_theme.dart';
+import '../../theme/modern_theme.dart';
+import '../../theme/modern_widgets.dart';
+import '../undo_snackbar.dart';
 import 'jam_qr_code.dart';
 import 'jam_session_panel.dart';
+import 'jam_widgets.dart';
 
 void _say(BuildContext context, String text) => ScaffoldMessenger.maybeOf(
   context,
-)?.showSnackBar(SnackBar(content: Text(text)));
+)?.showSnackBar(auroraSnackBar(context, Text(text)));
 
 /// Inicia una Jam con un toque: en línea si hay servidor, si no en la red local.
 /// Al terminar abre «Invitar»; [seed] añade esas canciones a la cola.
@@ -16,7 +21,7 @@ Future<void> startJamFlow(
   BuildContext context,
   JamController jam, {
   List<Track> seed = const [],
-  String name = 'Anfitrión',
+  String? name,
 }) async {
   if (!jam.service.connected) {
     if (jam.remoteAvailable) {
@@ -43,6 +48,7 @@ Future<void> showJamInviteSheet(BuildContext context, JamController jam) =>
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
+      shape: jamSheetShape(context),
       constraints: const BoxConstraints(maxWidth: 520),
       builder: (_) => _InviteSheet(jam: jam),
     );
@@ -55,6 +61,21 @@ class _InviteSheet extends StatelessWidget {
     final invite = jam.service.invite;
     final remote = invite?.isRemote == true;
     final colors = Theme.of(context).colorScheme;
+    final brasa = isBrasa(context);
+    final modern = isModern(context);
+    // En la tarjeta oscura de Modern el texto va en blanco y los botones invertidos.
+    final soft = modern ? Colors.white70 : colors.onSurfaceVariant;
+    final onCard = modern
+        ? const TextStyle(color: Colors.white)
+        : const TextStyle();
+    final inverse = FilledButton.styleFrom(
+      backgroundColor: Colors.white,
+      foregroundColor: Tracky.navy,
+    );
+    final ghost = OutlinedButton.styleFrom(
+      foregroundColor: Colors.white,
+      side: const BorderSide(color: Colors.white54),
+    );
     Future<void> copy(String text, String done) async {
       await Clipboard.setData(ClipboardData(text: text));
       if (context.mounted) _say(context, done);
@@ -79,75 +100,101 @@ class _InviteSheet extends StatelessWidget {
             const SizedBox(height: 16),
             if (invite == null)
               const Text('Aún no hay una Jam activa.')
-            else ...[
-              JamQrCode(data: invite.encode(), size: 200),
-              const SizedBox(height: 16),
-              if (remote) ...[
-                const StudioStamp('CÓDIGO'),
-                SelectableText(
-                  invite.code,
-                  style: const TextStyle(
-                    fontFamily: 'monospace',
-                    fontSize: 32,
-                    letterSpacing: 6,
-                    fontWeight: FontWeight.w700,
+            else
+              _card(modern, brasa, [
+                JamQrCode(data: invite.encode(), size: 200),
+                const SizedBox(height: 16),
+                if (remote) ...[
+                  modern || brasa
+                      ? Text(
+                          'CÓDIGO',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                            color: soft,
+                          ),
+                        )
+                      : const StudioStamp('CÓDIGO'),
+                  SelectableText(
+                    invite.code,
+                    style: TextStyle(
+                      fontFamily: modern || brasa ? null : 'monospace',
+                      fontSize: brasa ? 24 : 32,
+                      letterSpacing: brasa ? 2 : 6,
+                      fontWeight: FontWeight.w700,
+                      color: modern ? Colors.white : null,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                SelectableText(
-                  invite.encode(),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: colors.onSurfaceVariant,
+                  const SizedBox(height: 4),
+                  SelectableText(
+                    invite.encode(),
+                    style: TextStyle(fontSize: 12, color: soft),
                   ),
+                ] else
+                  Text(
+                    'Red local · ${invite.endpoint}',
+                    style: onCard.copyWith(color: soft),
+                  ),
+                const SizedBox(height: 16),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 12,
+                  runSpacing: 8,
+                  children: [
+                    if (remote)
+                      OutlinedButton.icon(
+                        style: modern ? ghost : null,
+                        onPressed: () => copy(invite.code, 'Código copiado.'),
+                        icon: const Icon(Icons.tag),
+                        label: const Text('Copiar código'),
+                      ),
+                    FilledButton.icon(
+                      style: modern ? inverse : null,
+                      onPressed: () => copy(
+                        remote
+                            ? 'Únete a mi Jam en Aurora: ${invite.encode()} (código ${invite.code})'
+                            : invite.encode(),
+                        'Invitación copiada. Compártela solo con quien quieras.',
+                      ),
+                      icon: const Icon(Icons.ios_share),
+                      label: Text(
+                        remote ? 'Compartir enlace' : 'Copiar invitación',
+                      ),
+                    ),
+                  ],
                 ),
-              ] else
-                Text(
-                  'Red local · ${invite.endpoint}',
-                  style: TextStyle(color: colors.onSurfaceVariant),
-                ),
-              const SizedBox(height: 16),
-              Wrap(
-                alignment: WrapAlignment.center,
-                spacing: 12,
-                runSpacing: 8,
-                children: [
-                  if (remote)
-                    OutlinedButton.icon(
-                      onPressed: () => copy(invite.code, 'Código copiado.'),
-                      icon: const Icon(Icons.tag),
-                      label: const Text('Copiar código'),
-                    ),
-                  FilledButton.icon(
-                    onPressed: () => copy(
-                      remote
-                          ? 'Únete a mi Jam en Aurora: ${invite.encode()} (código ${invite.code})'
-                          : invite.encode(),
-                      'Invitación copiada. Compártela solo con quien quieras.',
-                    ),
-                    icon: const Icon(Icons.ios_share),
-                    label: Text(
-                      remote ? 'Compartir enlace' : 'Copiar invitación',
-                    ),
+                if (!remote) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'Red local: los dispositivos deben estar en el mismo Wi-Fi.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, color: soft),
                   ),
                 ],
-              ),
-              if (!remote) ...[
-                const SizedBox(height: 12),
-                Text(
-                  'Red local: los dispositivos deben estar en el mismo Wi-Fi.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: colors.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ],
+              ]),
           ],
         ),
       ),
     );
+  }
+
+  Widget _card(bool modern, bool brasa, List<Widget> children) {
+    final column = Column(mainAxisSize: MainAxisSize.min, children: children);
+    if (brasa) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Brasa.obsidian,
+          borderRadius: BorderRadius.circular(6),
+          boxShadow: Brasa.cardShadow,
+        ),
+        child: column,
+      );
+    }
+    return modern
+        ? ModernCard(dark: true, feature: true, child: column)
+        : column;
   }
 }
 
@@ -160,6 +207,7 @@ Future<void> showJamPanel(BuildContext context, JamController jam) {
       isScrollControlled: true,
       showDragHandle: true,
       useSafeArea: true,
+      shape: jamSheetShape(context),
       builder: (_) => DraggableScrollableSheet(
         expand: false,
         initialChildSize: .85,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/desktop_shell.dart';
 import '../core/window_controls.dart';
+import '../theme/brasa_theme.dart';
 
 /// Ajustes de ventana de Windows: comportamiento de la X e inicio con Windows.
 class DesktopSettingsTiles extends StatefulWidget {
@@ -29,6 +30,8 @@ class _DesktopSettingsTilesState extends State<DesktopSettingsTiles> {
     children: [
       SwitchListTile(
         contentPadding: EdgeInsets.zero,
+        activeTrackColor: isBrasa(context) ? Brasa.cream : null,
+        activeThumbColor: isBrasa(context) ? Brasa.void_ : null,
         title: const Text('Al cerrar con X: minimizar a la bandeja'),
         subtitle: Text(
           _tray
@@ -43,6 +46,8 @@ class _DesktopSettingsTilesState extends State<DesktopSettingsTiles> {
       ),
       SwitchListTile(
         contentPadding: EdgeInsets.zero,
+        activeTrackColor: isBrasa(context) ? Brasa.cream : null,
+        activeThumbColor: isBrasa(context) ? Brasa.void_ : null,
         title: const Text('Iniciar con Windows'),
         value: _autostart,
         onChanged: (v) async {

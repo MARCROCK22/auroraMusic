@@ -44,6 +44,7 @@ extension JamServiceRemote on JamService {
           permissions: JamPermissions.all,
         ),
       ];
+      if (localAvatar != null) avatars['host'] = localAvatar!;
       error = null;
       await _startHub(transport, room);
       _startBeat();
@@ -623,6 +624,11 @@ extension JamServiceRemote on JamService {
               ),
             )
             .toList();
+    final moved = {for (final e in avatars.entries) swap(e.key): e.value};
+    avatars
+      ..clear()
+      ..addAll(moved);
+    if (localAvatar != null) avatars['host'] = localAvatar!;
     queue = [
       for (final e in queue)
         JamQueueEntry(

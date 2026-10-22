@@ -240,9 +240,13 @@ void main() {
   });
 
   group('integración en pantallas existentes', () {
-    testWidgets('la ficha de artista de la biblioteca ofrece seguir', (
+    testWidgets('la lista de artistas muestra solo los seguidos', (
       tester,
     ) async {
+      await tester.runAsync(() async {
+        await service.repository.follow('UC1', 'Ana Núñez');
+        await service.load();
+      });
       await tester.binding.setSurfaceSize(const Size(320, 700));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.pumpWidget(
@@ -256,6 +260,7 @@ void main() {
               body: ArtistsPage(
                 tracks: const [
                   Track(id: 'one', title: 'First', artist: 'Ana Núñez'),
+                  Track(id: 'two', title: 'Other', artist: 'No seguido'),
                 ],
                 follow: service,
                 onPlay: (_) {},
@@ -265,12 +270,11 @@ void main() {
           ),
         ),
       );
+      expect(find.text('1 artista que sigues'), findsOneWidget);
+      expect(find.text('No seguido'), findsNothing);
       await tester.tap(find.text('Ana Núñez').first);
       await tester.pumpAndSettle();
-      expect(find.text('Seguir'), findsOneWidget);
-      await tester.tap(find.text('Seguir'));
-      await settle(tester);
-      expect(find.text('Siguiendo'), findsOneWidget);
+      expect(find.text('Siguiendo'), findsWidgets);
       expect(tester.takeException(), isNull);
     });
 

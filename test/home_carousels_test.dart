@@ -3,8 +3,13 @@ import 'dart:ui' as ui;
 
 import 'package:aurora_music/app_controller.dart';
 import 'package:aurora_music/core/models.dart';
+import 'package:aurora_music/follow/follow_models.dart';
+import 'package:aurora_music/follow/follow_repository.dart';
+import 'package:aurora_music/follow/follow_service.dart';
+import 'package:aurora_music/library/library_database.dart';
 import 'package:aurora_music/ui/home_music_page.dart';
 import 'package:aurora_music/ui/horizontal_music_row.dart';
+import 'package:drift/native.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -230,7 +235,12 @@ void main() {
       await tester.scrollUntilVisible(
         find.text('ENCONTRAR MÚSICA'),
         240,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: find
+            .descendant(
+              of: find.byType(ListView).first,
+              matching: find.byType(Scrollable),
+            )
+            .first,
       );
       await tester.pumpAndSettle();
       await tester.tap(find.text('ENCONTRAR MÚSICA'));
@@ -257,7 +267,12 @@ void main() {
       await tester.scrollUntilVisible(
         find.byKey(const ValueKey('home-recommendations')),
         240,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: find
+            .descendant(
+              of: find.byType(ListView).first,
+              matching: find.byType(Scrollable),
+            )
+            .first,
       );
       await tester.pumpAndSettle();
       expect(
@@ -265,18 +280,28 @@ void main() {
         findsOneWidget,
       );
       await tester.scrollUntilVisible(
-        find.text('Mi playlist 0 para escuchar'),
+        find.text('Mi playlist 4 para escuchar'),
         300,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: find
+            .descendant(
+              of: find.byType(ListView).first,
+              matching: find.byType(Scrollable),
+            )
+            .first,
       );
-      await tester.ensureVisible(find.text('Mi playlist 0 para escuchar'));
+      await tester.ensureVisible(find.text('Mi playlist 4 para escuchar'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Mi playlist 0 para escuchar'));
-      expect(opened?.id, 'list-0');
+      await tester.tap(find.text('Mi playlist 4 para escuchar'));
+      expect(opened?.id, 'list-4');
       await tester.scrollUntilVisible(
         find.byKey(const ValueKey('home-library')),
         300,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: find
+            .descendant(
+              of: find.byType(ListView).first,
+              matching: find.byType(Scrollable),
+            )
+            .first,
       );
       expect(find.byKey(const ValueKey('home-library')), findsOneWidget);
       final track = controller.tracks.first;
@@ -329,7 +354,7 @@ void main() {
   );
 
   testWidgets(
-    'real artist and album groups keep namesakes separate and play their own context at enlarged narrow size',
+    'home shows only followed artists (no derived albums) at enlarged narrow size',
     (tester) async {
       const artistA = 'Artista A con un nombre largo';
       const artistB = 'Artista B con un nombre largo';
@@ -373,10 +398,21 @@ void main() {
           ),
         ]);
       controller.playlists.clear();
+      final db = LibraryDatabase(NativeDatabase.memory());
+      final follow = FollowService(
+        repository: FollowRepository(db),
+        fetchArtist: (_) async => const ArtistPage(),
+        findArtist: (_) async => const [],
+      );
+      addTearDown(() async {
+        follow.dispose();
+        await db.close();
+      });
       await mount(
         tester,
         HomeMusicPage(
           controller: controller,
+          follow: follow,
           onSearch: () {},
           onDownloads: () {},
           onLikes: () {},
@@ -384,6 +420,15 @@ void main() {
         ),
         scale: 2,
       );
+      // Sin seguidos no hay carril de artistas, ni de álbumes deducidos.
+      expect(find.byKey(const ValueKey('home-artists')), findsNothing);
+      expect(find.byKey(const ValueKey('home-albums')), findsNothing);
+      await tester.runAsync(() async {
+        await follow.follow('Seguido uno', browseId: 'UC1');
+        await follow.follow(artistB, browseId: 'UC2');
+        await pumpEventQueue();
+      });
+      await tester.pump();
       final outer = find.byType(Scrollable).first;
       await tester.scrollUntilVisible(
         find.byKey(const ValueKey('home-artists')),
@@ -395,29 +440,11 @@ void main() {
         find.byKey(const ValueKey('home-artists')),
       );
       expect(artistsRow.itemCount, 2);
-      await tester.ensureVisible(find.byTooltip('Escuchar artista $artistB'));
+      expect(find.byKey(const ValueKey('home-albums')), findsNothing);
+      await tester.ensureVisible(find.byTooltip('Abrir artista $artistB'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Escuchar artista $artistB'));
+      await tester.tap(find.byTooltip('Abrir artista $artistB'));
       await tester.pumpAndSettle();
-      expect(controller.queue.map((t) => t.id), ['b-one', 'b-two']);
-      await tester.scrollUntilVisible(
-        find.byKey(const ValueKey('home-albums')),
-        300,
-        scrollable: find.byType(Scrollable).first,
-      );
-      await tester.pumpAndSettle();
-      final albumsRow = tester.widget<HorizontalMusicRow>(
-        find.byKey(const ValueKey('home-albums')),
-      );
-      expect(albumsRow.itemCount, 2);
-      await tester.ensureVisible(
-        find.byTooltip('Escuchar álbum $album de $artistA'),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Escuchar álbum $album de $artistA'));
-      await tester.pumpAndSettle();
-      expect(controller.queue.map((t) => t.id), ['a-one', 'a-two']);
-      expect(controller.currentTrack?.id, 'a-one');
       expect(tester.takeException(), isNull);
     },
   );

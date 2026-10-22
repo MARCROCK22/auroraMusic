@@ -1,7 +1,22 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../../jam/jam_controller.dart';
 import '../../jam/jam_models.dart';
+import '../../theme/brasa_theme.dart';
+import '../../theme/modern_theme.dart';
+import '../../theme/modern_widgets.dart';
 import '../studio/studio_components.dart';
+
+/// Forma de las hojas inferiores en Modern (radio 24 arriba); null en Atelier.
+ShapeBorder? jamSheetShape(BuildContext context) => isBrasa(context)
+    ? const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+      )
+    : isModern(context)
+    ? const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      )
+    : null;
 
 /// Permisos y etiquetas derivados de la sesión; los usa la barra, el chip y el panel.
 extension JamUi on JamController {
@@ -25,8 +40,17 @@ String jamRoleLabel(JamRole role) => switch (role) {
 
 /// Avatar con la inicial; el color sale del nombre para ser estable entre pantallas.
 class JamAvatar extends StatelessWidget {
-  const JamAvatar({super.key, required this.name, this.size = 28, this.muted});
+  const JamAvatar({
+    super.key,
+    required this.name,
+    this.size = 28,
+    this.muted,
+    this.image,
+  });
   final String name;
+
+  /// Foto de perfil (PNG/JPEG ya validado); sin ella se muestra la inicial.
+  final Uint8List? image;
   final double size;
   final bool? muted;
   static const _tones = [
@@ -37,11 +61,56 @@ class JamAvatar extends StatelessWidget {
     Color(0xff8fb996),
     Color(0xff9db4d6),
   ];
+  static const _brasaTones = [
+    Color(0xffffd9a8),
+    Color(0xffe8c4a0),
+    Color(0xffc8b8aa),
+    Color(0xffd9a57a),
+    Color(0xffb8c9a6),
+    Color(0xffa9b9cc),
+  ];
+  static const _modernTones = [
+    Tracky.mint,
+    Tracky.butter,
+    Color(0xffb9d4f0),
+    Color(0xffd8c8f0),
+    Color(0xffc9e8a8),
+    Color(0xffe8e7e5),
+  ];
   @override
   Widget build(BuildContext context) {
-    final tone =
-        _tones[name.codeUnits.fold(0, (a, b) => a + b) % _tones.length];
+    final modern = isModern(context);
+    final brasa = isBrasa(context);
+    final tones = brasa
+        ? _brasaTones
+        : modern
+        ? _modernTones
+        : _tones;
+    final tone = tones[name.codeUnits.fold(0, (a, b) => a + b) % tones.length];
     final initial = name.trim().isEmpty ? '?' : name.trim()[0].toUpperCase();
+    final letter = Text(
+      initial,
+      style: TextStyle(
+        color: brasa
+            ? Colors.black
+            : modern
+            ? Tracky.navy
+            : StudioPalette.canvas,
+        fontSize: size * .45,
+        fontWeight: FontWeight.w700,
+      ),
+    );
+    // Misma instancia de bytes => la caché de imágenes decodifica una vez.
+    Widget photo(Widget fallback) => Image.memory(
+      image!,
+      width: size,
+      height: size,
+      fit: BoxFit.cover,
+      cacheWidth: (size * 3).round(),
+      gaplessPlayback: true,
+      excludeFromSemantics: true,
+      errorBuilder: (_, _, _) => Center(child: fallback),
+    );
     return Semantics(
       label: name,
       excludeSemantics: true,
@@ -54,17 +123,10 @@ class JamAvatar extends StatelessWidget {
           shape: BoxShape.circle,
           border: Border.all(
             color: Theme.of(context).colorScheme.surfaceContainerLowest,
-            width: 2,
+            width: brasa ? 1 : 2,
           ),
         ),
-        child: Text(
-          initial,
-          style: TextStyle(
-            color: StudioPalette.canvas,
-            fontSize: size * .45,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
+        child: image == null ? letter : ClipOval(child: photo(letter)),
       ),
     );
   }
@@ -74,14 +136,20 @@ class JamAvatarStack extends StatelessWidget {
   const JamAvatarStack({
     super.key,
     required this.names,
+    this.images = const [],
     this.size = 24,
     this.max = 4,
   });
   final List<String> names;
+
+  /// Fotos en paralelo a [names] (pueden faltar o ser null).
+  final List<Uint8List?> images;
   final double size;
   final int max;
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final modern = isModern(context) || isBrasa(context);
     final shown = names.take(max).toList();
     final extra = names.length - shown.length;
     final step = size * .7;
@@ -93,7 +161,11 @@ class JamAvatarStack extends StatelessWidget {
           for (final (i, name) in shown.indexed)
             Positioned(
               left: i * step,
-              child: JamAvatar(name: name, size: size),
+              child: JamAvatar(
+                name: name,
+                size: size,
+                image: i < images.length ? images[i] : null,
+              ),
             ),
           if (extra > 0)
             Positioned(
@@ -103,15 +175,22 @@ class JamAvatarStack extends StatelessWidget {
                 height: size,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: StudioPalette.high,
+                  color: modern
+                      ? colors.surfaceContainerHighest
+                      : StudioPalette.high,
                   shape: BoxShape.circle,
-                  border: Border.all(color: StudioPalette.well, width: 2),
+                  border: Border.all(
+                    color: modern
+                        ? colors.surfaceContainerLowest
+                        : StudioPalette.well,
+                    width: 2,
+                  ),
                 ),
                 child: Text(
                   '+$extra',
                   style: TextStyle(
                     fontSize: size * .38,
-                    color: StudioPalette.ink,
+                    color: modern ? colors.onSurface : StudioPalette.ink,
                   ),
                 ),
               ),
@@ -136,10 +215,11 @@ class JamPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final names = [
+    final people = [
       for (final p in jam.service.participants)
-        if (p.connected) p.name,
+        if (p.connected) p,
     ];
+    final names = [for (final p in people) p.name];
     final label =
         'Jam · ${jam.peopleCount} ${jam.peopleCount == 1 ? 'persona' : 'personas'}';
     return Semantics(
@@ -150,9 +230,19 @@ class JamPill extends StatelessWidget {
       child: Tooltip(
         message: 'Abrir la Jam · ${jam.roleLabel} · ${jam.modeLabel}',
         child: Material(
-          color: colors.surfaceContainerHigh,
+          color: isBrasa(context)
+              ? colors.surfaceContainerHigh
+              : isModern(context)
+              ? colors.surfaceContainerLow
+              : colors.surfaceContainerHigh,
+          elevation: 0,
+          shadowColor: Colors.transparent,
           shape: StadiumBorder(
-            side: BorderSide(color: colors.primaryContainer.withAlpha(120)),
+            side: isBrasa(context)
+                ? BorderSide.none
+                : isModern(context)
+                ? BorderSide(color: colors.outlineVariant)
+                : BorderSide(color: colors.primaryContainer.withAlpha(120)),
           ),
           child: InkWell(
             customBorder: const StadiumBorder(),
@@ -166,6 +256,7 @@ class JamPill extends StatelessWidget {
                   children: [
                     JamAvatarStack(
                       names: names,
+                      images: [for (final p in people) jam.avatarOf(p.id)],
                       size: 22,
                       max: compact ? 2 : 3,
                     ),

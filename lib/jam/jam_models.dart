@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import '../core/models.dart';
 
@@ -35,6 +36,25 @@ String jamCleanName(String value, {String fallback = 'Invitado'}) {
       .trim();
   if (clean.isEmpty) return fallback;
   return clean.length > 32 ? clean.substring(0, 32).trim() : clean;
+}
+
+/// Tope del avatar decodificado (miniatura PNG/JPEG de perfil).
+const jamMaxAvatarBytes = 24 * 1024;
+
+/// Valida un avatar recibido (base64 de PNG/JPEG de hasta [jamMaxAvatarBytes]).
+/// Devuelve null ante cualquier defecto: un avatar malo se ignora, nunca falla.
+Uint8List? jamAvatarFromBase64(Object? raw) {
+  // 24 KiB en base64 son 32768 caracteres; se corta antes de decodificar.
+  if (raw is! String || raw.length < 12 || raw.length > 32768) return null;
+  try {
+    final b = base64Decode(raw);
+    if (b.length < 8 || b.length > jamMaxAvatarBytes) return null;
+    final png = b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47;
+    final jpeg = b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF;
+    return png || jpeg ? b : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 class JamException implements Exception {

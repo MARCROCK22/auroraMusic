@@ -3,6 +3,10 @@ import '../../app_controller.dart';
 import '../../core/models.dart';
 import '../../jam/jam_controller.dart';
 import '../../shortcuts/shortcut_service.dart';
+import '../../theme/brasa_theme.dart';
+import '../../theme/modern_theme.dart';
+import '../../theme/modern_widgets.dart';
+import '../../theme/slush_theme.dart';
 import '../artwork.dart';
 import '../jam/jam_session_panel.dart' show jamTrackAsTrack;
 import '../jam/jam_widgets.dart';
@@ -39,6 +43,14 @@ class StudioTransport extends StatefulWidget {
 class _StudioTransportState extends State<StudioTransport> {
   double? _scrub;
   String? _scrubTrack;
+  // Brasa: el thumb de la barra solo aparece al pasar el ratón.
+  final _hover = ValueNotifier<bool>(false);
+  @override
+  void dispose() {
+    _hover.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: Listenable.merge([
@@ -62,6 +74,8 @@ class _StudioTransportState extends State<StudioTransport> {
           ? (jamEntry == null ? null : jamTrackAsTrack(jamEntry.track))
           : c.currentTrack;
       final colors = Theme.of(context).colorScheme;
+      final modern = isModern(context);
+      final brasa = isBrasa(context);
       final large = MediaQuery.textScalerOf(context).scale(1) > 1.5;
       return LayoutBuilder(
         builder: (context, constraints) {
@@ -75,22 +89,29 @@ class _StudioTransportState extends State<StudioTransport> {
                   artworkContext: wide
                       ? ArtworkContext.transport
                       : ArtworkContext.thumbnailCompact,
-                  radius: 2,
+                  radius: brasa ? 4 : (modern ? 8 : 2),
                 )
               else
                 Container(
                   width: 44,
                   height: 44,
                   decoration: BoxDecoration(
-                    color: colors.surfaceContainerLow,
-                    borderRadius: StudioPalette.sleeve,
-                    boxShadow: const [
-                      BoxShadow(color: Colors.black, offset: Offset(2, 3)),
-                    ],
+                    color: brasa ? Brasa.obsidian : colors.surfaceContainerLow,
+                    borderRadius: StudioPalette.of(context),
+                    boxShadow: brasa
+                        ? null
+                        : modern
+                        ? Tracky.warmShadow
+                        : const [
+                            BoxShadow(
+                              color: Colors.black,
+                              offset: Offset(2, 3),
+                            ),
+                          ],
                   ),
                   child: Icon(StudioSymbols.musicNote, color: colors.primary),
                 ),
-              const SizedBox(width: 16),
+              SizedBox(width: brasa ? 12 : 16),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -100,29 +121,59 @@ class _StudioTransportState extends State<StudioTransport> {
                       track?.title ?? 'Elige una canción',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontFamily: 'Newsreader',
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style: brasa
+                          ? const TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Brasa.cream,
+                            )
+                          : modern
+                          ? const TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 15,
+                              letterSpacing: -.15,
+                              fontWeight: FontWeight.w600,
+                            )
+                          : const TextStyle(
+                              fontFamily: 'Newsreader',
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
                     ),
                     if (track != null)
-                      Text(
-                        c.adPlaying && !jamAudio
-                            ? 'Anuncio · tu canción sigue después'
-                            : jamAudio
-                            ? '${track.artist} · Jam'
-                            : track.artist,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: colors.onSurfaceVariant,
+                      MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: GestureDetector(
+                          onTap: () => c.openArtist(track.artist),
+                          child: Text(
+                            c.adPlaying && !jamAudio
+                                ? 'Anuncio · tu canción sigue después'
+                                : jamAudio
+                                ? '${track.artist} · Jam'
+                                : track.artist,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: brasa
+                                  ? Brasa.steel
+                                  : modern
+                                  ? Tracky.slate
+                                  : colors.onSurfaceVariant,
+                            ),
+                          ),
                         ),
                       ),
                   ],
                 ),
               ),
+              // Brasa: marca estática de «sonando» (sin animación continua).
+              if (brasa && track != null && c.audio.isPlaying)
+                Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: Icon(Icons.graphic_eq, size: 14, color: Brasa.accent),
+                ),
               if (wide)
                 IconButton(
                   tooltip: 'Favorito',
@@ -153,7 +204,9 @@ class _StudioTransportState extends State<StudioTransport> {
                     StudioSymbols.shuffle,
                     size: 18,
                     color: c.shuffle
-                        ? colors.primaryContainer
+                        ? (modern || brasa
+                              ? colors.onSurface
+                              : colors.primaryContainer)
                         : colors.onSurfaceVariant,
                   ),
                 ),
@@ -169,7 +222,7 @@ class _StudioTransportState extends State<StudioTransport> {
                     size: 18,
                     color: c.repeat == RepeatMode.off
                         ? colors.onSurfaceVariant
-                        : colors.primaryContainer,
+                        : (brasa ? colors.onSurface : colors.primaryContainer),
                   ),
                 ),
             ],
@@ -187,24 +240,41 @@ class _StudioTransportState extends State<StudioTransport> {
                   onPressed: widget.onStartJam,
                   icon: const Icon(StudioSymbols.groups, size: 18),
                 );
-          return Container(
+          final bar = Container(
             padding: EdgeInsets.symmetric(
               horizontal: wide ? 24 : 12,
               vertical: wide ? 8 : 6,
             ),
-            decoration: BoxDecoration(
-              color: colors.surfaceContainerLowest,
-              border: Border(
-                top: BorderSide(color: colors.surfaceContainerHigh),
-              ),
-            ),
+            decoration: brasa
+                ? const BoxDecoration(
+                    color: Brasa.void_,
+                    border: Border(top: BorderSide(color: Brasa.ash)),
+                  )
+                : isSlush(context)
+                ? BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.fromBorderSide(Slush.border),
+                  )
+                : modern
+                ? BoxDecoration(
+                    color: colors.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: Tracky.warmShadow,
+                  )
+                : BoxDecoration(
+                    color: colors.surfaceContainerLowest,
+                    border: Border(
+                      top: BorderSide(color: colors.surfaceContainerHigh),
+                    ),
+                  ),
             child: wide
                 ? SizedBox(
                     height: 80,
                     child: Row(
                       children: [
                         SizedBox(
-                          width: 280,
+                          width: brasa ? 320 : 280,
                           child: InkWell(
                             onTap: track == null ? null : widget.onOpenPlayer,
                             child: info,
@@ -216,7 +286,10 @@ class _StudioTransportState extends State<StudioTransport> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               transport,
-                              SizedBox(height: 32, child: progress),
+                              SizedBox(
+                                height: brasa ? 20 : 32,
+                                child: progress,
+                              ),
                             ],
                           ),
                         ),
@@ -228,17 +301,27 @@ class _StudioTransportState extends State<StudioTransport> {
                           child: Row(
                             children: [
                               jamControl,
-                              TextButton.icon(
-                                onPressed: widget.onLyrics,
-                                icon: const Icon(
-                                  StudioSymbols.lyrics,
-                                  size: 16,
+                              if (brasa)
+                                IconButton(
+                                  tooltip: 'Letras',
+                                  onPressed: widget.onLyrics,
+                                  icon: const Icon(
+                                    StudioSymbols.lyrics,
+                                    size: 18,
+                                  ),
+                                )
+                              else
+                                TextButton.icon(
+                                  onPressed: widget.onLyrics,
+                                  icon: const Icon(
+                                    StudioSymbols.lyrics,
+                                    size: 16,
+                                  ),
+                                  label: const Text(
+                                    'Letras',
+                                    style: TextStyle(fontSize: 12),
+                                  ),
                                 ),
-                                label: const Text(
-                                  'Letras',
-                                  style: TextStyle(fontSize: 12),
-                                ),
-                              ),
                               IconButton(
                                 tooltip: 'Modo Vinilo',
                                 onPressed: widget.onVinyl,
@@ -261,8 +344,8 @@ class _StudioTransportState extends State<StudioTransport> {
                                 child: SliderTheme(
                                   data: SliderTheme.of(context).copyWith(
                                     trackHeight: 4,
-                                    thumbShape: const RoundSliderThumbShape(
-                                      enabledThumbRadius: 3,
+                                    thumbShape: RoundSliderThumbShape(
+                                      enabledThumbRadius: brasa ? 5 : 3,
                                     ),
                                     overlayShape: const RoundSliderOverlayShape(
                                       overlayRadius: 12,
@@ -276,13 +359,14 @@ class _StudioTransportState extends State<StudioTransport> {
                                   ),
                                 ),
                               ),
-                              Text(
-                                '${(c.audio.volume * 100).round()}%',
-                                style: const TextStyle(
-                                  fontFamily: 'monospace',
-                                  fontSize: 9,
+                              if (!brasa)
+                                Text(
+                                  '${(c.audio.volume * 100).round()}%',
+                                  style: const TextStyle(
+                                    fontFamily: 'monospace',
+                                    fontSize: 9,
+                                  ),
                                 ),
-                              ),
                             ],
                           ),
                         ),
@@ -336,6 +420,12 @@ class _StudioTransportState extends State<StudioTransport> {
                     ],
                   ),
           );
+          return modern && !brasa
+              ? Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                  child: bar,
+                )
+              : bar;
         },
       );
     },
@@ -361,52 +451,103 @@ class _StudioTransportState extends State<StudioTransport> {
     final position =
         (_scrubTrack == key ? _scrub : null) ??
         c.audio.position.inMilliseconds.toDouble();
-    return Row(
-      children: [
-        Text(
-          studioTime(Duration(milliseconds: position.toInt())),
-          style: const TextStyle(fontFamily: 'monospace', fontSize: 10),
-        ),
-        Expanded(
-          child: SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              trackHeight: 6,
-              thumbShape: const _StudioNeedle(),
-              overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-            ),
-            child: Slider(
-              semanticFormatterCallback: (value) =>
-                  'Posición de reproducción ${Duration(milliseconds: value.round()).inSeconds} segundos',
-              value: position.clamp(0, duration > 0 ? duration.toDouble() : 1),
-              max: duration > 0 ? duration.toDouble() : 1,
-              onChangeStart: duration <= 0 || !seekable
-                  ? null
-                  : (value) {
-                      _scrubTrack = key;
-                    },
-              onChanged: duration <= 0 || !seekable
-                  ? null
-                  : (value) => setState(() => _scrub = value),
-              onChangeEnd: duration <= 0 || !seekable
-                  ? null
-                  : (value) {
-                      if (_scrubTrack == key) {
-                        final to = Duration(milliseconds: value.toInt());
-                        _jamAudio ? j!.seek(to) : c.seek(to);
-                      }
-                      setState(() {
-                        _scrub = null;
-                        _scrubTrack = null;
-                      });
-                    },
-            ),
+    final modern = isModern(context);
+    final brasa = isBrasa(context);
+    final timeStyle = brasa
+        ? const TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 11,
+            color: Brasa.steel,
+            fontFeatures: [FontFeature.tabularFigures()],
+          )
+        : modern
+        ? const TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            letterSpacing: -.11,
+            fontFeatures: [FontFeature.tabularFigures()],
+          )
+        : const TextStyle(fontFamily: 'monospace', fontSize: 10);
+    final ink = Theme.of(context).colorScheme.onSurface;
+    Widget scrubber(bool showThumb) => SliderTheme(
+      data: SliderTheme.of(context).copyWith(
+        trackHeight: brasa ? 4 : (modern ? 3 : 6),
+        thumbShape: brasa
+            ? RoundSliderThumbShape(
+                enabledThumbRadius: showThumb || _scrub != null ? 6 : 0,
+                elevation: 0,
+                pressedElevation: 0,
+              )
+            : modern
+            ? const RoundSliderThumbShape(enabledThumbRadius: 5)
+            : const _StudioNeedle(),
+        overlayShape: brasa
+            ? SliderComponentShape.noOverlay
+            : const RoundSliderOverlayShape(overlayRadius: 14),
+        activeTrackColor: brasa || modern ? ink : null,
+        inactiveTrackColor: brasa
+            ? Brasa.ash
+            : modern
+            ? Tracky.slate.withValues(alpha: .28)
+            : null,
+        thumbColor: brasa
+            ? Brasa.cream
+            : isSlush(context)
+            ? Slush.yellow
+            : modern
+            ? Tracky.coral
+            : null,
+      ),
+      child: Slider(
+        semanticFormatterCallback: (value) =>
+            'Posición de reproducción ${Duration(milliseconds: value.round()).inSeconds} segundos',
+        value: position.clamp(0, duration > 0 ? duration.toDouble() : 1),
+        max: duration > 0 ? duration.toDouble() : 1,
+        onChangeStart: duration <= 0 || !seekable
+            ? null
+            : (value) {
+                _scrubTrack = key;
+              },
+        onChanged: duration <= 0 || !seekable
+            ? null
+            : (value) => setState(() => _scrub = value),
+        onChangeEnd: duration <= 0 || !seekable
+            ? null
+            : (value) {
+                if (_scrubTrack == key) {
+                  final to = Duration(milliseconds: value.toInt());
+                  _jamAudio ? j!.seek(to) : c.seek(to);
+                }
+                setState(() {
+                  _scrub = null;
+                  _scrubTrack = null;
+                });
+              },
+      ),
+    );
+    return RepaintBoundary(
+      child: Row(
+        children: [
+          Text(
+            studioTime(Duration(milliseconds: position.toInt())),
+            style: timeStyle,
           ),
-        ),
-        Text(
-          studioTime(c.audio.duration),
-          style: const TextStyle(fontFamily: 'monospace', fontSize: 10),
-        ),
-      ],
+          Expanded(
+            child: brasa
+                ? MouseRegion(
+                    onEnter: (_) => _hover.value = true,
+                    onExit: (_) => _hover.value = false,
+                    child: ValueListenableBuilder<bool>(
+                      valueListenable: _hover,
+                      builder: (_, over, _) => scrubber(over),
+                    ),
+                  )
+                : scrubber(false),
+          ),
+          Text(studioTime(c.audio.duration), style: timeStyle),
+        ],
+      ),
     );
   }
 }
@@ -470,6 +611,57 @@ class TransportPlayButton extends StatelessWidget {
     final j = jam;
     final jamAudio = transportJamAudio(c, jam);
     final enabled = jamAudio ? j!.canPause : c.currentTrack != null;
+    if (isModern(context) || isBrasa(context)) {
+      final brasa = isBrasa(context);
+      final tip = jamAudio && !enabled
+          ? 'Lo controla ${j!.hostName}'
+          : '${c.audio.isPlaying ? 'Pausar' : 'Reproducir'}${_hint(shortcut)}';
+      return Tooltip(
+        message: tip,
+        child: SizedBox.square(
+          dimension: brasa ? 36 : 40,
+          child: Material(
+            color: enabled
+                ? (brasa
+                      ? Brasa.cream
+                      : isSlush(context)
+                      ? Slush.ink
+                      : Tracky.mint)
+                : colors.surfaceContainerHigh,
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: !enabled
+                  ? null
+                  : jamAudio
+                  ? j!.togglePlayback
+                  : c.togglePlayback,
+              child: c.busy && !jamAudio
+                  ? Padding(
+                      padding: const EdgeInsets.all(11),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: brasa ? Colors.black : Tracky.navy,
+                      ),
+                    )
+                  : Icon(
+                      c.audio.isPlaying
+                          ? Icons.pause_rounded
+                          : Icons.play_arrow_rounded,
+                      color: enabled
+                          ? (brasa
+                                ? Colors.black
+                                : isSlush(context)
+                                ? Colors.white
+                                : Tracky.navy)
+                          : colors.outline,
+                      size: brasa ? 22 : 24,
+                    ),
+            ),
+          ),
+        ),
+      );
+    }
     return Container(
       decoration: BoxDecoration(
         color: enabled ? colors.primaryContainer : colors.surfaceContainerHigh,

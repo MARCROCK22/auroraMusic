@@ -29,6 +29,17 @@ class JamService extends ChangeNotifier {
   int? roundTripMs;
   List<JamQueueEntry> queue = [];
   List<JamParticipant> participants = [];
+
+  /// Avatares validados por id de participante (misma instancia de bytes
+  /// siempre, para que la caché de imágenes decodifique una sola vez).
+  final Map<String, Uint8List> avatars = {};
+
+  /// Foto de perfil de este dispositivo; se presenta al unirse.
+  Uint8List? localAvatar;
+
+  /// Invitados que anunciaron soporte de avatar: solo a ellos se les difunden.
+  final Set<String> _avatarPeers = {};
+  bool _avatarProbe = false, _hostLacksAvatar = false;
   JamPlayback? playback;
   Future<void> Function()? onSkip;
   HttpServer? _server;
@@ -78,6 +89,62 @@ class JamService extends ChangeNotifier {
       !_disposed;
   JamParticipant? get me =>
       participants.where((p) => p.id == participantId).firstOrNull;
+  Uint8List? avatarOf(String id) => avatars[id];
+
+  /// Cambia el avatar propio: el anfitrión lo difunde; un invitado lo envía al
+  /// anfitrión como comando `avatar` (límite propio de trama, ver _receiveCommand).
+  void setLocalAvatar(Uint8List? bytes) {
+    localAvatar = bytes;
+    if (isHost) {
+      _setAvatar('host', bytes);
+    } else if (connected) {
+      _sendMyAvatar();
+    }
+  }
+
+  /// Anuncia la capacidad de avatar al anfitrión (data vacío si no hay foto).
+  /// Un anfitrión antiguo contesta `error: invalid` (no cierra); eso se detecta
+  /// con [_avatarProbe] y se deja de enviar avatares en esa conexión.
+  void _sendMyAvatar() {
+    if (isHost || _hostLacksAvatar) return;
+    final bytes = localAvatar;
+    _avatarProbe = true;
+    _sendSocket(
+      _client,
+      jsonEncode({
+        'kind': 'avatar',
+        'data': bytes == null ? '' : base64Encode(bytes),
+      }),
+    );
+  }
+
+  void _setAvatar(String id, Uint8List? bytes) {
+    if (bytes == null) {
+      if (avatars.remove(id) == null) return;
+    } else {
+      avatars[id] = bytes;
+    }
+    final data = _avatarMessage(id);
+    for (final entry in _sockets.entries) {
+      if (entry.key != id && _avatarPeers.contains(entry.key)) {
+        _sendSocket(entry.value, data);
+      }
+    }
+    _notify();
+  }
+
+  String _avatarMessage(String id) => jsonEncode({
+    'kind': 'avatar',
+    'id': id,
+    'data': avatars[id] == null ? '' : base64Encode(avatars[id]!),
+  });
+
+  void _sendAvatarsTo(String id) {
+    for (final other in avatars.keys) {
+      if (other != id) _sendSocket(_sockets[id], _avatarMessage(other));
+    }
+  }
+
   String participantName(String id) =>
       participants.where((p) => p.id == id).firstOrNull?.name ?? 'Participante';
   static const connectionHelp =
@@ -139,6 +206,7 @@ class JamService extends ChangeNotifier {
           permissions: JamPermissions.all,
         ),
       ];
+      if (localAvatar != null) avatars['host'] = localAvatar!;
       error = null;
       server.listen(
         (request) {
@@ -289,6 +357,7 @@ class JamService extends ChangeNotifier {
     }
     final generation = ++_generation;
     final ready = Completer<void>();
+    _avatarProbe = _hostLacksAvatar = false;
     error = null;
     connection = JamConnection.disconnected;
     _notify();
@@ -331,6 +400,7 @@ class JamService extends ChangeNotifier {
                 _notify();
               case 'pong':
                 jamKeys(data, {'kind', 'sent', 'serverTimeMs'});
+                _avatarProbe = false;
                 final sent = jamInt(data['sent'], max: 8640000000000000);
                 final before = _pings.remove(sent);
                 if (before != null) {
@@ -355,6 +425,16 @@ class JamService extends ChangeNotifier {
                   playback = state;
                 }
                 _notify();
+              case 'avatar':
+                jamKeys(data, {'kind', 'id', 'data'});
+                final who = jamIdentifier(data['id']);
+                if (data['data'] == '') {
+                  avatars.remove(who);
+                } else {
+                  final bytes = jamAvatarFromBase64(data['data']);
+                  if (bytes != null) avatars[who] = bytes;
+                }
+                _notify();
               case 'kicked':
                 jamKeys(data, {'kind'});
                 _endRemote('Te expulsaron de la Jam.');
@@ -375,6 +455,12 @@ class JamService extends ChangeNotifier {
                   'muted',
                 }.contains(data['code'])) {
                   throw const JamException('Código de error inválido.');
+                }
+                if (_avatarProbe && data['code'] == 'invalid') {
+                  // Anfitrión antiguo: no entiende `avatar`; se ignora sin aviso.
+                  _avatarProbe = false;
+                  _hostLacksAvatar = true;
+                  return;
                 }
                 error = _commandError(data['code']);
                 _notify();
@@ -421,6 +507,7 @@ class JamService extends ChangeNotifier {
         Duration(seconds: _transport == null ? 2 : 8),
         (_) => _ping(),
       );
+      _sendMyAvatar();
       _ping();
       _attempt = 0;
       _hostLostTimer?.cancel();
@@ -511,6 +598,7 @@ class JamService extends ChangeNotifier {
     revision = next;
     queue = entries;
     participants = people;
+    avatars.removeWhere((id, _) => !people.any((p) => p.id == id));
     mode = JamMode.values.firstWhere((v) => v.name == data['mode']);
     if (state != null &&
         (playback == null || state.sequence >= playback!.sequence)) {
@@ -524,7 +612,10 @@ class JamService extends ChangeNotifier {
         return;
       }
       _takeRequest(id);
-      final data = _message(message, maxBytes: 8192);
+      // Solo el avatar (base64 de hasta 24 KiB) puede superar los 8 KiB.
+      final isAvatar =
+          message is String && message.startsWith('{"kind":"avatar"');
+      final data = _message(message, maxBytes: isAvatar ? 40960 : 8192);
       _command(id, data);
     } on JamException catch (failure) {
       _sendSocket(
@@ -648,6 +739,16 @@ class JamService extends ChangeNotifier {
           throw const JamException('permissions');
         }
         unawaited(onPlayPause?.call(data['play'] as bool));
+      case 'avatar':
+        jamKeys(data, {'kind', 'data'});
+        // Un avatar inválido se ignora sin error ni cierre de sesión.
+        if (id != 'host' && _avatarPeers.add(id)) _sendAvatarsTo(id);
+        if (data['data'] == '') {
+          if (id != 'host') _setAvatar(id, null);
+        } else {
+          final bytes = jamAvatarFromBase64(data['data']);
+          if (bytes != null && id != 'host') _setAvatar(id, bytes);
+        }
       case 'listen':
         jamKeys(data, {'kind', 'on'});
         if (data['on'] is! bool) throw const JamException('invalid');
@@ -840,6 +941,7 @@ class JamService extends ChangeNotifier {
   void _broadcast() {
     if (!isHost) return;
     _prune();
+    avatars.removeWhere((id, _) => !participants.any((p) => p.id == id));
     final data = jsonEncode({
       'kind': 'state',
       'revision': revision,
@@ -857,6 +959,7 @@ class JamService extends ChangeNotifier {
   void _disconnected(String id, JamPeer socket) {
     if (_sockets[id] != socket) return;
     _sockets.remove(id);
+    _avatarPeers.remove(id);
     participants = participants
         .map((p) => p.id == id ? p.copyWith(connected: false) : p)
         .toList();
@@ -907,6 +1010,8 @@ class JamService extends ChangeNotifier {
     _joiningIds.clear();
     queue = [];
     participants = [];
+    avatars.clear();
+    _avatarPeers.clear();
     playback = null;
     revision = 0;
     clockOffsetMs = 0;
