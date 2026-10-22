@@ -11,6 +11,7 @@ import 'jam_session_panel.dart';
 import '../../theme/modern_theme.dart';
 import '../../theme/modern_widgets.dart';
 import '../../theme/slush_theme.dart';
+import '../slush/slush_jam.dart';
 
 class JamPage extends StatefulWidget {
   const JamPage({
@@ -135,6 +136,29 @@ class _JamPageState extends State<JamPage> {
     final busy = c?.busy == true || _readingImage;
     final colors = Theme.of(context).colorScheme;
     final message = _inputError ?? c?.error ?? session?.error;
+    if (isSlush(context)) {
+      return ColoredBox(
+        color: Colors.white,
+        child: active
+            ? SlushJamActive(controller: c!)
+            : SlushJamIdle(
+                name: _name,
+                code: _code,
+                busy: busy,
+                message: message,
+                onStart: () => startJamFlow(
+                  context,
+                  jam,
+                  name: _participantName(host: true),
+                ),
+                onJoin: () => _join(_code.text),
+                onScan: _scan,
+                scanLabel: Platform.isAndroid
+                    ? 'Escanear QR'
+                    : 'Importar imagen QR',
+              ),
+      );
+    }
     final header = <Widget>[
       if (isSlush(context))
         Text(
