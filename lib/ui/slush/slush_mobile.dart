@@ -5,6 +5,7 @@ import '../../core/models.dart';
 import '../../theme/slush_theme.dart';
 import '../../theme/slush_widgets.dart';
 import '../artwork.dart';
+import 'slush_decor.dart';
 
 const _bagel = 'Bagel Fat One';
 
@@ -150,6 +151,16 @@ class _SlushMobileHomeState extends State<SlushMobileHome> {
                 top: 20,
                 child: SlushSticker('NUEVO', size: 72),
               ),
+              const Positioned(
+                right: 70,
+                top: 100,
+                child: SlushDecor(SlushShape.bolt, size: 34),
+              ),
+              const Positioned(
+                left: 150,
+                bottom: 4,
+                child: SlushDecor(SlushShape.star, size: 26, color: Slush.mint),
+              ),
             ],
           ),
         ),
@@ -216,75 +227,83 @@ class _SlushMobileHomeState extends State<SlushMobileHome> {
         const SizedBox(height: 14),
         Wrap(
           spacing: 8,
+          runSpacing: 8,
           children: [
-            for (final (i, label) in const [
-              'TODO',
-              'FAVORITOS',
-              'DESCARGAS',
-            ].indexed)
-              ChoiceChip(
-                label: Text(label, style: const TextStyle(fontSize: 12)),
+            for (final (i, label, color) in const [
+              (0, 'TODO', Slush.lilac),
+              (1, 'FAVORITOS', Slush.mint),
+              (2, 'DESCARGAS', Slush.yellow),
+            ])
+              SlushChip(
+                label,
+                color: color,
                 selected: _filter == i,
-                showCheckmark: false,
-                selectedColor: Slush.ink,
-                labelStyle: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  color: _filter == i ? Colors.white : Slush.ink,
-                ),
-                visualDensity: VisualDensity.compact,
-                onSelected: (_) => setState(() => _filter = i),
+                onTap: () => setState(() => _filter = i),
               ),
           ],
         ),
-        const SizedBox(height: 16),
-        const Text(
-          'HACE POCO',
-          style: TextStyle(fontFamily: _bagel, fontSize: 26),
-        ),
-        const SizedBox(height: 10),
-        if (recent.isEmpty)
-          const Text('Aquí aparecerá lo que escuches.')
-        else
-          SizedBox(
-            height: 128,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              clipBehavior: Clip.none,
-              itemCount: recent.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 10),
-              itemBuilder: (context, i) => GestureDetector(
-                onTap: () => c.playTrack(recent[i], context: recent),
-                child: SizedBox(
-                  width: 92,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.fromBorderSide(Slush.border),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(14),
-                          child: Artwork(track: recent[i], size: 88, radius: 0),
+        const SizedBox(height: 20),
+        SlushBand(
+          tone: Slush.mint,
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'HACE POCO',
+                style: TextStyle(fontFamily: _bagel, fontSize: 34),
+              ),
+              const SizedBox(height: 10),
+              if (recent.isEmpty)
+                const Text('Aquí aparecerá lo que escuches.')
+              else
+                SizedBox(
+                  height: 128,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    clipBehavior: Clip.none,
+                    itemCount: recent.length,
+                    separatorBuilder: (_, _) => const SizedBox(width: 10),
+                    itemBuilder: (context, i) => GestureDetector(
+                      onTap: () => c.playTrack(recent[i], context: recent),
+                      child: SizedBox(
+                        width: 92,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            DecoratedBox(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.fromBorderSide(Slush.border),
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(14),
+                                child: Artwork(
+                                  track: recent[i],
+                                  size: 88,
+                                  radius: 0,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              recent[i].title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        recent[i].title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-            ),
+            ],
           ),
+        ),
       ],
     );
   }

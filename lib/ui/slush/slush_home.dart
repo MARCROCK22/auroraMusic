@@ -6,6 +6,8 @@ import '../../app_controller.dart';
 import '../../core/models.dart';
 import '../../theme/slush_theme.dart';
 import '../../theme/slush_widgets.dart';
+import '../artwork.dart';
+import 'slush_decor.dart';
 
 const _ink = Slush.ink;
 const _display = 'Bagel Fat One';
@@ -44,12 +46,15 @@ class SlushHome extends StatelessWidget {
       builder: (context, box) {
         final w = box.maxWidth;
         final wide = w >= 760;
-        final h = wide ? (w * .46).clamp(400.0, 620.0) : 430.0;
+        final h = wide ? (w * .4).clamp(420.0, 470.0) : 430.0;
         final font = wide
-            ? (w * .2).clamp(120.0, 270.0)
+            ? (h * .5).clamp(120.0, 240.0)
             : (w * .34).clamp(90.0, 150.0);
         final time = slushTotalTime(pool);
-        final cardW = (w * .27).clamp(250.0, 340.0);
+        final cardW = (w * .21).clamp(200.0, 270.0);
+        final covers = [
+          for (final t in [...c.recentTracks, ...pool]) t,
+        ];
         return SizedBox(
           height: h,
           child: Stack(
@@ -109,8 +114,24 @@ class SlushHome extends StatelessWidget {
                 ),
               ),
               if (wide) ...[
+                for (final (i, dx, dy, ang, color) in [
+                  (1, .06, .1, -.12, Slush.yellow),
+                  (2, .03, .2, .2, Slush.mint),
+                ])
+                  Positioned(
+                    right: w * dx,
+                    top: h * dy,
+                    child: Transform.rotate(
+                      angle: ang,
+                      child: _StackCard(
+                        width: cardW * .92,
+                        color: color,
+                        track: covers.length > i ? covers[i] : null,
+                      ),
+                    ),
+                  ),
                 Positioned(
-                  right: w * .02,
+                  right: w * .08,
                   top: h * .02,
                   child: Transform.rotate(
                     angle: .1,
@@ -118,6 +139,7 @@ class SlushHome extends StatelessWidget {
                       width: cardW,
                       count: pool.length,
                       time: time,
+                      cover: covers.firstOrNull,
                       onPlay: pool.isEmpty ? null : playAll,
                     ),
                   ),
@@ -135,13 +157,42 @@ class SlushHome extends StatelessWidget {
                   ),
                 ),
                 Positioned(
-                  left: w * .6,
-                  top: h * .72,
+                  left: w * .5,
+                  top: h * .04,
+                  child: const SlushDecor(SlushShape.bolt, size: 46),
+                ),
+                Positioned(
+                  left: w * .34,
+                  top: h * .6,
+                  child: const SlushDecor(
+                    SlushShape.star,
+                    size: 30,
+                    color: Slush.mint,
+                    angle: .3,
+                  ),
+                ),
+                Positioned(
+                  left: w * .56,
+                  top: h * .58,
+                  child: const SlushDecor(SlushShape.dots, size: 44),
+                ),
+                Positioned(
+                  right: w * .34,
+                  top: h * .08,
+                  child: const SlushDecor(
+                    SlushShape.star,
+                    size: 24,
+                    color: Slush.lilac,
+                  ),
+                ),
+                Positioned(
+                  left: w * .44,
+                  top: h * .8,
                   child: Transform.rotate(angle: -.14, child: const _DjTag()),
                 ),
                 Positioned(
-                  right: w * .03,
-                  top: h * .76,
+                  right: w * .01,
+                  top: h * .84,
                   child: const _NoteDisc(),
                 ),
               ],
@@ -237,7 +288,9 @@ class _MixCard extends StatelessWidget {
     required this.count,
     required this.time,
     required this.onPlay,
+    this.cover,
   });
+  final Track? cover;
   final double width;
   final int count;
   final String? time;
@@ -260,7 +313,18 @@ class _MixCard extends StatelessWidget {
         AspectRatio(
           aspectRatio: 1.08,
           child: ExcludeSemantics(
-            child: CustomPaint(painter: const _CoverPainter()),
+            child: cover == null
+                ? CustomPaint(painter: const _CoverPainter())
+                : LayoutBuilder(
+                    builder: (_, b) => ClipRRect(
+                      borderRadius: BorderRadius.circular(18),
+                      child: Artwork(
+                        track: cover!,
+                        size: b.maxWidth,
+                        radius: 0,
+                      ),
+                    ),
+                  ),
           ),
         ),
         const SizedBox(height: 12),
@@ -306,6 +370,32 @@ class _MixCard extends StatelessWidget {
         ),
       ],
     ),
+  );
+}
+
+class _StackCard extends StatelessWidget {
+  const _StackCard({required this.width, required this.color, this.track});
+  final double width;
+  final Color color;
+  final Track? track;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: width,
+    height: width * 1.05,
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: color,
+      borderRadius: BorderRadius.circular(26),
+      border: Border.all(color: _ink, width: 2.5),
+      boxShadow: Slush.hardShadow,
+    ),
+    child: track == null
+        ? null
+        : ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Artwork(track: track!, size: width - 20, radius: 0),
+          ),
   );
 }
 
