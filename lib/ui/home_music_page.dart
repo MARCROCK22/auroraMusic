@@ -10,6 +10,7 @@ import '../theme/modern_theme.dart';
 import '../theme/modern_widgets.dart';
 import '../theme/slush_theme.dart';
 import 'artwork.dart';
+import 'slush/slush_mobile.dart';
 import 'studio/home_introduction.dart';
 import 'studio/studio_components.dart';
 import 'studio/studio_symbols.dart';
@@ -75,56 +76,60 @@ class HomeMusicPage extends StatelessWidget {
           return ListView(
             padding: EdgeInsets.all(modern ? 32 : 24),
             children: [
-              StudioHomeIntroduction(
-                controller: c,
-                onSearch: onSearch,
-                onSearchQuery: onSearchQuery,
-                onVinyl: onVinyl ?? onSearch,
-              ),
-              const SizedBox(height: 24),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  ActionChip(
-                    avatar: const Icon(Icons.download_outlined, size: 18),
-                    label: const Text('Descargas locales'),
-                    onPressed: onDownloads,
-                    side: modern ? BorderSide.none : null,
-                    backgroundColor: modern
-                        ? Theme.of(context).colorScheme.surfaceContainerLow
-                        : null,
-                  ),
-                  ActionChip(
-                    avatar: const Icon(Icons.favorite_border, size: 18),
-                    label: const Text('Favoritos'),
-                    onPressed: onLikes,
-                    side: modern ? BorderSide.none : null,
-                    backgroundColor: modern
-                        ? Theme.of(context).colorScheme.surfaceContainerLow
-                        : null,
-                  ),
-                ],
-              ),
-              SizedBox(height: modern ? 48 : 24),
-              if (c.recentTracks.isNotEmpty)
-                HorizontalMusicRow(
-                  key: const ValueKey('home-recent'),
-                  title: isSlush(context)
-                      ? 'Hace poco'
-                      : 'Escuchados recientemente',
-                  subtitle: 'Continúa donde lo dejaste',
-                  itemWidth: recentWidth,
-                  itemCount: c.recentTracks.length,
-                  itemHeight: 238 + text.scale(72),
-                  itemBuilder: (context, index) => _RecentSleeve(
-                    controller: c,
-                    track: c.recentTracks[index],
-                    actionLabel: 'Reanudar',
-                    onPlay: () =>
-                        _play(context, c.recentTracks[index], c.recentTracks),
-                  ),
+              if (isSlush(context) && bounds.maxWidth < 600)
+                SlushMobileHome(controller: c, onSearch: onSearch)
+              else ...[
+                StudioHomeIntroduction(
+                  controller: c,
+                  onSearch: onSearch,
+                  onSearchQuery: onSearchQuery,
+                  onVinyl: onVinyl ?? onSearch,
                 ),
+                const SizedBox(height: 24),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ActionChip(
+                      avatar: const Icon(Icons.download_outlined, size: 18),
+                      label: const Text('Descargas locales'),
+                      onPressed: onDownloads,
+                      side: modern ? BorderSide.none : null,
+                      backgroundColor: modern
+                          ? Theme.of(context).colorScheme.surfaceContainerLow
+                          : null,
+                    ),
+                    ActionChip(
+                      avatar: const Icon(Icons.favorite_border, size: 18),
+                      label: const Text('Favoritos'),
+                      onPressed: onLikes,
+                      side: modern ? BorderSide.none : null,
+                      backgroundColor: modern
+                          ? Theme.of(context).colorScheme.surfaceContainerLow
+                          : null,
+                    ),
+                  ],
+                ),
+                SizedBox(height: modern ? 48 : 24),
+                if (c.recentTracks.isNotEmpty)
+                  HorizontalMusicRow(
+                    key: const ValueKey('home-recent'),
+                    title: isSlush(context)
+                        ? 'Hace poco'
+                        : 'Escuchados recientemente',
+                    subtitle: 'Continúa donde lo dejaste',
+                    itemWidth: recentWidth,
+                    itemCount: c.recentTracks.length,
+                    itemHeight: 238 + text.scale(72),
+                    itemBuilder: (context, index) => _RecentSleeve(
+                      controller: c,
+                      track: c.recentTracks[index],
+                      actionLabel: 'Reanudar',
+                      onPlay: () =>
+                          _play(context, c.recentTracks[index], c.recentTracks),
+                    ),
+                  ),
+              ],
               SizedBox(height: gap),
               if (recommendations.isNotEmpty)
                 HorizontalMusicRow(
