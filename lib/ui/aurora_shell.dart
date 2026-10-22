@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'aurora_states.dart';
 import '../theme/brasa_theme.dart';
 import '../theme/slush_theme.dart';
+import '../theme/slush_widgets.dart';
 import 'slush/slush_player.dart';
 import 'slush/slush_mobile.dart';
 import '../theme/modern_theme.dart';
@@ -30,6 +31,7 @@ import 'slush/slush_eq_queue.dart';
 import 'studio/equalizer_panel.dart';
 import 'studio/studio_navigation.dart';
 import 'slush/slush_bars.dart';
+import 'slush/slush_pages.dart';
 import 'studio/studio_transport.dart';
 import 'studio/session_aside.dart';
 import 'studio/downloads_studio_page.dart';
@@ -1015,10 +1017,94 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     );
   }
 
-  Widget _header(AppController c, bool rail) =>
-      !rail && _section == 0 && _playlist == null && isSlush(context)
-      ? SlushMobileTopBar(onSettings: () => _navigate(7), onMore: _navigate)
-      : _headerBar(c, rail);
+  /// Slush: estas secciones llevan su propio titular gigante (SlushPage).
+  bool get _slushOwned =>
+      isSlush(context) && const [1, 2, 3, 7, 11, 12].contains(_section);
+
+  Widget _header(AppController c, bool rail) {
+    if (rail && _slushOwned) return const SizedBox.shrink();
+    return !rail &&
+            isSlush(context) &&
+            ((_section == 0 && _playlist == null) || _slushOwned)
+        ? SlushMobileTopBar(onSettings: () => _navigate(7), onMore: _navigate)
+        : _headerBar(c, rail);
+  }
+
+  /// Slush: cabecera gigante + píldoras + contenido en tarjeta blanca.
+  Widget _slushPage(AppController c, Widget child) {
+    if (!_slushOwned) return child;
+    final s = _section;
+    final libRoot = s == 2 && _playlist == null && !_likesSelected;
+    final songs = '${c.tracks.length} canciones';
+    final list = c.playlists.where((p) => p.id == _playlist?.id).firstOrNull;
+    final found = c.searchEntries.isNotEmpty && c.searchResults.isEmpty
+        ? c.searchEntries.length
+        : c.searchResults.length;
+    final (base, title, sticker, pills) = switch (s) {
+      1 => (
+        Slush.lilac,
+        'BÚSQUEDA',
+        '¡HEY!',
+        [
+          _spotifySearch ? 'Spotify' : 'YouTube',
+          if (c.searching)
+            'Buscando…'
+          else if (found > 0)
+            '$found resultados'
+          else
+            '${c.recentSearches.length} recientes',
+        ],
+      ),
+      2 => (
+        Slush.mint,
+        _likesSelected
+            ? 'ME GUSTA'
+            : _playlist == null
+            ? 'BIBLIOTECA'
+            : (list?.name ?? 'LISTA').toUpperCase(),
+        _likesSelected ? 'AMOR' : 'TUYA',
+        libRoot
+            ? [
+                songs,
+                '${c.playlists.length} listas',
+                '${c.favoriteIds.length} me gusta',
+              ]
+            : [
+                '${_likesSelected ? c.favoriteIds.length : (list?.trackIds.length ?? 0)} canciones',
+              ],
+      ),
+      3 => (
+        const Color(0xffa9d0ff),
+        'DESCARGAS',
+        'BAJA',
+        [
+          '${c.downloads.where((j) => j.status == DownloadStatus.completed).length} listas',
+          '${c.downloads.where((j) => j.status == DownloadStatus.queued || j.status == DownloadStatus.downloading).length} en curso',
+        ],
+      ),
+      11 => (const Color(0xffa9d0ff), 'VÍDEOS', 'MP4', ['yt-dlp']),
+      12 => (
+        Slush.yellow,
+        'ARTISTAS',
+        'FANS',
+        ['${c.tracks.map((t) => t.artist).toSet().length} artistas', songs],
+      ),
+      _ => (
+        const Color(0xffffb48a),
+        'AJUSTES',
+        'TUYO',
+        ['Slush', _settingsTabs[_settingsTab]],
+      ),
+    };
+    return SlushPage(
+      color: slushTone(context, base),
+      title: title,
+      sticker: sticker,
+      pills: pills,
+      card: !libRoot && s != 7,
+      child: child,
+    );
+  }
 
   Widget _headerBar(AppController c, bool rail) => Padding(
     padding: EdgeInsets.fromLTRB(
@@ -1256,10 +1342,13 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       if (_videosVisited)
         Offstage(
           offstage: _section != 11,
-          child: VideoDownloadsPage(
-            key: const ValueKey('video-downloads-page'),
-            source: c.source,
-            supportDirectory: c.supportDirectory,
+          child: _slushPage(
+            c,
+            VideoDownloadsPage(
+              key: const ValueKey('video-downloads-page'),
+              source: c.source,
+              supportDirectory: c.supportDirectory,
+            ),
           ),
         ),
       if (_jamVisited)
@@ -1297,11 +1386,11 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   Widget _page(AppController c) {
     switch (_section) {
       case 1:
-        return _searchPage(c);
+        return _slushPage(c, _searchPage(c));
       case 2:
-        return _library(c);
+        return _slushPage(c, _library(c));
       case 3:
-        return _downloads(c);
+        return _slushPage(c, _downloads(c));
       case 4:
         return VinylPlayer(
           controller: c,
@@ -1329,7 +1418,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
           ),
         );
       case 7:
-        return _settings(c);
+        return _slushPage(c, _settings(c));
       case 8:
         return DjDiscoveryPage(controller: c, onSearch: () => _navigate(1));
       case 13:
@@ -1345,16 +1434,19 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
           ),
         );
       case 12:
-        return ArtistsPage(
-          controller: c,
-          follow: ref.read(followServiceProvider),
-          tracks: c.tracks,
-          onPlay: c.playTrack,
-          onSearch: (query) {
-            _search.text = query;
-            _navigate(1);
-            if (query.isNotEmpty) _submitSearch(c, query);
-          },
+        return _slushPage(
+          c,
+          ArtistsPage(
+            controller: c,
+            follow: ref.read(followServiceProvider),
+            tracks: c.tracks,
+            onPlay: c.playTrack,
+            onSearch: (query) {
+              _search.text = query;
+              _navigate(1);
+              if (query.isNotEmpty) _submitSearch(c, query);
+            },
+          ),
         );
       case 9:
       case 10:
@@ -1993,18 +2085,19 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     }
     return Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 12, 24, 12),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              'Tu biblioteca',
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+        if (!isSlush(context))
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 12, 24, 12),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Tu biblioteca',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           ),
-        ),
         Expanded(
           child: ListView(
             padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -2029,16 +2122,26 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                 ),
               ),
               const SizedBox(height: 16),
-              ListTile(
-                leading: const Icon(Icons.favorite),
-                title: const Text('Me gusta'),
-                subtitle: Text('${c.favoriteIds.length} canciones'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => setState(() {
-                  _likesSelected = true;
-                  _playlist = null;
-                }),
-              ),
+              if (isSlush(context)) ...[
+                SlushLikesCard(
+                  count: c.favoriteIds.length,
+                  onTap: () => setState(() {
+                    _likesSelected = true;
+                    _playlist = null;
+                  }),
+                ),
+                const SizedBox(height: 18),
+              ] else
+                ListTile(
+                  leading: const Icon(Icons.favorite),
+                  title: const Text('Me gusta'),
+                  subtitle: Text('${c.favoriteIds.length} canciones'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => setState(() {
+                    _likesSelected = true;
+                    _playlist = null;
+                  }),
+                ),
               FollowedArtistsSection(
                 showArtists: false,
                 service: ref.read(followServiceProvider),
@@ -2120,55 +2223,75 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       controller: c,
       track: t,
       extras: extras,
-      builder: (context, hot) => ListTile(
-        shape: active
-            ? auroraSelectedShape(context)
-            : RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        selected: active,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        leading: Artwork(
-          track: t,
-          artworkContext: ArtworkContext.thumbnail,
-          radius: 8,
-        ),
-        title: Text(
-          t.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+      builder: (context, hot) {
+        final tile = ListTile(
+          shape: isSlush(context)
+              ? RoundedRectangleBorder(
+                  side: Slush.border,
+                  borderRadius: BorderRadius.circular(16),
+                )
+              : active
+              ? auroraSelectedShape(context)
+              : RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          selectedTileColor: isSlush(context) ? Slush.mint : null,
+          selected: active,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 4,
           ),
-        ),
-        subtitle: Text(
-          t.isPendingSpotifyMatch
-              ? '${t.artist} · ${c.usesOfficialYouTubeMusic ? 'Buscar en YouTube Music' : 'Elige una coincidencia de YouTube'}'
-              : c.requiresOfficialYouTubeMusic(t)
-              ? '${t.artist} · Abrir reproductor oficial'
-              : '${t.artist}${t.isLocal ? ' · Disponible sin conexión' : ''}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        onTap: t.isPendingSpotifyMatch
-            ? () => _matchSpotify(c, t)
-            : () => c.playTrack(t, context: items, replaceQueue: !searchResult),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (MediaQuery.sizeOf(context).width >= 700)
-              Text(
-                _time(t.duration),
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            TrackMenuButton(
-              controller: c,
-              track: t,
-              extras: extras,
-              quickAdd: true,
-              quickAddVisible: hot,
+          leading: Artwork(
+            track: t,
+            artworkContext: ArtworkContext.thumbnail,
+            radius: 8,
+          ),
+          title: Text(
+            t.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
             ),
-          ],
-        ),
-      ),
+          ),
+          subtitle: Text(
+            t.isPendingSpotifyMatch
+                ? '${t.artist} · ${c.usesOfficialYouTubeMusic ? 'Buscar en YouTube Music' : 'Elige una coincidencia de YouTube'}'
+                : c.requiresOfficialYouTubeMusic(t)
+                ? '${t.artist} · Abrir reproductor oficial'
+                : '${t.artist}${t.isLocal ? ' · Disponible sin conexión' : ''}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          onTap: t.isPendingSpotifyMatch
+              ? () => _matchSpotify(c, t)
+              : () =>
+                    c.playTrack(t, context: items, replaceQueue: !searchResult),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (MediaQuery.sizeOf(context).width >= 700)
+                isSlush(context)
+                    ? SlushPill(_time(t.duration), color: Slush.lilac)
+                    : Text(
+                        _time(t.duration),
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+              TrackMenuButton(
+                controller: c,
+                track: t,
+                extras: extras,
+                quickAdd: true,
+                quickAddVisible: hot,
+              ),
+            ],
+          ),
+        );
+        return isSlush(context)
+            ? Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                child: tile,
+              )
+            : tile;
+      },
     );
   }
 
@@ -3393,7 +3516,11 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       ) ??
       false;
 
-  Widget _empty(IconData icon, String title, String message) => Center(
+  Widget _empty(IconData icon, String title, String message) => isSlush(context)
+      ? SlushEmpty(icon: icon, title: title, message: message)
+      : _plainEmpty(icon, title, message);
+
+  Widget _plainEmpty(IconData icon, String title, String message) => Center(
     child: SingleChildScrollView(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),

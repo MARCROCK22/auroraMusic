@@ -5,6 +5,7 @@ import '../core/models.dart';
 import '../follow/follow_service.dart';
 import '../theme/brasa_theme.dart';
 import '../theme/modern_theme.dart';
+import '../theme/slush_theme.dart';
 import 'horizontal_music_row.dart';
 import '../theme/modern_widgets.dart';
 import 'follow_widgets.dart';
@@ -106,8 +107,10 @@ class _ArtistsPageState extends State<ArtistsPage> {
       return ListView(
         padding: const EdgeInsets.all(24),
         children: [
-          Text('Artistas', style: Theme.of(context).textTheme.headlineMedium),
-          const SizedBox(height: 24),
+          if (!isSlush(context)) ...[
+            Text('Artistas', style: Theme.of(context).textTheme.headlineMedium),
+            const SizedBox(height: 24),
+          ],
           Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 360),
