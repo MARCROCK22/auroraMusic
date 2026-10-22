@@ -643,12 +643,12 @@ class _CrateLook {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            Color.lerp(wood, Colors.black, dark ? .6 : .5)!,
-            Color.lerp(wood, Colors.black, dark ? .4 : .28)!,
+            Color.lerp(wood, Colors.black, dark ? .6 : .32)!,
+            Color.lerp(wood, Colors.black, dark ? .4 : .16)!,
           ],
         ),
       ),
-      shade: Colors.black.withValues(alpha: .4),
+      shade: Colors.black.withValues(alpha: dark ? .4 : .22),
       topRadius: top(10),
       slat: [
         Color.lerp(wood, Colors.white, .16)!,
