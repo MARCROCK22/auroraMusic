@@ -214,9 +214,8 @@ ThemeData modernTheme(Brightness brightness, Color accent) {
             : scheme.surfaceContainerHigh,
       ),
       trackOutlineColor: WidgetStateProperty.resolveWith(
-        (s) => s.contains(WidgetState.selected)
-            ? scheme.primary
-            : scheme.outline,
+        (s) =>
+            s.contains(WidgetState.selected) ? scheme.primary : scheme.outline,
       ),
     ),
     appBarTheme: const AppBarTheme(

@@ -10,13 +10,21 @@ import '../theme/brasa_theme.dart';
 import '../theme/modern_theme.dart';
 import '../theme/modern_widgets.dart';
 import '../theme/slush_theme.dart';
-import '../theme/slush_widgets.dart';
+import 'slush/slush_player.dart';
 import 'artwork.dart';
 import 'cassette_player.dart';
 import 'follow_widgets.dart';
 
 class VinylPlayer extends StatefulWidget {
-  const VinylPlayer({super.key, required this.controller, this.follow});
+  const VinylPlayer({
+    super.key,
+    required this.controller,
+    this.follow,
+    this.onSection,
+  });
+
+  /// Slush: cambia de sección del shell (0 inicio, 4 vinilo, 5 cola, 6 letras, 13 EQ).
+  final ValueChanged<int>? onSection;
   final AppController controller;
 
   /// Si se pasa, junto al artista aparece «Seguir / Siguiendo».
@@ -474,7 +482,9 @@ class _VinylStyle {
     required this.pivot,
     required this.arm,
     required this.needle,
+    this.slush = false,
   });
+  final bool slush;
   final Color disc, label, ring, groove, pivot, arm, needle;
   final double ringWidth, grooveHi, grooveLo;
   final List<BoxShadow> shadow;
@@ -557,6 +567,7 @@ extension on _VinylPlayerState {
                             s.groove,
                             s.grooveHi,
                             s.grooveLo,
+                            dense: s.slush,
                           ),
                         ),
                       ),
@@ -565,15 +576,17 @@ extension on _VinylPlayerState {
                       alignment: Alignment.center,
                       child: Container(
                         key: const ValueKey('vinyl-label'),
-                        width: artSize * .38,
-                        height: artSize * .38,
+                        width: artSize * (s.slush ? .4 : .38),
+                        height: artSize * (s.slush ? .4 : .38),
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: s.label,
                           border: Border.all(color: s.ring, width: s.ringWidth),
                         ),
                         clipBehavior: Clip.antiAlias,
-                        child: track == null
+                        child: s.slush
+                            ? SlushLabelArt(color: s.label)
+                            : track == null
                             ? const Icon(Icons.music_note, size: 46)
                             : Artwork.fill(
                                 track: track,
@@ -598,7 +611,7 @@ extension on _VinylPlayerState {
               ),
             ),
           ),
-        if (!_cassette)
+        if (!_cassette && !s.slush)
           Positioned.fill(
             child: IgnorePointer(
               child: CustomPaint(
@@ -610,19 +623,20 @@ extension on _VinylPlayerState {
               ),
             ),
           ),
-        Positioned(
-          left: 0,
-          top: 0,
-          child: IconButton(
-            key: const ValueKey('cassette-toggle'),
-            tooltip: _cassette ? 'Ver vinilo' : 'Ver casete',
-            onPressed: () => _setCassette(!_cassette),
-            icon: Icon(
-              _cassette ? Icons.album_outlined : Icons.sd_card_outlined,
-              color: s.ring,
+        if (!s.slush)
+          Positioned(
+            left: 0,
+            top: 0,
+            child: IconButton(
+              key: const ValueKey('cassette-toggle'),
+              tooltip: _cassette ? 'Ver vinilo' : 'Ver casete',
+              onPressed: () => _setCassette(!_cassette),
+              icon: Icon(
+                _cassette ? Icons.album_outlined : Icons.sd_card_outlined,
+                color: s.ring,
+              ),
             ),
           ),
-        ),
       ],
     ),
   );
@@ -723,193 +737,41 @@ extension on _VinylPlayerState {
     );
   }
 
-  /// Modo Vinilo de Slush: disco grande sobre fondo plano, título gigante,
-  /// píldoras de género, pegatina «GIRANDO» y controles en píldora.
+  /// Modo Vinilo de Slush: ver lib/ui/slush/slush_player.dart.
   Widget _slushLayout(
     BuildContext context,
     AppController c,
     Track? track,
     bool compact,
     BoxConstraints constraints,
-  ) {
-    const ink = Slush.ink;
-    final side = compact
-        ? math.min(constraints.maxWidth - 36, 360.0)
-        : math.min(constraints.maxWidth * .38, 460.0);
-    final title = (track?.title ?? 'Nada sonando').toUpperCase();
-    final record = _record(
+  ) => SlushPlayerScreen(
+    controller: c,
+    track: track,
+    compact: compact,
+    cassette: _cassette,
+    onToggleCassette: () => _setCassette(!_cassette),
+    onSection: widget.onSection,
+    recordBuilder: (size) => _record(
       context,
       c,
       track,
-      math.max(0.0, side),
-      const _VinylStyle(
-        disc: Color(0xff111111),
-        label: Slush.orange,
-        ring: ink,
+      math.max(0.0, size),
+      _VinylStyle(
+        disc: const Color(0xff111111),
+        label: slushScreenColor(c.accentColor),
+        ring: Slush.ink,
         ringWidth: 2.5,
-        shadow: [],
+        shadow: const [],
         groove: Colors.white,
         grooveHi: .07,
         grooveLo: .03,
-        pivot: ink,
-        arm: ink,
-        needle: ink,
+        pivot: Slush.ink,
+        arm: Slush.ink,
+        needle: Slush.ink,
+        slush: true,
       ),
-    );
-    Widget round(IconData icon, VoidCallback? onTap, {bool big = false}) =>
-        Material(
-          color: big ? ink : Colors.white,
-          shape: const CircleBorder(side: Slush.border),
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: onTap,
-            child: Padding(
-              padding: EdgeInsets.all(big ? 16 : 10),
-              child: Icon(
-                icon,
-                size: big ? 32 : 24,
-                color: big ? Colors.white : ink,
-              ),
-            ),
-          ),
-        );
-    final info = ListenableBuilder(
-      listenable: c.audio,
-      builder: (context, _) {
-        final duration = _liveDuration();
-        final max = math.max(1, duration.inMilliseconds).toDouble();
-        final pos = c.audio.position.inMilliseconds.toDouble().clamp(0.0, max);
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SlushPill('Ahora suena', color: Colors.white),
-            const SizedBox(height: 10),
-            Text(
-              title,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(
-                context,
-              ).textTheme.displayLarge?.copyWith(fontSize: compact ? 44 : 64),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              track?.artist ?? 'Elige una canción de tu biblioteca',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: ink,
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            if (track != null && track.genres.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (final (i, g) in track.genres.take(3).indexed)
-                    SlushPill(
-                      g,
-                      color: [Slush.mint, Slush.yellow, Slush.lilac][i],
-                    ),
-                ],
-              ),
-            ],
-            const SizedBox(height: 18),
-            Row(
-              children: [
-                Text(_time(c.audio.position)),
-                Expanded(
-                  child: Slider(
-                    min: 0,
-                    max: max,
-                    value: pos,
-                    onChanged: duration > Duration.zero
-                        ? (v) => c.seek(Duration(milliseconds: v.round()))
-                        : null,
-                  ),
-                ),
-                Text(_time(duration)),
-              ],
-            ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                round(
-                  Icons.skip_previous_rounded,
-                  track == null ? null : c.previous,
-                ),
-                const SizedBox(width: 12),
-                round(
-                  c.audio.isPlaying
-                      ? Icons.pause_rounded
-                      : Icons.play_arrow_rounded,
-                  track == null ? null : c.togglePlayback,
-                  big: true,
-                ),
-                const SizedBox(width: 12),
-                round(Icons.skip_next_rounded, track == null ? null : c.next),
-              ],
-            ),
-          ],
-        );
-      },
-    );
-    final disc = Stack(
-      clipBehavior: Clip.none,
-      alignment: Alignment.center,
-      children: [
-        record,
-        Positioned(
-          top: -8,
-          left: -8,
-          child: ListenableBuilder(
-            listenable: c.audio,
-            builder: (context, _) => c.audio.isPlaying
-                ? const SlushSticker('GIRANDO', size: 88)
-                : const SizedBox.shrink(),
-          ),
-        ),
-      ],
-    );
-    return SingleChildScrollView(
-      padding: EdgeInsets.all(compact ? 18 : 28),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1200),
-          child: Stack(
-            children: [
-              const Positioned(
-                left: -40,
-                right: -40,
-                bottom: 40,
-                child: SlushWave(height: 120),
-              ),
-              compact
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Center(child: disc),
-                        const SizedBox(height: 24),
-                        info,
-                      ],
-                    )
-                  : Row(
-                      children: [
-                        disc,
-                        const SizedBox(width: 40),
-                        Expanded(child: info),
-                      ],
-                    ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+    ),
+  );
 
   /// Modo Vinilo de Modern y Brasa: mismo disco que Atelier dentro de una
   /// tarjeta de cada tema.
@@ -1207,7 +1069,8 @@ class _TonearmPainter extends CustomPainter {
 }
 
 class _GroovesPainter extends CustomPainter {
-  const _GroovesPainter(this.color, this.hi, this.lo);
+  const _GroovesPainter(this.color, this.hi, this.lo, {this.dense = false});
+  final bool dense;
   final Color color;
   final double hi, lo;
   @override
@@ -1215,8 +1078,9 @@ class _GroovesPainter extends CustomPainter {
     final center = size.center(Offset.zero);
     final radius = size.shortestSide / 2;
     final paint = Paint()..style = PaintingStyle.stroke;
-    for (var i = 0; i < 34; i++) {
-      final r = radius * (.43 + i * .0088);
+    final n = dense ? 70 : 34;
+    for (var i = 0; i < n; i++) {
+      final r = radius * (dense ? .42 + i * .0079 : .43 + i * .0088);
       paint.color = color.withValues(alpha: i.isEven ? hi : lo);
       paint.strokeWidth = i % 5 == 0 ? 1.2 : .7;
       canvas.drawCircle(center, r, paint);
@@ -1225,7 +1089,7 @@ class _GroovesPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _GroovesPainter old) =>
-      color != old.color || hi != old.hi || lo != old.lo;
+      color != old.color || hi != old.hi || lo != old.lo || dense != old.dense;
 }
 
 /// Primer artista de «A, B feat. C» (YouTube Music los lista juntos).

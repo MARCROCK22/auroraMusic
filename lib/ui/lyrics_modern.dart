@@ -74,11 +74,15 @@ class ModernLyricsList extends StatelessWidget {
           curve: Curves.easeOut,
           style: TextStyle(
             fontFamily: fontFamily,
-            fontSize: on ? 36 : 26,
+            fontSize: slush ? (on ? 22 : 16) : (on ? 36 : 26),
             height: 1.25,
             letterSpacing: -.3,
             fontWeight: on ? FontWeight.w800 : FontWeight.w600,
-            color: on ? c.onSurface : c.onSurface.withValues(alpha: .42),
+            color: slush && !on
+                ? const Color(0xff8d8d8d)
+                : on
+                ? c.onSurface
+                : c.onSurface.withValues(alpha: .42),
           ),
           // Slush: marcador lilac tras la línea activa.
           child: slush && on

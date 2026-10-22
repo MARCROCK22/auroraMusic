@@ -563,30 +563,30 @@ class StudioSidebar extends StatelessWidget {
                       controller: controller,
                       playlist: playlist,
                       child: TextButton(
-                      style: TextButton.styleFrom(
-                        alignment: Alignment.centerLeft,
-                        foregroundColor: colors.onSurfaceVariant,
-                      ),
-                      onPressed: () => onPlaylist(playlist),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.circle,
-                            color: colors.onSurfaceVariant,
-                            size: 10,
-                          ),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              playlist.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 12),
+                        style: TextButton.styleFrom(
+                          alignment: Alignment.centerLeft,
+                          foregroundColor: colors.onSurfaceVariant,
+                        ),
+                        onPressed: () => onPlaylist(playlist),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.circle,
+                              color: colors.onSurfaceVariant,
+                              size: 10,
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                playlist.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
                     ),
                   if (controller.playlists.isEmpty)
                     const Padding(
