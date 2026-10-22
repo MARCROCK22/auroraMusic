@@ -1350,8 +1350,8 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       selected: selected,
       showCheckmark: false,
       selectedColor: colors.primary,
-      backgroundColor: colors.surfaceContainerHigh,
-      side: BorderSide(color: colors.outline),
+      backgroundColor: colors.surfaceContainerHighest,
+      side: BorderSide(color: colors.outline, width: 1.5),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       labelStyle: TextStyle(
         fontWeight: FontWeight.w500,
@@ -1798,7 +1798,8 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                             message: 'Cambiar foto',
                             child: GestureDetector(
                               key: const ValueKey('playlist-cover-camera'),
-                              onTap: () => changePlaylistPhoto(context, c, playlist),
+                              onTap: () =>
+                                  changePlaylistPhoto(context, c, playlist),
                               child: const CircleAvatar(
                                 radius: 12,
                                 backgroundColor: Colors.black54,
