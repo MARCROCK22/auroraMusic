@@ -12,6 +12,8 @@ import 'playlist_views/playlist_cover.dart';
 import 'playlist_views/playlist_crate.dart';
 import 'playlist_views/playlist_photo_menu.dart';
 import 'playlist_views/playlist_view_mode.dart';
+import 'slush/slush_pages.dart';
+import '../theme/slush_theme.dart';
 
 enum _PlaylistSort {
   recent('Más recientes'),
@@ -125,6 +127,19 @@ class _PlaylistShelfState extends State<PlaylistShelf> {
               playlists: visible,
               onOpen: onOpen,
             ),
+        ],
+      );
+    }
+    if (isSlush(context) && !horizontal) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _controls(),
+          SlushPlaylistGrid(
+            controller: controller,
+            playlists: visible,
+            onOpen: onOpen,
+          ),
         ],
       );
     }
