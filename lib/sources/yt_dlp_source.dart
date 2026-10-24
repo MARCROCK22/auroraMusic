@@ -290,24 +290,52 @@ class YtDlpSource extends SourceBackend {
     return file.path;
   }
 
+  static bool get _desktop => Platform.isWindows || Platform.isLinux;
+
+  // `.exe` en Windows; en Linux, el binario sin extensión.
+  static String _exe(String name) => Platform.isWindows ? '$name.exe' : name;
+
+  // Deno es opcional en Linux: yt-dlp usa otro intérprete de JS si lo hay.
+  static List<String> get _requiredTools => [
+    _exe('yt-dlp'),
+    _exe('ffmpeg'),
+    _exe('ffprobe'),
+    if (Platform.isWindows) 'deno.exe',
+  ];
+
+  static bool _hasTools(String directory) =>
+      _requiredTools.every((n) => File(p.join(directory, n)).existsSync());
+
+  // Linux: herramientas del sistema (p. ej. `apt install yt-dlp ffmpeg`).
+  static String? _onPath(String name) {
+    for (final directory in (Platform.environment['PATH'] ?? '').split(':')) {
+      final file = p.join(directory, name);
+      if (directory.isNotEmpty && File(file).existsSync()) return file;
+    }
+    return null;
+  }
+
   @override
   String? get toolDirectory {
     final configured = _preferences.getString('toolDirectory');
     if (configured != null) return configured;
-    if (!Platform.isWindows) return null;
+    if (!_desktop) return null;
     final adjacent = p.join(p.dirname(Platform.resolvedExecutable), 'tools');
-    return File(p.join(adjacent, 'yt-dlp.exe')).existsSync() &&
-            File(p.join(adjacent, 'ffmpeg.exe')).existsSync() &&
-            File(p.join(adjacent, 'ffprobe.exe')).existsSync() &&
-            File(p.join(adjacent, 'deno.exe')).existsSync()
-        ? adjacent
+    if (_hasTools(adjacent)) return adjacent;
+    final system = Platform.isLinux ? _onPath('yt-dlp') : null;
+    return system != null && _hasTools(p.dirname(system))
+        ? p.dirname(system)
         : null;
   }
 
   @override
-  String? get ffmpegExecutable => Platform.isWindows && toolDirectory != null
-      ? p.join(toolDirectory!, 'ffmpeg.exe')
-      : null;
+  String? get ffmpegExecutable {
+    if (!_desktop) return null;
+    final directory = toolDirectory;
+    if (directory != null) return p.join(directory, _exe('ffmpeg'));
+    return Platform.isLinux ? _onPath('ffmpeg') : null;
+  }
+
   static const _safe = [
     '--ignore-config',
     '--no-plugin-dirs',
@@ -475,12 +503,7 @@ class YtDlpSource extends SourceBackend {
   @override
   Future<void> configureToolDirectory(String directory) async {
     final absolute = Directory(directory).absolute.path;
-    for (final name in [
-      'yt-dlp.exe',
-      'ffmpeg.exe',
-      'ffprobe.exe',
-      'deno.exe',
-    ]) {
+    for (final name in _requiredTools) {
       if (!await File(p.join(absolute, name)).exists()) {
         throw StateError('Falta $name en la carpeta.');
       }
@@ -517,8 +540,8 @@ class YtDlpSource extends SourceBackend {
     String? jobId,
     void Function(double)? onProgress,
   }) async {
-    if (!Platform.isWindows) {
-      throw UnsupportedError('Esta fuente requiere Windows o Android.');
+    if (!_desktop) {
+      throw UnsupportedError('Esta fuente requiere Windows, Linux o Android.');
     }
     final directory = toolDirectory;
     if (directory == null) {
@@ -526,10 +549,11 @@ class YtDlpSource extends SourceBackend {
         'Selecciona la carpeta de yt-dlp, FFmpeg y Deno en Ajustes.',
       );
     }
-    final executable = p.join(directory, 'yt-dlp.exe');
+    final executable = p.join(directory, _exe('yt-dlp'));
     if (!await File(executable).exists()) {
-      throw StateError('No se encuentra yt-dlp.exe.');
+      throw StateError('No se encuentra ${_exe('yt-dlp')}.');
     }
+    final deno = p.join(directory, _exe('deno'));
     if (jobId != null && _cancelled.remove(jobId)) {
       throw StateError('Descarga cancelada.');
     }
@@ -539,8 +563,7 @@ class YtDlpSource extends SourceBackend {
         '--cookies',
         await _validateCookieFile(cookieFile!),
       ],
-      '--js-runtimes',
-      'deno:${p.join(directory, 'deno.exe')}',
+      if (await File(deno).exists()) ...['--js-runtimes', 'deno:$deno'],
       '--ffmpeg-location',
       directory,
       ...arguments,
@@ -605,6 +628,7 @@ class YtDlpSource extends SourceBackend {
 
   Future<void> _killTree(Process process) async {
     try {
+      if (!Platform.isWindows) return;
       final taskkill = p.join(
         Platform.environment['SystemRoot'] ?? r'C:\Windows',
         'System32',
@@ -767,7 +791,7 @@ class YtDlpSource extends SourceBackend {
       final result = await _resolveProgressiveAudio(track, target);
       if (result != null) return result;
     }
-    if (Platform.isWindows && !_isAndroid) {
+    if (_desktop && !_isAndroid) {
       return _resolveWindowsAudio(track, target);
     }
     if (_isAndroid) return _resolveAndroidAudio(track, target);
@@ -1414,7 +1438,7 @@ class YtDlpSource extends SourceBackend {
   }
 
   @override
-  bool get supportsPlaybackCache => Platform.isWindows || _isAndroid;
+  bool get supportsPlaybackCache => _desktop || _isAndroid;
 
   @override
   Future<({int bytes, int files})> playbackCacheInfo() async {
@@ -1512,7 +1536,7 @@ class YtDlpSource extends SourceBackend {
     }
     final directory = toolDirectory;
     if (directory == null) return null;
-    final ffprobe = File(p.join(directory, 'ffprobe.exe'));
+    final ffprobe = File(p.join(directory, _exe('ffprobe')));
     if (!await ffprobe.exists()) return null;
     final result = await Process.run(ffprobe.path, [
       '-v',

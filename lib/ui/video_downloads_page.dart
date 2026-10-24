@@ -148,9 +148,11 @@ class _VideoDownloadsPageState extends State<VideoDownloadsPage> {
       'downloads',
       'videos',
     );
-    if (Platform.isWindows) {
+    if (Platform.isWindows || Platform.isLinux) {
       await Directory(directory).create(recursive: true);
-      await Process.start('explorer.exe', [directory], runInShell: false);
+      await Process.start(Platform.isWindows ? 'explorer.exe' : 'xdg-open', [
+        directory,
+      ], runInShell: false);
     }
   }
 
@@ -200,7 +202,7 @@ class _VideoDownloadsPageState extends State<VideoDownloadsPage> {
                 'Carpeta: ${p.join(widget.supportDirectory.path, 'downloads', 'videos')}',
               ),
             ),
-            if (Platform.isWindows)
+            if (Platform.isWindows || Platform.isLinux)
               IconButton(
                 tooltip: 'Abrir carpeta',
                 onPressed: _openFolder,

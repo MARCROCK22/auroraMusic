@@ -8,7 +8,7 @@ local; el reproductor oficial en WebView queda como respaldo automático.
 
 ## Qué es
 
-Reproductor Flutter (Windows + Android) con estética propia «Atelier Sonoro»
+Reproductor Flutter (Windows + Android + Linux) con estética propia «Atelier Sonoro»
 (Newsreader + Plus Jakarta Sans, tonos tinta/marfil con acento de portada).
 Funcionamiento de referencia: LIMusic (búsqueda de YouTube Music, radio/autoplay,
 cola nativa), pero con la interfaz de Aurora. **No cambiar la estética.**
@@ -80,6 +80,12 @@ C:/flutter/flutter/bin/cache/dart-sdk/bin/dart.exe format lib test
 & $flutter build apk --release
 $env:PATH = "$PWD/build/build-tools/nuget;$env:PATH"; & $flutter build windows --release
 ```
+
+Linux (en Ubuntu/WSL, con Flutter 3.38.8 para Linux y las dependencias de apt
+del README): `flutter build linux --release` → `build/linux/x64/release/bundle`.
+En Linux no hay WebView (sin respaldo web: `resolve()` reintenta nativo como en
+Android), ni audio_service/MPRIS, bandeja ni actualizador; yt-dlp/ffmpeg salen
+del `PATH` o de la carpeta de Ajustes; Discord y Duvet usan socket Unix.
 
 ## Reglas
 
