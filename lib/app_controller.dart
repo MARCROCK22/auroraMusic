@@ -33,6 +33,7 @@ import 'dj/suggestions_api.dart';
 import 'metadata/spotify/spotify_metadata_provider.dart';
 import 'metadata/spotify_recs.dart';
 import 'metadata/youtube_match.dart';
+import 'discord/discord_presence.dart';
 import 'sources/innertube_source.dart';
 import 'sources/youtube_request_policy.dart';
 import 'sources/web_music_source.dart';
@@ -536,7 +537,14 @@ class AppController extends ChangeNotifier {
   ThemeMode themeMode = ThemeMode.dark;
 
   /// 'atelier' (por defecto), 'modern', 'brasa' o 'slush'.
-  String themeKind = 'atelier';
+  String themeKind = 'modern';
+  final DiscordPresence discord = DiscordPresence();
+  bool get discordPresence => discord.enabled;
+  void setDiscordPresence(bool value) {
+    discord.enabled = value;
+    unawaited(preferences.setBool('discordPresence', value));
+    _audioChanged();
+  }
 
   /// Perfil local del usuario (lo usa la Jam). Vacío = sin nombre elegido.
   String profileName = '';
@@ -1275,12 +1283,14 @@ class AppController extends ChangeNotifier {
       }
       themeKind =
           const {
+            'atelier',
             'modern',
             'brasa',
             'slush',
           }.contains(preferences.getString('themeKind'))
           ? preferences.getString('themeKind')!
-          : 'atelier';
+          : 'modern';
+      discord.enabled = preferences.getBool('discordPresence') ?? true;
       themeMode = ThemeMode.values.firstWhere(
         (mode) => mode.name == preferences.getString('themeMode'),
         orElse: () => ThemeMode.dark,
@@ -1397,6 +1407,16 @@ class AppController extends ChangeNotifier {
   }
 
   void _audioChanged() {
+    if (discordAvailable) {
+      final loaded = currentTrack;
+      discord.update(
+        !_jamPlaybackActive && loaded != null && _loadedTrackId == loaded.id
+            ? loaded
+            : null,
+        playing: audio.isPlaying,
+        position: audio.position,
+      );
+    }
     // Scrobble: nunca en Jam compartido (track null reinicia la sesión).
     final loaded = currentTrack;
     listenBrainz?.observe(
@@ -3918,6 +3938,7 @@ class AppController extends ChangeNotifier {
     audio.removeListener(_audioChanged);
     eq.dispose();
     listenBrainz?.dispose();
+    discord.dispose();
     unawaited(_saveQueue());
     if (_controls != null) unawaited(_controls!.dispose());
     audio.dispose();

@@ -21,6 +21,8 @@ import '../core/models.dart';
 import '../core/source_backend.dart';
 import '../core/desktop_shell.dart';
 import '../core/window_controls.dart';
+import '../discord/discord_presence.dart';
+import 'brand/aurora_logo.dart';
 import '../jam/jam_protocol.dart';
 import '../profile/profile_settings.dart';
 import 'desktop_settings_tiles.dart';
@@ -889,7 +891,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                     ),
                   )
                 else
-                  Icon(Icons.graphic_eq, color: colors.primary, size: 26),
+                  const AuroraLogo(size: 28),
                 if (wide) ...[
                   const SizedBox(width: 8),
                   Text(
@@ -1115,10 +1117,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     ),
     child: Row(
       children: [
-        if (!rail) ...[
-          Icon(Icons.graphic_eq, color: Theme.of(context).colorScheme.primary),
-          const SizedBox(width: 10),
-        ],
+        if (!rail) ...[const AuroraLogo(size: 28), const SizedBox(width: 10)],
         Expanded(
           child: isModern(context)
               ? _modernTitle(
@@ -2581,6 +2580,22 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
           ),
         ],
       ),
+      if (discordAvailable)
+        (
+          title: 'Discord',
+          subtitle: 'Presencia enriquecida',
+          children: [
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Mostrar en Discord'),
+              subtitle: const Text(
+                'Muestra la canción que suena en tu perfil.',
+              ),
+              value: c.discordPresence,
+              onChanged: c.setDiscordPresence,
+            ),
+          ],
+        ),
       (
         title: 'Movimiento',
         subtitle: 'Animaciones de la interfaz',
