@@ -23,7 +23,7 @@ import 'import/spotify_import.dart';
 import 'follow/follow_boost.dart';
 import 'library/library_database.dart';
 import 'jam/jam_models.dart' show jamCleanName;
-import 'listenbrainz/listenbrainz_service.dart';
+import 'lastfm/lastfm_service.dart';
 import 'profile/avatar_image.dart';
 import 'dj/ai_dj.dart';
 import 'dj/dj_modes.dart';
@@ -49,11 +49,11 @@ class AppController extends ChangeNotifier {
     required this.database,
     required this.preferences,
     required this.supportDirectory,
-    this.listenBrainz,
+    this.lastfm,
   });
 
-  /// Scrobbling y recomendaciones opcionales de ListenBrainz (null = sin ellas).
-  final ListenBrainzService? listenBrainz;
+  /// Scrobbling y recomendaciones opcionales de Last.fm (null = sin ellas).
+  final LastfmService? lastfm;
   final AudioBackend audio;
   final SourceBackend source;
   final LibraryDatabase database;
@@ -242,13 +242,13 @@ class AppController extends ChangeNotifier {
     final matcher = YoutubeMatcher(
       search: (q, k) => source.searchPage(q, k).then((p) => p.tracks),
     );
-    // Con token de ListenBrainz activo, sus recomendaciones lideran (DJ y Jam).
+    // Con Last.fm activo, sus recomendaciones lideran (DJ y Jam).
     final mix = {...defaultRecMix};
-    void syncMix() => mix[RecBucket.listenbrainz] = listenBrainz?.active == true
+    void syncMix() => mix[RecBucket.lastfm] = lastfm?.active == true
         ? 0.40
-        : defaultRecMix[RecBucket.listenbrainz]!;
+        : defaultRecMix[RecBucket.lastfm]!;
     syncMix();
-    listenBrainz?.addListener(syncMix);
+    lastfm?.addListener(syncMix);
     return _suggestionsApi = SuggestionsApi(
       mix: mix,
       sources: source is InnerTubeSource
@@ -257,7 +257,7 @@ class AppController extends ChangeNotifier {
                 catalog: ProviderSpotifyCatalog(SpotifyMetadataProvider()),
                 matcher: matcher,
               ),
-              if (listenBrainz != null) listenBrainz!.recSource(matcher),
+              if (lastfm != null) lastfm!.recSource(matcher),
             ]
           : const [],
     );
@@ -1399,7 +1399,7 @@ class AppController extends ChangeNotifier {
   void _audioChanged() {
     // Scrobble: nunca en Jam compartido (track null reinicia la sesión).
     final loaded = currentTrack;
-    listenBrainz?.observe(
+    lastfm?.observe(
       !_jamPlaybackActive && loaded != null && _loadedTrackId == loaded.id
           ? loaded
           : null,
@@ -3917,7 +3917,7 @@ class AppController extends ChangeNotifier {
     unawaited(_completedSubscription?.cancel());
     audio.removeListener(_audioChanged);
     eq.dispose();
-    listenBrainz?.dispose();
+    lastfm?.dispose();
     unawaited(_saveQueue());
     if (_controls != null) unawaited(_controls!.dispose());
     audio.dispose();

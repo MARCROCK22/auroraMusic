@@ -25,7 +25,7 @@ import '../jam/jam_protocol.dart';
 import '../profile/profile_settings.dart';
 import 'desktop_settings_tiles.dart';
 import 'playlist_views/playlist_view_mode_tile.dart';
-import 'listenbrainz_settings_panel.dart';
+import 'lastfm_settings_panel.dart';
 import '../jam/jam_controller.dart';
 import 'slush/slush_eq_queue.dart';
 import 'studio/equalizer_panel.dart';
@@ -2316,7 +2316,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     'Almacenamiento y biblioteca' ||
     'Vista de playlists' ||
     'Música sin conexión' => 2,
-    'Perfil' || 'Actualizaciones' || 'ListenBrainz' => 3,
+    'Perfil' || 'Actualizaciones' || 'Last.fm' => 3,
     _ => 4,
   };
 
@@ -2421,11 +2421,11 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         subtitle: 'Nuevas versiones desde GitHub Releases',
         children: [UpdateSettings(controller: _updates)],
       ),
-      if (c.listenBrainz != null)
+      if (c.lastfm != null)
         (
-          title: 'ListenBrainz',
+          title: 'Last.fm',
           subtitle: 'Opcional: historial y recomendaciones',
-          children: [ListenBrainzSettingsPanel(service: c.listenBrainz!)],
+          children: [LastfmSettingsPanel(service: c.lastfm!)],
         ),
       (
         title: 'Música sin conexión',
@@ -2773,7 +2773,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         'Tema, modo, color de acento y movimiento.',
         'Ecualizador, sueño y autoplay.',
         'Carpetas, descargas y vista de playlists.',
-        'Perfil, actualizaciones y ListenBrainz.',
+        'Perfil, actualizaciones y Last.fm.',
         'Ventana, atajos, herramientas y diagnóstico.',
       ],
       selected: _settingsTab,

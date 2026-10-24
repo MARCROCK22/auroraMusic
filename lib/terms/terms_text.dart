@@ -3,7 +3,7 @@
 // para que todos los usuarios vuelvan a aceptarlo.
 
 /// Versión del texto. Cambiarla obliga a volver a aceptar.
-const kTermsVersion = '2026-10-19.2';
+const kTermsVersion = '2026-10-24';
 
 /// Fecha legible de esta versión.
 const kTermsDate = '19 de octubre de 2026';
@@ -57,29 +57,29 @@ const kTermsSections = <TermsSection>[
         'recomendaciones, y comprueba si hay actualizaciones. Esos servicios '
         'ven tu dirección IP y los datos propios de cada petición, y se rigen '
         'por sus propias políticas de privacidad. Compartir tu historial con '
-        'ListenBrainz es opcional y está desactivado por defecto (ver la '
+        'Last.fm es opcional y está desactivado por defecto (ver la '
         'sección 6).',
   ),
   TermsSection(
-    '6. ListenBrainz (opcional)',
-    'ListenBrainz es un servicio de MetaBrainz Foundation. Está desactivado '
-        'por defecto y solo funciona si pegas tu propio token de usuario y '
-        'enciendes el interruptor en Ajustes. Entonces Aurora envía a '
-        'ListenBrainz lo que escuchas: artista, título, álbum si se conoce, '
-        'duración, la hora de inicio de la reproducción y el nombre del '
-        'cliente («Aurora»). No se envían escuchas de menos de 30 segundos ni '
-        'durante una Jam. Aurora también usa tu token para pedir a '
-        'ListenBrainz tus recomendaciones y novedades, y las usa para '
-        'sugerirte canciones; después Aurora busca esas canciones en '
-        'YouTube. El token se guarda en el almacenamiento seguro del sistema, '
-        'nunca en texto plano. Tú lo controlas: puedes cerrar sesión en '
-        'Ajustes, lo que borra el token y las escuchas pendientes de enviar, '
-        'o revocarlo en tu cuenta de ListenBrainz. ListenBrainz y MetaBrainz '
-        'Foundation tratan esos datos bajo sus propios términos y su propia '
-        'política de privacidad (listenbrainz.org y metabrainz.org); léelos '
-        'antes de activarlo. Por defecto tus escuchas son públicas en tu '
-        'perfil de ListenBrainz, salvo que lo cambies allí. Aurora no vende '
-        'tus datos.',
+    '6. Last.fm (opcional)',
+    'Last.fm es un servicio de Last.fm Ltd. Está desactivado por defecto y '
+        'solo funciona si conectas tu propia cuenta en Ajustes e '
+        'enciendes el interruptor. Tu contraseña solo se envía a Last.fm, por '
+        'HTTPS, para iniciar sesión; Aurora no la guarda. Lo único que '
+        'conserva es una clave de sesión, en el almacenamiento seguro del '
+        'sistema, nunca en texto plano. Con el interruptor encendido Aurora '
+        'envía a Last.fm lo que escuchas: artista, título, álbum si se conoce, '
+        'duración y la hora de inicio de la reproducción. No se envían '
+        'escuchas de menos de 30 segundos ni durante una Jam. Aurora también '
+        'pide a Last.fm canciones similares a la que suena y las usa para '
+        'sugerirte música; después Aurora busca esas canciones en YouTube. '
+        'Tú lo controlas: puedes desconectar tu cuenta en Ajustes, lo que '
+        'borra la sesión y las escuchas pendientes de enviar, o revocar el '
+        'acceso de Aurora en tu cuenta de Last.fm. Last.fm trata esos datos '
+        'bajo sus propios términos y su propia política de privacidad '
+        '(last.fm); léelos antes de activarlo. Tus escuchas son públicas en '
+        'tu perfil de Last.fm según los ajustes de privacidad que tengas allí. '
+        'Aurora no vende tus datos.',
   ),
   TermsSection(
     '7. Artistas que sigues',

@@ -49,7 +49,7 @@ jobs:
           ./scripts/prepare_windows_plugins.ps1
           ./scripts/setup_tools.ps1
 
-      - run: flutter build windows --release --no-pub --dart-define=AURORA_SUPABASE_URL=${{ secrets.AURORA_SUPABASE_URL }} --dart-define=AURORA_SUPABASE_ANON_KEY=${{ secrets.AURORA_SUPABASE_ANON_KEY }}
+      - run: flutter build windows --release --no-pub --dart-define=AURORA_SUPABASE_URL=${{ secrets.AURORA_SUPABASE_URL }} --dart-define=AURORA_SUPABASE_ANON_KEY=${{ secrets.AURORA_SUPABASE_ANON_KEY }} --dart-define=AURORA_LASTFM_API_KEY=${{ secrets.AURORA_LASTFM_API_KEY }} --dart-define=AURORA_LASTFM_SECRET=${{ secrets.AURORA_LASTFM_SECRET }}
 
       - name: Empaquetar
         shell: pwsh
@@ -123,7 +123,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           $env:ANDROID_KEYSTORE_PATH = Join-Path $env:RUNNER_TEMP 'aurora-signing/release.jks'
-          flutter build apk --release --target-platform android-arm64 --dart-define=AURORA_SUPABASE_URL=${{ secrets.AURORA_SUPABASE_URL }} --dart-define=AURORA_SUPABASE_ANON_KEY=${{ secrets.AURORA_SUPABASE_ANON_KEY }}
+          flutter build apk --release --target-platform android-arm64 --dart-define=AURORA_SUPABASE_URL=${{ secrets.AURORA_SUPABASE_URL }} --dart-define=AURORA_SUPABASE_ANON_KEY=${{ secrets.AURORA_SUPABASE_ANON_KEY }} --dart-define=AURORA_LASTFM_API_KEY=${{ secrets.AURORA_LASTFM_API_KEY }} --dart-define=AURORA_LASTFM_SECRET=${{ secrets.AURORA_LASTFM_SECRET }}
           if ($LASTEXITCODE -ne 0) { throw 'Falló la compilación firmada.' }
 
       - name: Eliminar el almacén de claves temporal

@@ -51,10 +51,14 @@ cola nativa), pero con la interfaz de Aurora. **No cambiar la estética.**
   candidatos. El perfil local manda en el ranking; todo candidato pasa por el filtro
   de coherencia de artista y la memoria anti-repetición, y si YouTube falla el DJ
   sigue con lo local. La cola nunca termina y el DJ no se apaga solo.
-- ListenBrainz (`lib/listenbrainz/`): **permitido** (decisión del usuario, 2026-10-19)
-  como scrobbling opcional con el token del usuario (desactivado por defecto, token en
-  almacenamiento seguro, nunca en logs) y como fuente de candidatos del DJ
-  (recomendaciones y novedades, sin API key pública, con el token del usuario).
+- Last.fm (`lib/lastfm/`): **permitido** (decisión del usuario, 2026-10-24; sustituye
+  a la integración anterior de scrobbling) como scrobbling opcional donde cada usuario
+  conecta su propia cuenta (usuario y contraseña solo para `auth.getMobileSession`; se
+  guarda únicamente la clave de sesión en almacenamiento seguro; nunca la contraseña ni
+  nada en logs; desactivado por defecto) y como fuente de candidatos del DJ
+  (`track.getSimilar`/`artist.getSimilar`) y estadísticas del Perfil. La clave y el
+  secreto de la app van por `--dart-define=AURORA_LASTFM_API_KEY/AURORA_LASTFM_SECRET`;
+  sin ellos la función queda desactivada.
 - Detalle: `docs/youtube_music_audio_engine.md`.
 
 ## Comandos (PowerShell, Windows)

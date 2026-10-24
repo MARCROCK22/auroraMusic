@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 import 'listen.dart';
 
-/// Dónde vive el token. Nunca texto plano: Windows Credential Locker/DPAPI y
+/// Dónde vive la clave de sesión. Nunca texto plano: Windows Credential Locker/DPAPI y
 /// Android Keystore (vía flutter_secure_storage). Si no hay, no se guarda.
 abstract class TokenStore {
   Future<String?> read();
@@ -15,9 +15,10 @@ abstract class TokenStore {
 }
 
 class SecureTokenStore implements TokenStore {
-  SecureTokenStore([FlutterSecureStorage? storage])
+  SecureTokenStore([FlutterSecureStorage? storage, this._key = _sessionKey])
     : _storage = storage ?? const FlutterSecureStorage();
-  static const _key = 'aurora.listenbrainz.token';
+  static const _sessionKey = 'aurora.lastfm.session';
+  final String _key;
   final FlutterSecureStorage _storage;
 
   @override
@@ -28,7 +29,7 @@ class SecureTokenStore implements TokenStore {
   Future<void> delete() => _storage.delete(key: _key);
 }
 
-/// Cola de listens pendientes (sin credenciales), acotada a [max] entradas.
+/// Cola de escuchas pendientes (sin credenciales), acotada a [max] entradas.
 abstract class ListenQueueStore {
   Future<List<Listen>> load();
   Future<void> save(List<Listen> listens);
@@ -45,7 +46,7 @@ class MemoryListenQueueStore implements ListenQueueStore {
 /// JSON en el directorio de soporte de la app; escritura atómica.
 class FileListenQueueStore implements ListenQueueStore {
   FileListenQueueStore(Directory directory)
-    : _file = File(p.join(directory.path, 'listenbrainz_queue.json'));
+    : _file = File(p.join(directory.path, 'lastfm_queue.json'));
   final File _file;
 
   @override
@@ -68,5 +69,29 @@ class FileListenQueueStore implements ListenQueueStore {
     final tmp = File('${_file.path}.tmp');
     await tmp.writeAsString(jsonEncode([for (final l in listens) l.toJson()]));
     await tmp.rename(_file.path);
+  }
+}
+
+/// Borra lo que dejó la integración anterior (token, cola y preferencias).
+/// Se llama al arrancar; no falla si no hay nada.
+Future<void> removeLegacyScrobbleData(
+  Directory directory,
+  Iterable<String> prefKeys,
+  Future<void> Function(String) removePref,
+) async {
+  try {
+    await SecureTokenStore(null, 'aurora.listenbrainz.token').delete();
+  } on Object {
+    // sin almacén seguro no había token
+  }
+  try {
+    final file = File(p.join(directory.path, 'listenbrainz_queue.json'));
+    if (await file.exists()) await file.delete();
+  } on Object {
+    // best effort
+  }
+  for (final k
+      in prefKeys.where((k) => k.startsWith('listenbrainz.')).toList()) {
+    await removePref(k);
   }
 }

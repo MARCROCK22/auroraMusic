@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
-import '../listenbrainz/lb_stats.dart';
-import '../listenbrainz/listenbrainz_service.dart';
+import '../lastfm/lastfm_service.dart';
+import '../lastfm/lastfm_stats.dart';
 import 'studio/studio_components.dart';
 
-/// Perfil con estadísticas de escucha de ListenBrainz. Usa [StudioPanel] y el
+/// Perfil con estadísticas de escucha de Last.fm. Usa [StudioPanel] y el
 /// `ColorScheme`/`TextTheme` del tema activo (Atelier, Brasa o Modern).
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key, required this.controller});
@@ -19,7 +19,7 @@ class _ProfilePageState extends State<ProfilePage> {
   StatsRange _range = StatsRange.month;
   Future<ListenStats>? _future;
 
-  ListenBrainzService? get _lb => widget.controller.listenBrainz;
+  LastfmService? get _lb => widget.controller.lastfm;
 
   @override
   void initState() {
@@ -29,7 +29,9 @@ class _ProfilePageState extends State<ProfilePage> {
 
   void _load({bool force = false}) {
     final lb = _lb;
-    _future = lb != null && lb.active ? lb.stats(_range, force: force) : null;
+    _future = lb != null && lb.connected
+        ? lb.stats(_range, force: force)
+        : null;
   }
 
   @override
@@ -42,27 +44,17 @@ class _ProfilePageState extends State<ProfilePage> {
         _Header(controller: c, username: lb?.username),
         const SizedBox(height: 20),
         if (lb == null)
-          const _Empty(text: 'ListenBrainz no está disponible en esta versión.')
+          const _Empty(text: 'Last.fm no está disponible en esta versión.')
         else
           ListenableBuilder(
             listenable: lb,
             builder: (context, _) {
-              if (!lb.active) {
+              if (!lb.connected) {
                 if (_future != null) _future = null;
                 return _Empty(
-                  text: lb.hasToken
-                      ? 'ListenBrainz está desactivado. Actívalo para ver tus estadísticas.'
-                      : 'Conecta ListenBrainz con tu token para ver tus estadísticas.',
-                  action: lb.needsEnable
-                      ? FilledButton(
-                          key: const ValueKey('profile-enable-lb'),
-                          onPressed: () async {
-                            await lb.setEnabled(true);
-                            setState(_load);
-                          },
-                          child: const Text('Activar ListenBrainz'),
-                        )
-                      : null,
+                  text: !lb.configured
+                      ? 'Last.fm no está configurado en esta compilación.'
+                      : 'Conectar Last.fm: inicia sesión en Ajustes para ver tus estadísticas.',
                 );
               }
               _future ??= lb.stats(_range);
@@ -116,7 +108,7 @@ class _Header extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
               if (username != null)
-                Text('ListenBrainz · $username', style: t.bodyMedium),
+                Text('Last.fm · $username', style: t.bodyMedium),
             ],
           ),
         ),
@@ -126,18 +118,14 @@ class _Header extends StatelessWidget {
 }
 
 class _Empty extends StatelessWidget {
-  const _Empty({required this.text, this.action});
+  const _Empty({required this.text});
   final String text;
-  final Widget? action;
 
   @override
   Widget build(BuildContext context) => StudioPanel(
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(text, style: Theme.of(context).textTheme.bodyLarge),
-        if (action != null) ...[const SizedBox(height: 12), action!],
-      ],
+      children: [Text(text, style: Theme.of(context).textTheme.bodyLarge)],
     ),
   );
 }
@@ -162,15 +150,18 @@ class _Stats extends StatelessWidget {
         Row(
           children: [
             Expanded(
-              child: SegmentedButton<StatsRange>(
-                key: const ValueKey('profile-range'),
-                showSelectedIcon: false,
-                segments: [
-                  for (final r in StatsRange.values)
-                    ButtonSegment(value: r, label: Text(r.label)),
-                ],
-                selected: {range},
-                onSelectionChanged: (s) => onRange(s.first),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SegmentedButton<StatsRange>(
+                  key: const ValueKey('profile-range'),
+                  showSelectedIcon: false,
+                  segments: [
+                    for (final r in StatsRange.values)
+                      ButtonSegment(value: r, label: Text(r.label)),
+                  ],
+                  selected: {range},
+                  onSelectionChanged: (s) => onRange(s.first),
+                ),
               ),
             ),
             IconButton(
@@ -209,16 +200,14 @@ class StatsView extends StatelessWidget {
   const StatsView({super.key, required this.stats});
   final ListenStats stats;
 
-  String _hour(int h) => '${h.toString().padLeft(2, '0')}:00 UTC';
-
   @override
   Widget build(BuildContext context) {
     final s = stats;
     if (s.recordings.isEmpty && s.artists.isEmpty && s.totalListens == 0) {
       return const _Empty(text: 'Aún no hay escuchas en este rango.');
     }
-    final hour = s.favoriteHour;
     final tiles = [
+      _Tile('Scrobbles', '${s.totalListens}', 'en toda tu cuenta'),
       _Tile(
         'Canción más escuchada',
         s.topTrack?.name ?? 'Sin datos',
@@ -231,15 +220,6 @@ class StatsView extends StatelessWidget {
         s.topArtist?.name ?? 'Sin datos',
         s.topArtist == null ? null : '${s.topArtist!.count} escuchas',
       ),
-      _Tile(
-        'Género principal',
-        s.topGenre?.name ?? 'No disponible',
-        s.topGenre == null ? 'Sin etiquetas en tus canciones top' : null,
-      ),
-      _Tile('Total de escuchas', '${s.totalListens}', 'en toda tu cuenta'),
-      if (s.streakDays > 0)
-        _Tile('Racha', '${s.streakDays} días', 'seguidos con escuchas'),
-      if (hour != null) _Tile('Hora favorita', _hour(hour), null),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -257,9 +237,11 @@ class StatsView extends StatelessWidget {
           const SizedBox(height: 12),
           _TopList('Top artistas', s.artists),
         ],
-        if (s.releases.isNotEmpty) ...[
+        if (s.recent.isNotEmpty) ...[
           const SizedBox(height: 12),
-          _TopList('Top álbumes', s.releases),
+          _TopList('Escuchadas hace poco', [
+            for (final r in s.recent) StatItem(r.title, 0, subtitle: r.artist),
+          ]),
         ],
       ],
     );
@@ -328,7 +310,8 @@ class _TopList extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  Text('${item.count}', style: t.labelMedium),
+                  if (item.count > 0)
+                    Text('${item.count}', style: t.labelMedium),
                 ],
               ),
             ),

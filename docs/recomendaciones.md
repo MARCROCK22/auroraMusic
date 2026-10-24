@@ -165,23 +165,11 @@ cubo) y en debug se loguea (`aurora.recs`). `defaultRecMix` incluye ahora
 `JamSuggestionAdapter`: semillas = actual + 4 recientes + 3 favoritas
 (opcional `favorites`), sin repetir y en paralelo; si ninguna radio responde ya
 no se inyecta lo local como candidatos extra, de modo que `api.sources`
-(Spotify, ListenBrainz) mandan antes de caer a la biblioteca.
+(Spotify, Last.fm) mandan antes de caer a la biblioteca.
 
-## Alternativas gratuitas (investigado 2026-10-19)
+## Last.fm (2026-10-24)
 
-Fuentes: documentación oficial de ListenBrainz, Troi, MusicBrainz y Last.fm; lo
-demás por búsqueda. Solo se investiga, no hay código ni dependencias nuevas.
-
-| Fuente | Requiere clave | Límite | ¿Encaja con CLAUDE.md? | Veredicto |
-|---|---|---|---|---|
-| ListenBrainz LB Radio (`GET /1/explore/lb-radio?prompt=&mode=`, JSPF con MBIDs; artista incluye similares) | Docs no lo dicen (sin verificar); el token del usuario da más cupo | 1 llamada/s por cliente, 429 si se excede; User-Agent obligatorio | Sí: ya permitido con el token del usuario en almacenamiento seguro | Candidato bueno; devuelve MBIDs, hay que emparejar a YouTube |
-| ListenBrainz labs (`labs.api.listenbrainz.org`: similar-artists / similar-recordings) | Sin verificar (no aparece en la documentación oficial consultada) | Sin verificar | Probablemente sí (sin clave), sin verificar | No usar hasta confirmar contrato y estabilidad |
-| MusicBrainz API (tags/géneros) | No | ~1 req/s por IP, User-Agent con contacto obligatorio; 503 si se excede | Sí | Útil solo para enriquecer géneros con caché; lento para lotes |
-| Last.fm `track.getSimilar` | Sí (`api_key`) | Fijado por Last.fm; error 29 al excederlo | No: exige clave en la app; términos: solo uso no comercial, caché máx. 100 MB, atribución | Descartar |
-| ReccoBeats (`api.reccobeats.com/v1`, recomendación por semillas) | Según directorios de terceros, no (sin verificar; no pude abrir la doc oficial) | Sin verificar | Sin verificar | Interesante, verificar antes de plantearlo |
-| AcousticBrainz | No | Proyecto terminado en 2022; web/API seguían online «por ahora» | Sí (datos CC0) pero sin datos nuevos | Descartar (archivado) |
-| Deezer API pública (artistas relacionados, radio) | Endpoints públicos sin clave (sin verificar: no pude abrir la doc oficial) | ~50 peticiones/5 s por IP según un tercero (sin verificar) | Probablemente sí; términos sin verificar | Alternativa gratuita a probar; emparejar a YouTube |
-
-Conclusión: lo ya permitido (radio/relacionadas de InnerTube, ListenBrainz con
-token, Spotify emparejado) cubre el caso; la mejor ampliación sin clave es LB
-Radio por artista semilla (1 req/s) y, si se verifica, Deezer relacionados.
+El DJ usa `track.getSimilar` (y, si no hay, `artist.getSimilar` + `artist.getTopTracks`)
+de la cuenta conectada por el usuario; cada pista se empareja con YouTube y entra en
+el cubo `RecBucket.lastfm` (prior 0,4 × confianza, cuota 0,08; 0,40 con Last.fm
+activo). Error 29 = límite: la fuente se calla un rato y el DJ sigue con lo local.

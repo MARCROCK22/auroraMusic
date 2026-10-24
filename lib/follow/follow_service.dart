@@ -11,7 +11,7 @@ import 'follow_repository.dart';
 typedef FetchArtistPage = Future<ArtistPage> Function(String browseId);
 typedef FindArtist = Future<List<SearchEntry>> Function(String name);
 
-/// Artistas seguidos (locales: ni Last.fm ni ListenBrainz permiten seguir) y
+/// Artistas seguidos (locales: Last.fm no permite seguir) y
 /// novedades de sus páginas de YouTube Music. Sin hilos propios: la consulta
 /// corre solo cuando [refreshIfDue] se llama (al abrir la app).
 class FollowService extends ChangeNotifier {

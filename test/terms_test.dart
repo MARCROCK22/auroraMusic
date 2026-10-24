@@ -52,34 +52,31 @@ void main() {
       expect(TermsAcceptance(prefs).isAccepted, isFalse);
     });
 
-    test(
-      'explica ListenBrainz: qué se envía, opcional, privacidad y borrado',
-      () {
-        for (final fragment in [
-          'ListenBrainz',
-          'MetaBrainz Foundation',
-          'desactivado por defecto',
-          'tu propio token',
-          'artista, título',
-          'duración',
-          'hora de inicio',
-          'públicas en tu perfil',
-          'política de privacidad',
-          'cerrar sesión',
-          'no vende',
-          'recomendaciones',
-          'busca esas canciones en YouTube',
-          'Artistas que sigues',
-          'solo en tu dispositivo',
-        ]) {
-          expect(
-            all.toLowerCase(),
-            contains(fragment.toLowerCase()),
-            reason: fragment,
-          );
-        }
-      },
-    );
+    test('explica Last.fm: qué se envía, opcional, privacidad y borrado', () {
+      for (final fragment in [
+        'Last.fm',
+        'Last.fm Ltd',
+        'desactivado por defecto',
+        'tu propia cuenta',
+        'artista, título',
+        'duración',
+        'hora de inicio',
+        'públicas en tu perfil',
+        'política de privacidad',
+        'desconectar tu cuenta',
+        'no vende',
+        'recomendaciones',
+        'busca esas canciones en YouTube',
+        'Artistas que sigues',
+        'solo en tu dispositivo',
+      ]) {
+        expect(
+          all.toLowerCase(),
+          contains(fragment.toLowerCase()),
+          reason: fragment,
+        );
+      }
+    });
 
     test('el texto nunca incluye un token', () {
       expect(

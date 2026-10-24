@@ -4,14 +4,14 @@ import 'dart:math' as math;
 import '../core/models.dart';
 import '../dj/reco_memory.dart';
 import 'listen.dart';
-import 'listen_storage.dart';
-import 'listenbrainz_client.dart';
+import 'lastfm_storage.dart';
+import 'lastfm_client.dart';
 
 /// Mínimo para contar un listen y tope de la regla «50 % o 4 minutos».
 const kMinListenDuration = Duration(seconds: 30);
 const kMaxListenThreshold = Duration(minutes: 4);
 const kPlayingNowAfter = Duration(seconds: 3);
-const kMaxBatch = 100; // el servidor admite 1000; se queda corto a propósito
+const kMaxBatch = 50; // máximo de track.scrobble
 const kMaxQueue = 500;
 
 /// Tiempo que hay que haber escuchado para contar la pista, o `null` si no
@@ -40,7 +40,7 @@ class Scrobbler {
   Scrobbler({
     required this.client,
     required this.store,
-    required this.readToken,
+    required this.readSession,
     DateTime Function()? clock,
     Future<void> Function(Duration)? delay,
     this.scheduleRetry,
@@ -53,9 +53,9 @@ class Scrobbler {
   /// Para tests: sustituye al temporizador real de reintentos.
   final void Function(Duration, void Function())? scheduleRetry;
 
-  final ListenBrainzClient client;
+  final LastfmClient client;
   final ListenQueueStore store;
-  final Future<String?> Function() readToken;
+  final Future<String?> Function() readSession;
   final void Function()? onChanged, onAuthFailed;
   final int maxQueue;
   final DateTime Function() _now;
@@ -93,7 +93,7 @@ class Scrobbler {
   String? lastError;
   int sentCount = 0;
 
-  void _failed(LbSubmitResult r) {
+  void _failed(LfmSubmitResult r) {
     lastError = r.detail ?? r.status.name;
     onChanged?.call();
   }
@@ -122,8 +122,8 @@ class Scrobbler {
     onChanged?.call();
   }
 
-  /// Token nuevo validado: se reanuda el envío.
-  void tokenReplaced() {
+  /// Sesión nueva: se reanuda el envío.
+  void sessionReplaced() {
     _authFailed = false;
     unawaited(flush());
   }
@@ -200,12 +200,12 @@ class Scrobbler {
   Future<void> _playingNow(_Session s, Duration duration) async {
     if (_authFailed || _blocked) return;
     final listen = buildListen(s.track, s.startedAt, duration: duration);
-    final token = await readToken();
+    final token = await readSession();
     if (listen == null || token == null || !enabled) return;
-    final r = await client.submit(token, 'playing_now', [listen]);
-    if (r.status == LbSubmitStatus.rateLimited) _block(r.retryAfter);
-    if (r.status == LbSubmitStatus.unauthorized) _failAuth();
-    if (r.status != LbSubmitStatus.ok) _failed(r);
+    final r = await client.updateNowPlaying(token, listen);
+    if (r.status == LfmSubmitStatus.rateLimited) _block(r.retryAfter);
+    if (r.status == LfmSubmitStatus.unauthorized) _failAuth();
+    if (r.status != LfmSubmitStatus.ok) _failed(r);
     // Si falla, se ignora: es solo informativo y se rehace con la siguiente pista.
   }
 
@@ -241,15 +241,15 @@ class Scrobbler {
     return true;
   }
 
-  /// Envía lo pendiente: 1 → `single`, varios → `import` por lotes. Se
+  /// Envía lo pendiente por lotes de hasta 50. Se
   /// reintenta con espera creciente; respeta 429 y su cabecera.
   Future<void> flush() async {
     if (_flushing || _queue.isEmpty || _authFailed || !enabled) return;
     _flushing = true;
     try {
-      final token = await readToken();
+      final token = await readSession();
       if (token == null) {
-        lastError = 'No se pudo leer el token guardado.';
+        lastError = 'No se pudo leer la sesión guardada.';
         onChanged?.call();
         return;
       }
@@ -264,28 +264,24 @@ class Scrobbler {
         final batch = _queue
             .take(_singleMode ? 1 : kMaxBatch)
             .toList(growable: false);
-        final r = await client.submit(
-          token,
-          batch.length == 1 ? 'single' : 'import',
-          batch,
-        );
+        final r = await client.scrobble(token, batch);
         switch (r.status) {
-          case LbSubmitStatus.ok:
+          case LfmSubmitStatus.ok:
             _failures = 0;
             lastError = null;
             lastSentAt = _now();
             sentCount += batch.length;
             await _drop(batch.length);
             if (_queue.isNotEmpty) await _delay(const Duration(seconds: 1));
-          case LbSubmitStatus.rateLimited:
+          case LfmSubmitStatus.rateLimited:
             _failed(r);
             _block(r.retryAfter);
             return;
-          case LbSubmitStatus.unauthorized:
+          case LfmSubmitStatus.unauthorized:
             _failed(r);
             _failAuth();
             return;
-          case LbSubmitStatus.rejected:
+          case LfmSubmitStatus.rejected:
             _failed(r);
             // Un lote rechazado se parte; un listen suelto rechazado se descarta.
             if (batch.length > 1) {
@@ -293,7 +289,7 @@ class Scrobbler {
             } else {
               await _drop(1);
             }
-          case LbSubmitStatus.retry:
+          case LfmSubmitStatus.retry:
             _failed(r);
             _failures++;
             final wait = r.retryAfter ?? _backoff(_failures);

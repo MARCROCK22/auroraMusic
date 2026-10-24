@@ -1,6 +1,6 @@
 # Seguir artistas
 
-Los artistas seguidos son **locales** (Last.fm y ListenBrainz no tienen API para
+Los artistas seguidos son **locales** (Last.fm no tiene API para
 seguir artistas). Código en `lib/follow/`; interfaz en `lib/ui/follow_widgets.dart`.
 
 - Datos: tablas `followed_artists` y `new_releases` (esquema v3 de
