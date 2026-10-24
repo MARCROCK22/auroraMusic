@@ -16,10 +16,10 @@
                   "checksumUrl":  "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/2026.10.10.233141/SHA2-256SUMS"
               },
     "ffmpeg":  {
-                   "sha256":  "13cc318a840c22f204cbfef0c6dc6465da3db83ff7f87e467a61e2100a9b06de",
-                   "url":  "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-10-09-19-22/ffmpeg-N-127264-gf5d4fd186c-win64-gpl.zip",
-                   "name":  "ffmpeg-N-127264-gf5d4fd186c-win64-gpl.zip",
-                   "version":  "autobuild-2026-10-09-19-22",
+                   "sha256":  "80418b69fbf11a7db0b06e2c4ea8cbf1c742c91ace4f4295577c6bea6ab0c35e",
+                   "url":  "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-10-24-17-20/ffmpeg-N-128018-ga881f0a9ad-win64-gpl.zip",
+                   "name":  "ffmpeg-N-128018-ga881f0a9ad-win64-gpl.zip",
+                   "version":  "autobuild-2026-10-24-17-20",
                    "repository":  "yt-dlp/FFmpeg-Builds"
                }
 }
