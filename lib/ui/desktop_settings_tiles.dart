@@ -1,13 +1,20 @@
 import 'package:flutter/material.dart';
 
 import '../core/desktop_shell.dart';
+import '../core/duvet_presence.dart';
 import '../core/window_controls.dart';
 import '../theme/brasa_theme.dart';
 
-/// Ajustes de ventana de Windows: comportamiento de la X e inicio con Windows.
+/// Ajustes de ventana de Windows: comportamiento de la X, inicio con Windows y
+/// lo que escuchas en Duvet.
 class DesktopSettingsTiles extends StatefulWidget {
-  const DesktopSettingsTiles({super.key, required this.shell});
+  const DesktopSettingsTiles({
+    super.key,
+    required this.shell,
+    required this.duvet,
+  });
   final DesktopShell shell;
+  final DuvetPresence duvet;
 
   @override
   State<DesktopSettingsTiles> createState() => _DesktopSettingsTilesState();
@@ -15,6 +22,7 @@ class DesktopSettingsTiles extends StatefulWidget {
 
 class _DesktopSettingsTilesState extends State<DesktopSettingsTiles> {
   late bool _tray = widget.shell.closeToTray;
+  late bool _duvet = widget.duvet.enabled;
   bool _autostart = false;
 
   @override
@@ -53,6 +61,20 @@ class _DesktopSettingsTilesState extends State<DesktopSettingsTiles> {
         onChanged: (v) async {
           final ok = await WindowControls.invoke('setAutostart', v);
           if (ok && mounted) setState(() => _autostart = v);
+        },
+      ),
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        activeTrackColor: isBrasa(context) ? Brasa.cream : null,
+        activeThumbColor: isBrasa(context) ? Brasa.void_ : null,
+        title: const Text('Mostrar en Duvet lo que escuchas'),
+        subtitle: const Text(
+          'Con la app de escritorio de Duvet abierta, tu perfil dice qué suena en Aurora mientras suena.',
+        ),
+        value: _duvet,
+        onChanged: (v) {
+          setState(() => _duvet = v);
+          widget.duvet.setEnabled(v);
         },
       ),
     ],
