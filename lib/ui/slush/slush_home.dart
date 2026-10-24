@@ -51,7 +51,7 @@ class SlushHome extends StatelessWidget {
             ? (h * .5).clamp(120.0, 240.0)
             : (w * .34).clamp(90.0, 150.0);
         final time = slushTotalTime(pool);
-        final cardW = (w * .21).clamp(200.0, 270.0);
+        final cardW = (w * .21).clamp(200.0, 300.0);
         final covers = [
           for (final t in [...c.recentTracks, ...pool]) t,
         ];

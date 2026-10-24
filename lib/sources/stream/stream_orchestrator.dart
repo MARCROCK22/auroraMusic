@@ -326,6 +326,10 @@ class StreamOrchestrator {
       itag: _int(format['itag'])!,
       mimeType: format['mimeType'] as String,
       contentLength: length,
+      duration: switch (_int(format['approxDurationMs'])) {
+        final ms? when ms > 0 => Duration(milliseconds: ms),
+        _ => null,
+      },
     );
   }
 

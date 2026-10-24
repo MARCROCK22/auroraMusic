@@ -307,6 +307,8 @@ class WebMusicAudio extends AudioBackend {
       if (duration > Duration.zero) _duration = duration;
       if (data['ended'] == true && !_ended) {
         _ended = true;
+        // The ended snapshot carries a stale position.
+        if (_duration > Duration.zero) _position = _duration;
         _playIntent = _playing = _buffering = false;
         _completed.add(null);
       }

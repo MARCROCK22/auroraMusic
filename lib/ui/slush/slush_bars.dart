@@ -176,6 +176,8 @@ class SlushTopBar extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               _round('Crear lista', Icons.add, onAdd, size: 30),
+              const SizedBox(width: 8),
+              _round('Ajustes', Icons.tune, () => onNavigate(7), size: 30),
               if (WindowControls.supported) ...[
                 const SizedBox(width: 6),
                 for (final (op, icon, tip) in const [
@@ -445,9 +447,9 @@ class _SlushPlayerBarState extends State<SlushPlayerBar> {
                   ic('Cola', Icons.queue_music, widget.onQueue),
                   ic('Modo Vinilo', Icons.album_outlined, widget.onVinyl),
                   ic('Letras', Icons.lyrics_outlined, widget.onLyrics),
+                  ic('Ajustes', Icons.tune, widget.onSettings),
                   if (wide) ...[
                     ic('Ecualizador', Icons.equalizer, widget.onEqualizer),
-                    ic('Ajustes', Icons.tune, widget.onSettings),
                     Icon(
                       c.audio.volume <= 0
                           ? Icons.volume_off

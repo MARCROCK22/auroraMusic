@@ -674,6 +674,44 @@ void main() {
     },
   );
 
+  test('completion within the engine tolerance still advances', () async {
+    final controller = await createTestController(tracks: [first, second]);
+    addTearDown(() => closeTestController(controller));
+    await controller.playTrack(first, context: [first, second]);
+    final audio = controller.audio as FakeAudio;
+    audio.position = audio.duration - const Duration(milliseconds: 900);
+    audio.completions.add(null);
+    await _waitFor(() => controller.currentTrack?.id == second.id);
+  });
+
+  test(
+    'shuffle keeps skipping failing tracks while some remain unplayed',
+    () async {
+      Completer<ResolvedAudio> failing() => Completer<ResolvedAudio>()
+        ..future.ignore()
+        ..completeError(StateError('boom'));
+      final source = FakeSource()
+        ..pendingResolves['two'] = failing()
+        ..pendingResolves['three'] = failing();
+      final controller = await createTestController(
+        source: source,
+        tracks: [first, second, third],
+      );
+      addTearDown(() => closeTestController(controller));
+      await controller.playTrack(first, context: [first, second, third]);
+      controller.shuffle = true;
+      final audio = controller.audio as FakeAudio;
+      audio.position = audio.duration;
+      audio.completions.add(null);
+      // Whichever fails first (even at the last index), the other is tried.
+      await _waitFor(
+        () =>
+            source.resolved.contains('two') &&
+            source.resolved.contains('three'),
+      );
+    },
+  );
+
   test('older extraction cannot replace a newer selected track', () async {
     final source = FakeSource();
     source.pendingResolves['one'] = Completer<ResolvedAudio>();
