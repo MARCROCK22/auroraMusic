@@ -255,11 +255,12 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     if (!mounted) return;
     showUndoSnackBar(
       ScaffoldMessenger.maybeOf(context),
-      Text(
-        n.kind == FriendsNoticeKind.share
-            ? '${n.username} te envió una canción'
-            : '${n.username} quiere ser tu amigo',
-      ),
+      Text(switch (n.kind) {
+        FriendsNoticeKind.share => '${n.username} te envió una canción',
+        FriendsNoticeKind.playlist => '${n.username} te envió una lista',
+        FriendsNoticeKind.jam => '${n.username} te invita a su Jam',
+        FriendsNoticeKind.request => '${n.username} quiere ser tu amigo',
+      }),
       label: 'Ver',
       onAction: () => _navigate(14),
     );
@@ -1492,7 +1493,11 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       case 14:
         return _slushPage(
           c,
-          FriendsPage(controller: c, onSettings: () => _navigate(7)),
+          FriendsPage(
+            controller: c,
+            onSettings: () => _navigate(7),
+            onJoinJam: (code) => _joinJamLink('aurora://jam/$code'),
+          ),
         );
       case 9:
       case 10:
@@ -2058,6 +2063,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                       onPressed: () => c.setPlaylistPhoto(playlist, null),
                       child: const Text('Quitar foto'),
                     ),
+                  PlaylistSendButton(controller: c, playlist: playlist),
                   OutlinedButton(
                     onPressed: () async {
                       final name = await _askText(
@@ -3180,6 +3186,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                                     TrackActions(context, player).share(t),
                                 icon: const Icon(Icons.share_outlined),
                               ),
+                              SendToFriendButton(track: t),
                               IconButton(
                                 tooltip: 'Añadir a una lista',
                                 onPressed: () => _addToPlaylist(player, t),

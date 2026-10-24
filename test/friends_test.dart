@@ -31,6 +31,7 @@ class FakeData implements FriendsData {
   void Function(Map<String, dynamic>)? onShare;
   bool unsubscribed = false;
   Map<String, Object?>? lastTrack;
+  String? lastKind;
 
   @override
   Future<List<Map<String, dynamic>>> searchProfiles(
@@ -66,9 +67,14 @@ class FakeData implements FriendsData {
   @override
   Future<void> insertShare(
     String toId,
-    Map<String, Object?> track,
+    String kind,
+    Map<String, Object?> payload,
     String? note,
-  ) async => lastTrack = track;
+  ) async {
+    lastKind = kind;
+    lastTrack = payload;
+  }
+
   @override
   Future<List<Map<String, dynamic>>> listInbox({
     required int limit,
@@ -267,10 +273,117 @@ void main() {
     expect(t.artworkUrl, isNull);
   });
 
+  test(
+    'listas: se filtran locales, se recorta y se valida al recibir',
+    () async {
+      data.requests.add(req('a', 'u1', 'me', 'accepted'));
+      auth.set('me');
+      final f = make();
+      await settle();
+      final many = [
+        for (var i = 0; i < 600; i++)
+          Track(id: 'v$i', title: 'T$i', artist: 'A'),
+        const Track(id: 'loc', title: 'L', artist: 'A', localPath: 'C:/m.mp3'),
+      ];
+      expect(await f.sharePlaylist('u2', 'Mix', many), isNotNull);
+      expect(await f.sharePlaylist('u1', 'Mix', many.sublist(600)), isNotNull);
+      expect(await f.sharePlaylist('u1', 'Mix', many, note: 'toma'), isNull);
+      expect(data.lastKind, 'playlist');
+      final sent = data.lastTrack!['tracks'] as List;
+      expect(sent.length, maxSharedPlaylistTracks);
+      expect(sent.any((t) => (t as Map).containsKey('localPath')), isFalse);
+      final back = playlistFromShared(data.lastTrack)!;
+      expect(back.tracks.length, maxSharedPlaylistTracks);
+      expect(playlistFromShared({'name': 'x', 'tracks': 'no'}), isNull);
+      expect(playlistFromShared({'name': '', 'tracks': []}), isNull);
+      f.dispose();
+    },
+  );
+
+  test(
+    'invitación a Jam: solo amigos, código válido, caduca a las 2 h',
+    () async {
+      data.requests.add(req('a', 'u1', 'me', 'accepted'));
+      auth.set('me');
+      final f = make();
+      await settle();
+      expect(await f.shareJamInvite('u1', 'no es un código'), isNotNull);
+      expect(await f.shareJamInvite('u2', 'ABCD2345'), isNotNull);
+      expect(await f.shareJamInvite('u1', 'abcd-2345'), isNull);
+      expect(data.lastKind, 'jam');
+      expect(data.lastTrack, {'code': 'ABCD2345'});
+      expect(jamCodeFromShared({'code': 'abcd2345'}), 'ABCD2345');
+      expect(jamCodeFromShared({'code': 'aurora://x'}), isNull);
+      expect(jamCodeFromShared({'code': 5}), isNull);
+      final item = SharedItem(
+        id: 'j',
+        from: f.friends.first,
+        track: const Track(id: '-', title: '', artist: ''),
+        createdAt: DateTime(2026, 1, 1, 10),
+        seen: false,
+        kind: SharedKind.jam,
+        jamCode: 'ABCD2345',
+      );
+      expect(item.jamExpired(DateTime(2026, 1, 1, 11, 59)), isFalse);
+      expect(item.jamExpired(DateTime(2026, 1, 1, 12, 1)), isTrue);
+      f.dispose();
+    },
+  );
+
+  test('bandeja con los tres tipos; los inválidos se descartan', () async {
+    final now = DateTime.now().toUtc().toIso8601String();
+    data.shares
+      ..add({...share(1), 'created_at': now})
+      ..add({
+        ...share(2),
+        'kind': 'playlist',
+        'created_at': now,
+        'track': {
+          'name': 'Mix',
+          'tracks': [
+            {'id': 'a', 'title': 'T', 'artist': 'A'},
+          ],
+        },
+      })
+      ..add({
+        ...share(3),
+        'kind': 'jam',
+        'created_at': now,
+        'track': {'code': 'ABCD2345'},
+      })
+      ..add({
+        ...share(4),
+        'kind': 'jam',
+        'track': {'code': '<x>'},
+      })
+      ..add({...share(5), 'kind': 'otro'});
+    auth.set('me');
+    final f = make();
+    await settle();
+    expect(f.inbox.map((i) => i.kind).toSet(), {
+      SharedKind.track,
+      SharedKind.playlist,
+      SharedKind.jam,
+    });
+    expect(f.inbox.length, 3);
+    final notices = <FriendsNoticeKind>[];
+    f.notices.map((n) => n.kind).listen(notices.add);
+    data.onShare!({
+      ...share(9),
+      'kind': 'jam',
+      'created_at': now,
+      'track': {'code': 'ZZZZ2345'},
+    });
+    await settle();
+    expect(notices, [FriendsNoticeKind.jam]);
+    f.dispose();
+  });
+
   Future<void> pump(
     WidgetTester tester, {
     required bool signedIn,
     Size? size,
+    Future<void> Function(String)? onJoinJam,
   }) async {
     final controller = await createTestController();
     auth.uid = signedIn ? 'me' : null;
@@ -287,7 +400,9 @@ void main() {
       ProviderScope(
         overrides: [friendsServiceProvider.overrideWith((ref) => f)],
         child: MaterialApp(
-          home: Scaffold(body: FriendsPage(controller: controller)),
+          home: Scaffold(
+            body: FriendsPage(controller: controller, onJoinJam: onJoinJam),
+          ),
         ),
       ),
     );
@@ -298,6 +413,100 @@ void main() {
     await tester.runAsync(() => pump(tester, signedIn: false));
     expect(find.byKey(const ValueKey('friends-signin-hint')), findsOneWidget);
     expect(find.textContaining('Ajustes → Cuenta'), findsOneWidget);
+  });
+
+  for (final size in [const Size(1000, 800), const Size(320, 640)]) {
+    testWidgets('bandeja con listas e invitaciones ${size.width.toInt()}px', (
+      tester,
+    ) async {
+      final now = DateTime.now().toUtc().toIso8601String();
+      data.requests.add(req('a', 'u1', 'me', 'accepted'));
+      data.shares
+        ..add({
+          ...share(2),
+          'kind': 'playlist',
+          'created_at': now,
+          'track': {
+            'name': 'Mix de ana',
+            'tracks': [
+              {'id': 'a', 'title': 'T', 'artist': 'A'},
+            ],
+          },
+        })
+        ..add({
+          ...share(3),
+          'kind': 'jam',
+          'created_at': now,
+          'track': {'code': 'ABCD2345'},
+        });
+      String? joined;
+      await tester.runAsync(
+        () => pump(
+          tester,
+          signedIn: true,
+          size: size,
+          onJoinJam: (c) async => joined = c,
+        ),
+      );
+      await tester.runAsync(settle);
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('friends-tab-2')));
+      await tester.pump();
+      expect(find.text('Mix de ana'), findsOneWidget);
+      expect(find.text('1 canciones'), findsOneWidget);
+      expect(find.text('Guardar en mi biblioteca'), findsOneWidget);
+      expect(find.text('ana te invita a su Jam'), findsOneWidget);
+      await tester.tap(find.text('Unirse'));
+      expect(joined, 'ABCD2345');
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('menú de canción: «Enviar a un amigo» sigue a la sesión', (
+    tester,
+  ) async {
+    final controller = await tester.runAsync(createTestController);
+    final f = make();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [friendsServiceProvider.overrideWith((ref) => f)],
+        child: MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                SendToFriendButton(
+                  track: const Track(id: 'x', title: 'T', artist: 'A'),
+                ),
+                SendToFriendButton(
+                  track: const Track(
+                    id: 'y',
+                    title: 'L',
+                    artist: 'A',
+                    localPath: 'C:/m.mp3',
+                  ),
+                ),
+                Text('${controller != null}'),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.byKey(const ValueKey('send-to-friend')), findsNothing);
+    data.requests.add(req('a', 'u1', 'me', 'accepted'));
+    auth.set('me');
+    await tester.runAsync(settle);
+    await tester.pump();
+    expect(find.byKey(const ValueKey('send-to-friend')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('send-to-friend')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('share-to-u1')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('share-to-u1')));
+    await tester.pumpAndSettle();
+    expect(data.lastKind, 'track');
+    auth.set(null);
+    await tester.pump();
+    expect(find.byKey(const ValueKey('send-to-friend')), findsNothing);
   });
 
   for (final size in [const Size(1000, 800), const Size(320, 640)]) {

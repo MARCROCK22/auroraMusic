@@ -2707,6 +2707,22 @@ class AppController extends ChangeNotifier {
     _notify();
   }
 
+  /// Copia local de una playlist recibida de un amigo.
+  Future<void> savePlaylistCopy(String name, List<Track> shared) async {
+    final id = 'list_${DateTime.now().microsecondsSinceEpoch}';
+    for (final t in shared) {
+      if (!tracks.any((x) => x.id == t.id)) await _remember(t);
+    }
+    final playlist = MusicPlaylist(
+      id: id,
+      name: name.trim().isEmpty ? 'Playlist de un amigo' : name.trim(),
+      trackIds: [for (final t in shared) t.id],
+    );
+    await database.savePlaylist(playlist);
+    playlists.add(playlist);
+    _notify();
+  }
+
   Future<void> renamePlaylist(MusicPlaylist playlist, String name) async {
     if (name.trim().isEmpty) return;
     playlist = _latestPlaylist(playlist);

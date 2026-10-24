@@ -17,7 +17,8 @@ abstract class FriendsData {
   Future<void> deleteRequest(String id);
   Future<void> insertShare(
     String toId,
-    Map<String, Object?> track,
+    String kind,
+    Map<String, Object?> payload,
     String? note,
   );
   Future<List<Map<String, dynamic>>> listInbox({
@@ -95,12 +96,14 @@ class SupabaseFriendsData implements FriendsData {
   @override
   Future<void> insertShare(
     String toId,
-    Map<String, Object?> track,
+    String kind,
+    Map<String, Object?> payload,
     String? note,
   ) => _client.from('shared_tracks').insert({
     'from_id': _uid,
     'to_id': toId,
-    'track': track,
+    'kind': kind,
+    'track': payload,
     'note': note,
   });
 

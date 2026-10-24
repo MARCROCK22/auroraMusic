@@ -1,3 +1,4 @@
+import '../friends_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/models.dart';
@@ -41,6 +42,30 @@ Future<void> startJamFlow(
   }
   if (seed.isNotEmpty) jam.addTracks(seed);
   await showJamInviteSheet(context, jam);
+}
+
+/// «Invitar a un amigo»: solo con sesión y una Jam en línea (con código).
+class JamInviteFriendButton extends StatelessWidget {
+  const JamInviteFriendButton({super.key, required this.jam, this.style});
+  final JamController jam;
+  final ButtonStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final invite = jam.service.invite;
+    if (invite == null || !invite.isRemote || !jam.active) {
+      return const SizedBox.shrink();
+    }
+    return FriendsGate(
+      builder: (context, f) => OutlinedButton.icon(
+        key: const ValueKey('jam-invite-friend'),
+        style: style,
+        onPressed: () => showInviteFriendToJamSheet(context, f, invite.code),
+        icon: const Icon(Icons.person_add_alt_1_outlined),
+        label: const Text('Invitar a un amigo'),
+      ),
+    );
+  }
 }
 
 Future<void> showJamInviteSheet(BuildContext context, JamController jam) =>
@@ -148,6 +173,10 @@ class _InviteSheet extends StatelessWidget {
                         icon: const Icon(Icons.tag),
                         label: const Text('Copiar código'),
                       ),
+                    JamInviteFriendButton(
+                      jam: jam,
+                      style: modern ? ghost : null,
+                    ),
                     FilledButton.icon(
                       style: modern ? inverse : null,
                       onPressed: () => copy(

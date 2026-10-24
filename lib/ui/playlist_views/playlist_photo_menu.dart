@@ -2,6 +2,45 @@ import 'package:flutter/material.dart';
 
 import '../../app_controller.dart';
 import '../../core/models.dart';
+import '../../friends/friends_providers.dart';
+import '../../friends/friends_service.dart';
+import '../friends_page.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+/// Tracks de [playlist] resueltos en la biblioteca.
+List<Track> playlistTracksOf(AppController c, MusicPlaylist playlist) {
+  final byId = {for (final t in c.tracks) t.id: t};
+  return [
+    for (final id in playlist.trackIds)
+      if (byId[id] != null) byId[id]!,
+  ];
+}
+
+/// Botón «Enviar a un amigo» para el encabezado de una playlist.
+class PlaylistSendButton extends StatelessWidget {
+  const PlaylistSendButton({
+    super.key,
+    required this.controller,
+    required this.playlist,
+  });
+  final AppController controller;
+  final MusicPlaylist playlist;
+
+  @override
+  Widget build(BuildContext context) => FriendsGate(
+    builder: (context, f) => OutlinedButton.icon(
+      key: const ValueKey('playlist-send-friend'),
+      onPressed: () => showSendPlaylistSheet(
+        context,
+        f,
+        playlist.name,
+        playlistTracksOf(controller, playlist),
+      ),
+      icon: const Icon(Icons.send_outlined),
+      label: const Text('Enviar a un amigo'),
+    ),
+  );
+}
 
 /// Abre el selector y avisa con un SnackBar si falla; lo usan todos los puntos de entrada.
 Future<void> changePlaylistPhoto(
@@ -27,6 +66,7 @@ Future<void> showPlaylistPhotoMenu(
           .firstOrNull ??
       playlist;
   final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+  final friends = _signedInFriends(context);
   final choice = await showMenu<String>(
     context: context,
     position: RelativeRect.fromRect(
@@ -49,6 +89,14 @@ Future<void> showPlaylistPhotoMenu(
             title: Text('Quitar foto'),
           ),
         ),
+      if (friends != null)
+        const PopupMenuItem(
+          value: 'send',
+          child: ListTile(
+            leading: Icon(Icons.send_outlined),
+            title: Text('Enviar a un amigo'),
+          ),
+        ),
     ],
   );
   if (!context.mounted) return;
@@ -56,6 +104,25 @@ Future<void> showPlaylistPhotoMenu(
     await changePlaylistPhoto(context, controller, latest);
   } else if (choice == 'remove') {
     await controller.setPlaylistPhoto(latest, null);
+  } else if (choice == 'send' && friends != null) {
+    await showSendPlaylistSheet(
+      context,
+      friends,
+      latest.name,
+      playlistTracksOf(controller, latest),
+    );
+  }
+}
+
+FriendsService? _signedInFriends(BuildContext context) {
+  try {
+    final f = ProviderScope.containerOf(
+      context,
+      listen: false,
+    ).read(friendsServiceProvider);
+    return f.signedIn ? f : null;
+  } catch (_) {
+    return null;
   }
 }
 

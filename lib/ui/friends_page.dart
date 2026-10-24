@@ -64,8 +64,16 @@ void _say(BuildContext context, String text) =>
     showUndoSnackBar(ScaffoldMessenger.maybeOf(context), Text(text));
 
 class FriendsPage extends ConsumerStatefulWidget {
-  const FriendsPage({super.key, required this.controller, this.onSettings});
+  const FriendsPage({
+    super.key,
+    required this.controller,
+    this.onSettings,
+    this.onJoinJam,
+  });
   final AppController controller;
+
+  /// Une a la Jam con ese código (la resuelve el shell).
+  final Future<void> Function(String code)? onJoinJam;
 
   /// Lleva a Ajustes → Cuenta cuando no hay sesión.
   final VoidCallback? onSettings;
@@ -332,7 +340,9 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
   List<Widget> _inboxRows(FriendsService f) {
     if (f.inbox.isEmpty) {
       return [
-        _empty('Aquí aparecerán las canciones que te envíen tus amigos.'),
+        _empty(
+          'Aquí aparecerán las canciones, listas e invitaciones que te envíen tus amigos.',
+        ),
       ];
     }
     final c = widget.controller;
@@ -340,16 +350,65 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
       for (final item in f.inbox)
         ListenableBuilder(
           listenable: c,
-          builder: (context, _) => _InboxRow(
-            item: item,
-            liked: c.favoriteIds.contains(item.track.id),
-            onPlay: () => c.playTrack(item.track),
-            onQueue: () async {
-              await c.addToQueue(item.track);
-              if (context.mounted) _say(context, 'Añadida a la cola');
-            },
-            onLike: () => c.toggleFavorite(item.track),
-          ),
+          builder: (context, _) => switch (item.kind) {
+            SharedKind.track => _InboxRow(
+              item: item,
+              liked: c.favoriteIds.contains(item.track.id),
+              onPlay: () => c.playTrack(item.track),
+              onQueue: () async {
+                await c.addToQueue(item.track);
+                if (context.mounted) _say(context, 'Añadida a la cola');
+              },
+              onLike: () => c.toggleFavorite(item.track),
+            ),
+            SharedKind.playlist => _InboxCard(
+              item: item,
+              title: item.playlist!.name,
+              subtitle: '${item.playlist!.tracks.length} canciones',
+              artworkUrl: item.playlist!.artworkUrl,
+              icon: Icons.queue_music,
+              actions: [
+                IconButton(
+                  key: ValueKey('inbox-play-${item.id}'),
+                  tooltip: 'Reproducir',
+                  icon: const Icon(Icons.play_arrow),
+                  onPressed: () => c.playTrack(
+                    item.playlist!.tracks.first,
+                    context: item.playlist!.tracks,
+                  ),
+                ),
+                FilledButton.tonalIcon(
+                  key: ValueKey('inbox-save-${item.id}'),
+                  icon: const Icon(Icons.library_add_outlined, size: 18),
+                  label: const Text('Guardar en mi biblioteca'),
+                  onPressed: () async {
+                    await c.savePlaylistCopy(
+                      item.playlist!.name,
+                      item.playlist!.tracks,
+                    );
+                    if (context.mounted) _say(context, 'Lista guardada');
+                  },
+                ),
+              ],
+            ),
+            SharedKind.jam => _InboxCard(
+              item: item,
+              title: '${item.from.username} te invita a su Jam',
+              subtitle: item.jamExpired()
+                  ? 'Invitación caducada'
+                  : 'Jam en vivo',
+              icon: Icons.groups_outlined,
+              actions: [
+                if (!item.jamExpired() && widget.onJoinJam != null)
+                  FilledButton.icon(
+                    key: ValueKey('inbox-join-${item.id}'),
+                    icon: const Icon(Icons.login, size: 18),
+                    label: const Text('Unirse'),
+                    onPressed: () => widget.onJoinJam!(item.jamCode!),
+                  ),
+              ],
+            ),
+          },
         ),
       if (f.hasMoreInbox)
         Center(
@@ -479,6 +538,118 @@ class _InboxRow extends StatelessWidget {
   }
 }
 
+/// Fila de la bandeja para listas e invitaciones a Jam.
+class _InboxCard extends StatelessWidget {
+  const _InboxCard({
+    required this.item,
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.actions,
+    this.artworkUrl,
+  });
+  final SharedItem item;
+  final String title;
+  final String subtitle;
+  final String? artworkUrl;
+  final IconData icon;
+  final List<Widget> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final colors = Theme.of(context).colorScheme;
+    final art = ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(
+        width: 56,
+        height: 56,
+        child: artworkUrl == null
+            ? ColoredBox(
+                color: colors.primary.withValues(alpha: .16),
+                child: Icon(icon, color: colors.primary),
+              )
+            : Image.network(
+                artworkUrl!,
+                fit: BoxFit.cover,
+                cacheWidth: 168,
+                errorBuilder: (_, _, _) => ColoredBox(
+                  color: colors.primary.withValues(alpha: .16),
+                  child: Icon(icon, color: colors.primary),
+                ),
+              ),
+      ),
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              FriendAvatar(user: item.from, size: 28),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '${item.from.username} · ${friendsAgo(item.createdAt)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: text.labelMedium,
+                ),
+              ),
+              if (!item.seen)
+                Semantics(
+                  label: 'Nueva',
+                  child: Icon(Icons.circle, size: 10, color: colors.primary),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              art,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: text.titleSmall,
+                    ),
+                    Text(subtitle, style: text.bodySmall),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (actions.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: actions,
+              ),
+            ),
+          if (item.note != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                '«${item.note}»',
+                style: text.bodyMedium?.copyWith(fontStyle: FontStyle.italic),
+              ),
+            ),
+          const Divider(height: 16),
+        ],
+      ),
+    );
+  }
+}
+
 class _SignedOut extends StatelessWidget {
   const _SignedOut({this.onSettings});
   final VoidCallback? onSettings;
@@ -513,12 +684,105 @@ class _SignedOut extends StatelessWidget {
   );
 }
 
+/// Amigos solo si hay sesión; se reconstruye al iniciar/cerrar sesión. Sin
+/// ProviderScope (p. ej. widgets aislados) no muestra nada.
+class FriendsGate extends StatelessWidget {
+  const FriendsGate({super.key, required this.builder});
+  final Widget Function(BuildContext context, FriendsService friends) builder;
+
+  @override
+  Widget build(BuildContext context) {
+    try {
+      ProviderScope.containerOf(context, listen: false);
+    } catch (_) {
+      return const SizedBox.shrink();
+    }
+    return Consumer(
+      builder: (context, ref, _) {
+        final f = ref.watch(friendsServiceProvider);
+        return f.signedIn ? builder(context, f) : const SizedBox.shrink();
+      },
+    );
+  }
+}
+
+/// Botón de icono «Enviar a un amigo» para reproductores y barras.
+class SendToFriendButton extends StatelessWidget {
+  const SendToFriendButton({
+    super.key,
+    required this.track,
+    this.size,
+    this.color,
+  });
+  final Track? track;
+  final double? size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = track;
+    if (t == null || t.isLocal) return const SizedBox.shrink();
+    return FriendsGate(
+      builder: (context, f) => IconButton(
+        key: const ValueKey('send-to-friend'),
+        tooltip: 'Enviar a un amigo',
+        iconSize: size,
+        color: color,
+        onPressed: () => showSendToFriendSheet(context, f, t),
+        icon: const Icon(Icons.send_outlined),
+      ),
+    );
+  }
+}
+
 /// Hoja para elegir a qué amigo enviar [track], con nota opcional.
 Future<void> showSendToFriendSheet(
   BuildContext context,
   FriendsService friends,
   Track track,
-) {
+) => showSendSheet(
+  context,
+  friends,
+  title: 'Enviar «${track.title}»',
+  send: (id, note) => friends.shareTrack(id, track, note: note),
+);
+
+/// Envía una copia de la lista [name] con [tracks] a un amigo.
+Future<void> showSendPlaylistSheet(
+  BuildContext context,
+  FriendsService friends,
+  String name,
+  List<Track> tracks,
+) => showSendSheet(
+  context,
+  friends,
+  title: 'Enviar la lista «$name»',
+  send: (id, note) => friends.sharePlaylist(id, name, tracks, note: note),
+);
+
+/// Invita a un amigo a la Jam con [code].
+Future<void> showInviteFriendToJamSheet(
+  BuildContext context,
+  FriendsService friends,
+  String code,
+) => showSendSheet(
+  context,
+  friends,
+  title: 'Invitar a tu Jam',
+  withNote: false,
+  confirmation: (name) => 'Invitación enviada a $name',
+  send: (id, _) => friends.shareJamInvite(id, code),
+);
+
+/// Selector de amigo común a canciones, listas e invitaciones.
+Future<void> showSendSheet(
+  BuildContext context,
+  FriendsService friends, {
+  required String title,
+  required Future<String?> Function(String friendId, String? note) send,
+  bool withNote = true,
+  String Function(String name)? confirmation,
+}) {
   final messenger = ScaffoldMessenger.maybeOf(context);
   return showModalBottomSheet<void>(
     context: context,
@@ -538,18 +802,19 @@ Future<void> showSendToFriendSheet(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Enviar «${track.title}»',
+              title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(sheet).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
-            TextField(
-              key: const ValueKey('share-note'),
-              controller: note,
-              maxLength: 200,
-              decoration: const InputDecoration(hintText: 'Nota (opcional)'),
-            ),
+            if (withNote)
+              TextField(
+                key: const ValueKey('share-note'),
+                controller: note,
+                maxLength: 200,
+                decoration: const InputDecoration(hintText: 'Nota (opcional)'),
+              ),
             if (friends.friends.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 16),
@@ -569,14 +834,14 @@ Future<void> showSendToFriendSheet(
                         trailing: const Icon(Icons.send_outlined),
                         onTap: () async {
                           Navigator.pop(sheet);
-                          final error = await friends.shareTrack(
-                            u.id,
-                            track,
-                            note: note.text,
-                          );
+                          final error = await send(u.id, note.text);
                           showUndoSnackBar(
                             messenger,
-                            Text(error ?? 'Enviada a ${u.username}'),
+                            Text(
+                              error ??
+                                  confirmation?.call(u.username) ??
+                                  'Enviada a ${u.username}',
+                            ),
                           );
                         },
                       ),
