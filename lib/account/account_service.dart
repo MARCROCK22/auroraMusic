@@ -155,7 +155,13 @@ class AccountService extends ChangeNotifier {
   SupabaseClient? _build() {
     final config = _config;
     if (config == null) return null;
-    final client = SupabaseClient(config.url, config.anonKey);
+    // Implícito: PKCE exige un asyncStorage que este cliente no usa y en
+    // release fallaba signUp con un null-check.
+    final client = SupabaseClient(
+      config.url,
+      config.anonKey,
+      authOptions: const AuthClientOptions(authFlowType: AuthFlowType.implicit),
+    );
     _sub = client.auth.onAuthStateChange.listen((state) {
       final session = state.session;
       if (state.event == AuthChangeEvent.signedOut || session == null) {

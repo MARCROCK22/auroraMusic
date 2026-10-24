@@ -30,6 +30,8 @@ create or replace function public.handle_new_user() returns trigger
 language plpgsql security definer set search_path = '' as $$
 declare u text := lower(coalesce(new.raw_user_meta_data->>'username', ''));
 begin
+  -- La Jam usa sesiones anónimas: sin perfil (si no, su alta falla).
+  if new.is_anonymous then return new; end if;
   if u !~ '^[a-z0-9_.]{3,24}$' then raise exception 'username invalido'; end if;
   insert into public.profiles (id, username) values (new.id, u);
   return new;
