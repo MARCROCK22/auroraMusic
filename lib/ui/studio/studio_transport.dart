@@ -1,3 +1,4 @@
+import '../friends_page.dart';
 import 'package:flutter/material.dart';
 import '../../app_controller.dart';
 import '../../core/models.dart';
@@ -188,6 +189,7 @@ class _StudioTransportState extends State<StudioTransport> {
                     color: colors.primary,
                   ),
                 ),
+              if (wide) SendToFriendButton(track: track),
             ],
           );
           final transport = Row(

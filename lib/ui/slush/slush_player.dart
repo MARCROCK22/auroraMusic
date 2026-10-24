@@ -1,3 +1,4 @@
+import '../friends_page.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -720,6 +721,18 @@ class _Controls extends StatelessWidget {
             size: size,
             onTap: track == null ? null : () => c.toggleFavorite(track),
           ),
+          if (track != null && !track.isLocal)
+            FriendsGate(
+              builder: (context, f) => Padding(
+                padding: EdgeInsets.only(left: gap),
+                child: _Round(
+                  icon: Icons.send_rounded,
+                  tooltip: 'Enviar a un amigo',
+                  size: size,
+                  onTap: () => showSendToFriendSheet(context, f, track),
+                ),
+              ),
+            ),
         ],
       ),
     );

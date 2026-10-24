@@ -246,6 +246,7 @@ class SlushJamActive extends StatelessWidget {
                             ),
                             child: const Text('COPIAR ENLACE'),
                           ),
+                          JamInviteFriendButton(jam: c),
                         ],
                       ),
                     ),

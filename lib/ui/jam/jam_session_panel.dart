@@ -202,6 +202,7 @@ class _JamSessionPanelState extends State<JamSessionPanel> {
                 icon: const Icon(Icons.qr_code_2),
                 label: const Text('Invitar'),
               ),
+              JamInviteFriendButton(jam: c),
               OutlinedButton.icon(
                 onPressed: c.canAdd ? () => showJamAddSheet(context, c) : null,
                 icon: const Icon(Icons.add),

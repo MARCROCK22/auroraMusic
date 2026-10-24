@@ -1,3 +1,4 @@
+import '../friends_page.dart';
 import 'package:flutter/material.dart';
 
 import '../../app_controller.dart';
@@ -432,6 +433,14 @@ class _SlushPlayerBarState extends State<SlushPlayerBar> {
                             has ? () => c.toggleFavorite(t) : null,
                             on: fav,
                           ),
+                          if (has && !t.isLocal)
+                            FriendsGate(
+                              builder: (context, f) => ic(
+                                'Enviar a un amigo',
+                                Icons.send_outlined,
+                                () => showSendToFriendSheet(context, f, t),
+                              ),
+                            ),
                         ],
                       ),
                     ),

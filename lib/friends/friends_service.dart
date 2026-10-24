@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:supabase/supabase.dart' show PostgrestException;
 
 import '../core/models.dart';
+import '../jam/jam_models.dart' show jamNormalizeCode;
 import 'friends_data.dart';
 
 class FriendUser {
@@ -29,6 +31,25 @@ class FriendRequestView {
   final DateTime createdAt;
 }
 
+enum SharedKind { track, playlist, jam }
+
+/// Playlist recibida (ya validada).
+class SharedPlaylist {
+  const SharedPlaylist({
+    required this.name,
+    required this.tracks,
+    this.artworkUrl,
+  });
+  final String name;
+  final List<Track> tracks;
+  final String? artworkUrl;
+}
+
+/// Las invitaciones a una Jam caducan a las 2 h de enviarse.
+const jamInviteTtl = Duration(hours: 2);
+const maxSharedPlaylistTracks = 500;
+const _maxPlaylistBytes = 240000;
+
 class SharedItem {
   const SharedItem({
     required this.id,
@@ -37,13 +58,25 @@ class SharedItem {
     required this.createdAt,
     required this.seen,
     this.note,
+    this.kind = SharedKind.track,
+    this.playlist,
+    this.jamCode,
   });
   final String id;
   final FriendUser from;
+
+  /// Solo para [SharedKind.track]; en los demás es un marcador vacío.
   final Track track;
   final String? note;
   final DateTime createdAt;
   final bool seen;
+  final SharedKind kind;
+  final SharedPlaylist? playlist;
+  final String? jamCode;
+
+  bool jamExpired([DateTime? now]) =>
+      (now ?? DateTime.now()).difference(createdAt) > jamInviteTtl;
+
   SharedItem withSeen() => SharedItem(
     id: id,
     from: from,
@@ -51,10 +84,13 @@ class SharedItem {
     createdAt: createdAt,
     seen: true,
     note: note,
+    kind: kind,
+    playlist: playlist,
+    jamCode: jamCode,
   );
 }
 
-enum FriendsNoticeKind { request, share }
+enum FriendsNoticeKind { request, share, playlist, jam }
 
 class FriendsNotice {
   const FriendsNotice(this.kind, this.username);
@@ -266,13 +302,38 @@ class FriendsService extends ChangeNotifier {
   SharedItem? _itemFrom(Map<String, dynamic> r) {
     final from = _profiles[r['from_id']];
     final id = r['id'];
-    final track = trackFromShared(r['track']);
-    if (from == null || id is! String || track == null) return null;
+    if (from == null || id is! String) return null;
+    final kind = switch (r['kind']) {
+      null || 'track' => SharedKind.track,
+      'playlist' => SharedKind.playlist,
+      'jam' => SharedKind.jam,
+      _ => null,
+    };
+    if (kind == null) return null;
+    final payload = r['track'];
+    var track = const Track(id: '-', title: '', artist: '');
+    SharedPlaylist? playlist;
+    String? code;
+    switch (kind) {
+      case SharedKind.track:
+        final t = trackFromShared(payload);
+        if (t == null) return null;
+        track = t;
+      case SharedKind.playlist:
+        playlist = playlistFromShared(payload);
+        if (playlist == null) return null;
+      case SharedKind.jam:
+        code = jamCodeFromShared(payload);
+        if (code == null) return null;
+    }
     final note = r['note'];
     return SharedItem(
       id: id,
       from: from,
       track: track,
+      kind: kind,
+      playlist: playlist,
+      jamCode: code,
       note: note is String && note.trim().isNotEmpty ? note.trim() : null,
       createdAt: _date(r['created_at']),
       seen: r['seen'] == true,
@@ -308,7 +369,13 @@ class FriendsService extends ChangeNotifier {
       if (item == null || inbox.any((i) => i.id == item.id)) return;
       inbox = [item, ...inbox];
       if (!item.seen) unseenCount++;
-      _emit(FriendsNotice(FriendsNoticeKind.share, item.from.username));
+      _emit(
+        FriendsNotice(switch (item.kind) {
+          SharedKind.track => FriendsNoticeKind.share,
+          SharedKind.playlist => FriendsNoticeKind.playlist,
+          SharedKind.jam => FriendsNoticeKind.jam,
+        }, item.from.username),
+      );
     } catch (_) {}
     _notify();
   }
@@ -394,11 +461,60 @@ class FriendsService extends ChangeNotifier {
     if (!friends.any((f) => f.id == friendId)) {
       return Future.value('Solo puedes enviar a tus amigos.');
     }
+    return _run(
+      (d) => d.insertShare(
+        friendId,
+        SharedKind.track.name,
+        trackForShare(track),
+        _cleanNote(note),
+      ),
+    );
+  }
+
+  String? _cleanNote(String? note) {
     final n = note?.trim();
-    final text = n == null || n.isEmpty
-        ? null
-        : (n.length > _maxNote ? n.substring(0, _maxNote) : n);
-    return _run((d) => d.insertShare(friendId, trackForShare(track), text));
+    return n == null || n.isEmpty ? null : _cut(n, _maxNote);
+  }
+
+  /// Envía una copia de la playlist (sin pistas locales ni pendientes).
+  Future<String?> sharePlaylist(
+    String friendId,
+    String name,
+    List<Track> tracks, {
+    String? note,
+  }) {
+    if (!friends.any((f) => f.id == friendId)) {
+      return Future.value('Solo puedes enviar a tus amigos.');
+    }
+    final payload = playlistForShare(name, tracks);
+    if (payload == null) {
+      return Future.value(
+        'La lista no tiene canciones que se puedan enviar (las locales no viajan).',
+      );
+    }
+    return _run(
+      (d) => d.insertShare(
+        friendId,
+        SharedKind.playlist.name,
+        payload,
+        _cleanNote(note),
+      ),
+    );
+  }
+
+  /// Invita a un amigo a la Jam [code] (solo código remoto válido).
+  Future<String?> shareJamInvite(String friendId, String code) {
+    final clean = jamNormalizeCode(code);
+    if (clean == null) {
+      return Future.value('Esta Jam no se puede compartir por código.');
+    }
+    if (!friends.any((f) => f.id == friendId)) {
+      return Future.value('Solo puedes invitar a tus amigos.');
+    }
+    return _run(
+      (d) =>
+          d.insertShare(friendId, SharedKind.jam.name, {'code': clean}, null),
+    );
   }
 
   Future<void> markSeen(Iterable<String> ids) async {
@@ -471,4 +587,54 @@ Track? trackFromShared(Object? json) {
         (json['genres'] as List?)?.whereType<String>().take(5).toList() ??
         const [],
   );
+}
+
+/// JSON de una playlist para enviar; null si no queda ninguna pista válida
+/// o el tamaño excede el límite.
+Map<String, Object?>? playlistForShare(String name, List<Track> tracks) {
+  final seen = <String>{};
+  final list = <Map<String, Object?>>[];
+  for (final t in tracks) {
+    if (t.isLocal ||
+        t.spotifyMatchPending ||
+        t.id.isEmpty ||
+        t.id.length > 64) {
+      continue;
+    }
+    if (!seen.add(t.id)) continue;
+    list.add(trackForShare(t));
+    if (list.length >= maxSharedPlaylistTracks) break;
+  }
+  if (list.isEmpty) return null;
+  final payload = <String, Object?>{
+    'name': _cut(name.trim().isEmpty ? 'Playlist' : name.trim(), 100),
+    'tracks': list,
+  };
+  return jsonEncode(payload).length > _maxPlaylistBytes ? null : payload;
+}
+
+/// Entrada no confiable: valida tipos, longitudes y que las pistas sean sanas.
+SharedPlaylist? playlistFromShared(Object? json) {
+  if (json is! Map) return null;
+  final name = json['name'], raw = json['tracks'];
+  if (name is! String || name.trim().isEmpty || raw is! List) return null;
+  final seen = <String>{};
+  final tracks = <Track>[];
+  for (final item in raw.take(maxSharedPlaylistTracks)) {
+    final t = trackFromShared(item);
+    if (t != null && seen.add(t.id)) tracks.add(t);
+  }
+  if (tracks.isEmpty) return null;
+  return SharedPlaylist(
+    name: _cut(name.trim(), 100),
+    tracks: tracks,
+    artworkUrl: tracks.map((t) => t.artworkUrl).whereType<String>().firstOrNull,
+  );
+}
+
+/// Código de Jam de una invitación recibida, o null si no es válido.
+String? jamCodeFromShared(Object? json) {
+  if (json is! Map) return null;
+  final code = json['code'];
+  return code is String ? jamNormalizeCode(code) : null;
 }
