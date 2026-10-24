@@ -66,7 +66,18 @@ try {
         if ($pin.url -notmatch '^https://github\.com/(yt-dlp/yt-dlp-nightly-builds|denoland/deno|yt-dlp/FFmpeg-Builds)/releases/download/') { throw 'URL de herramientas no autorizada.' }
         $download = Join-Path $staging ([IO.Path]::GetFileName($pin.name))
         Write-Host "Descargando $tool ($($pin.version)); verificando SHA-256 oficial."
-        Invoke-WebRequest -Uri $pin.url -OutFile $download -Headers $headers -TimeoutSec 600
+        try {
+            Invoke-WebRequest -Uri $pin.url -OutFile $download -Headers $headers -TimeoutSec 600
+        } catch {
+            # FFmpeg-Builds borra sus autobuilds viejos: usa el último publicado,
+            # verificado con el SHA-256 que publica GitHub para ese archivo.
+            if ($tool -ne 'ffmpeg') { throw }
+            Write-Host 'La versión fijada de ffmpeg ya no existe; usando la última publicada.'
+            $pin = Get-PinnedAsset 'yt-dlp/FFmpeg-Builds' 'latest' '^ffmpeg-(master-latest|N-\d+-g[0-9a-f]+)-win64-gpl\.zip$'
+            $pins.ffmpeg = $pin
+            $download = Join-Path $staging ([IO.Path]::GetFileName($pin.name))
+            Invoke-WebRequest -Uri $pin.url -OutFile $download -Headers $headers -TimeoutSec 600
+        }
         if ((Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash.ToLowerInvariant() -ne $pin.sha256.ToLowerInvariant()) { throw "SHA-256 incorrecto: $tool. No se instalará." }
         if ($tool -ne 'ytdlp') { Expand-Archive -LiteralPath $download -DestinationPath (Join-Path $staging $tool) }
     }

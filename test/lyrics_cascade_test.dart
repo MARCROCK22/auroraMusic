@@ -92,7 +92,14 @@ void main() {
   late Directory dir;
   setUp(() async => dir = await Directory.systemTemp.createTemp('aurora_lyr_'));
   tearDown(() async {
-    if (await dir.exists()) await dir.delete(recursive: true);
+    // Windows puede tener aún abierto el archivo de caché un instante.
+    for (var i = 0; i < 5 && await dir.exists(); i++) {
+      try {
+        await dir.delete(recursive: true);
+      } on FileSystemException {
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
+    }
   });
 
   group('limpieza de metadatos', () {
