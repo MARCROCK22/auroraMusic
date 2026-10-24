@@ -20,6 +20,7 @@ import '../core/audio_backend.dart';
 import '../core/models.dart';
 import '../core/source_backend.dart';
 import '../core/desktop_shell.dart';
+import '../core/duvet_presence.dart';
 import '../core/window_controls.dart';
 import '../jam/jam_protocol.dart';
 import '../profile/profile_settings.dart';
@@ -207,6 +208,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   final _searchFocus = FocusNode();
   late final AudioBackend _audio;
   late final DesktopShell _desktop;
+  late final DuvetPresence _duvet;
   bool _playerOpen = false;
   bool _foreground = true;
   bool _analysisEnabled = false;
@@ -224,6 +226,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
       ..start();
     WindowControls.setCloseConfirmation(_confirmWindowClose);
     _desktop = DesktopShell(ref.read(controllerProvider))..start();
+    _duvet = DuvetPresence(ref.read(controllerProvider))..start();
     _guardWebClose();
     _audio.setVisualizationEnabled(false);
     _listenForJamLinks();
@@ -327,6 +330,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _desktop.dispose();
+    _duvet.dispose();
     WindowControls.onArguments = null;
     WindowControls.setCloseConfirmation(null);
     WindowControls.guardClose(false);
@@ -2598,7 +2602,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         (
           title: 'Ventana y bandeja',
           subtitle: 'Cierre, bandeja del sistema e inicio',
-          children: [DesktopSettingsTiles(shell: _desktop)],
+          children: [DesktopSettingsTiles(shell: _desktop, duvet: _duvet)],
         ),
       (
         title: 'Ecualizador',
