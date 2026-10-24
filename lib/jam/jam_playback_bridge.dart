@@ -216,6 +216,10 @@ class JamPlaybackBridge extends ChangeNotifier {
             continue;
           }
           currentEntryId = entry.id;
+          app.setJamParty(
+            service.invite?.sessionId,
+            service.participants.where((p) => p.connected).length,
+          );
           app.setJamNowPlaying(track);
           unawaited(app.noteJamPlay(track).catchError((Object _) {}));
           _lastSeekMs = clock().millisecondsSinceEpoch;
