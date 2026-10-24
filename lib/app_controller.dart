@@ -289,7 +289,7 @@ class AppController extends ChangeNotifier {
       !_jamPlaybackActive &&
       !_youtubeMusicActive &&
       repeat != RepeatMode.one &&
-      (_personalDjActive || (!shuffle && repeat == RepeatMode.off)) &&
+      (_personalDjActive || repeat == RepeatMode.off) &&
       queue.isNotEmpty &&
       queueIndex >= 0;
 
@@ -318,15 +318,17 @@ class AppController extends ChangeNotifier {
   /// La radio de YouTube (related) entra como una fuente más del motor, que
   /// la mezcla por cubo (`mix`) y la filtra igual que el resto.
   Future<List<Suggestion>> _engineSuggestions({int limit = 12}) async {
-    final retryAt = _engineRetryAt;
-    if (retryAt != null && DateTime.now().isBefore(retryAt)) return const [];
     final current = currentTrack;
     final recent = recentTracks
         .take(20)
         .expand(recommendationTrackKeys)
         .toSet();
+    final extra = <DjCandidate>[];
+    List<Suggestion> radioOnly() => [
+      for (final c in extra)
+        Suggestion(c.track, c.reason, '', bucket: RecBucket.radio),
+    ];
     try {
-      final extra = <DjCandidate>[];
       final src = source;
       final id = current?.id.startsWith('yt:') == true
           ? current!.id.substring(3)
@@ -347,6 +349,11 @@ class AppController extends ChangeNotifier {
             );
           }
         } catch (_) {}
+      }
+      // Radio de YouTube como suplente si el motor local falla o está en espera.
+      final retryAt = _engineRetryAt;
+      if (retryAt != null && DateTime.now().isBefore(retryAt)) {
+        return radioOnly();
       }
       final picks = await suggestionsApi
           .getSuggestions(
@@ -379,7 +386,7 @@ class AppController extends ChangeNotifier {
         personalDjError = _engineDownNotice;
         _notify();
       }
-      return const [];
+      return radioOnly();
     }
   }
 
@@ -2408,7 +2415,9 @@ class AppController extends ChangeNotifier {
           )
           .toList();
       var candidates = unplayed();
-      if (candidates.isEmpty && repeat != RepeatMode.all && _personalDjActive) {
+      if (candidates.isEmpty &&
+          repeat != RepeatMode.all &&
+          (_personalDjActive || _canAutoRefill)) {
         // Autoplay: the DJ continues when the queue runs out.
         final generation = _playGeneration;
         await _refillPersonalDjQueue(force: true);
