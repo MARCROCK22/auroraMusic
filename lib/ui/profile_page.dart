@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../account/account_avatar.dart';
 import '../app_controller.dart';
 import '../lastfm/lastfm_service.dart';
 import '../lastfm/lastfm_stats.dart';
@@ -86,16 +87,7 @@ class _Header extends StatelessWidget {
     final avatar = controller.profileAvatar;
     return Row(
       children: [
-        CircleAvatar(
-          radius: 36,
-          backgroundImage: avatar == null ? null : MemoryImage(avatar),
-          child: avatar == null
-              ? Text(
-                  name.isEmpty ? '?' : name.characters.first.toUpperCase(),
-                  style: t.headlineSmall,
-                )
-              : null,
-        ),
+        AccountAvatar(bytes: avatar, radius: 36),
         const SizedBox(width: 16),
         Expanded(
           child: Column(
