@@ -619,9 +619,38 @@ class AppController extends ChangeNotifier {
 
   /// Pista que suena en la Jam (null hasta que cargue la primera).
   Track? get jamNowPlaying => _jamNowPlaying;
+  int _jamPartySize = 0;
+  String? _jamSessionId;
+
+  /// Oyentes y sesión de la Jam, solo para la presencia de Discord.
+  void setJamParty(String? sessionId, int size) {
+    _jamSessionId = sessionId;
+    _jamPartySize = size;
+    _updateDiscord();
+  }
+
+  void _updateDiscord() {
+    if (!discordAvailable) return;
+    final loaded = currentTrack;
+    final jam = _jamPlaybackActive;
+    discord.update(
+      jam
+          ? _jamNowPlaying
+          : loaded != null && _loadedTrackId == loaded.id
+          ? loaded
+          : null,
+      playing: audio.isPlaying,
+      position: audio.position,
+      jam: jam,
+      partySize: jam ? _jamPartySize : 0,
+      partyId: _jamSessionId,
+    );
+  }
+
   void setJamNowPlaying(Track? track) {
     if (_jamNowPlaying?.id == track?.id) return;
     _jamNowPlaying = track;
+    _updateDiscord();
     _notify();
   }
 
@@ -1423,16 +1452,7 @@ class AppController extends ChangeNotifier {
   }
 
   void _audioChanged() {
-    if (discordAvailable) {
-      final loaded = currentTrack;
-      discord.update(
-        !_jamPlaybackActive && loaded != null && _loadedTrackId == loaded.id
-            ? loaded
-            : null,
-        playing: audio.isPlaying,
-        position: audio.position,
-      );
-    }
+    _updateDiscord();
     // Scrobble: nunca en Jam compartido (track null reinicia la sesión).
     final loaded = currentTrack;
     lastfm?.observe(
