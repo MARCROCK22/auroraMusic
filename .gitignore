@@ -61,3 +61,4 @@ dart_defines.local.json
 
 # graphify
 graphify-out/
+.env
