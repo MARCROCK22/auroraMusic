@@ -4,14 +4,12 @@ Reproductor de música en Flutter y Dart para **Windows x64 y Android 7+**. Inte
 
 ## Motor de audio
 
-- **Búsqueda** en YouTube Music vía InnerTube, sin clave de API ([`innertube_source.dart`](lib/sources/innertube_source.dart)): categorías canciones, álbumes, artistas y vídeos, paginación por continuación, búsquedas recientes y navegación de álbum/artista.
-- **YouTube suena en el reproductor oficial**: cada canción carga `https://music.youtube.com/watch?v=<id>` en un WebView invisible ([`web_music_audio.dart`](lib/audio_web/web_music_audio.dart)), siempre montado y tapado por la interfaz de Aurora (1×1, sin puntero, foco ni semántica). Aurora no extrae URLs de audio, no genera tokens PO ni imita clientes; la extracción nativa dejó de funcionar (YouTube corta tras ~1 MiB) y yt-dlp queda limitado por HTTP 429.
-- **Archivos locales** siguen en los motores nativos (Android Media3, Windows SoLoud + FFmpeg) con ecualizador y espectro; en canciones de YouTube el ecualizador se desactiva porque el audio lo decodifica el sitio. Un único motor está activo a la vez ([`routed_music_audio.dart`](lib/audio/routed_music_audio.dart)).
-- **Controles**: título, artista y portada salen de la pista de Aurora; posición, duración y fin, del elemento multimedia de la página. Las órdenes se serializan por pista y `play()` espera eventos reales `playing`/`timeupdate` (hasta 20 s), reintenta una vez tras `AbortError` y separa los bloqueos de gesto. Los controles del sistema (notificación Media3 en Android, SMTC en Windows) reflejan el estado y envían reproducir/pausa/anterior/siguiente/buscar a Aurora.
-- **Anuncios**: filtros de red de `adblocker_webview` (solo Windows; en Android se desactivan por un ANR del plugin) y, si aun así aparece un anuncio, la página lo silencia, pulsa el botón «Omitir» del propio sitio cuando está disponible y Aurora muestra «Anuncio» sin contarlo como fin de canción. **No es una garantía** de eliminar anuncios.
-- **Consentimiento o verificación**: si el sitio pide consentimiento, inicio de sesión o una verificación, Aurora muestra un aviso con **Revisar sitio**, que abre la página en una hoja para resolverlo; **Listo** la oculta y reintenta.
-- **yt-dlp** solo para descargas explícitas de audio y vídeo e importación de listas.
-- **Reproducir a continuación** (funciona con aleatorio) y **DJ con IA local** ([docs/dj.md](docs/dj.md)): vectores de 256 dimensiones, perfil de gustos con decaimiento de 14 días, similitud coseno, diversidad MMR y enfriamiento por artista, almacenados en SQLite. No usa recomendaciones de YouTube.
+- **Búsqueda** en YouTube Music vía InnerTube, sin clave de API ([`innertube_source.dart`](lib/sources/innertube_source.dart)): canciones, álbumes, artistas y vídeos, con paginación y navegación de álbum/artista.
+- **Reproducción nativa**: el audio de YouTube se resuelve por InnerTube y suena en el motor nativo (Android Media3, Windows SoLoud + FFmpeg) a través de un proxy local en `127.0.0.1` que pide trozos acotados al CDN ([`lib/sources/stream/`](lib/sources/stream/)). Sin tokens PO ni descifrado de firmas. Si YouTube bloquea, en Windows entra el reproductor oficial en un WebView oculto como respaldo.
+- **Ecualizador y espectro** en el motor nativo; un único motor activo a la vez ([`routed_music_audio.dart`](lib/audio/routed_music_audio.dart)).
+- **Controles del sistema** (notificación Media3 en Android, SMTC en Windows).
+- **yt-dlp** solo para descargas explícitas e importación de listas.
+- **La cola nunca termina**: cuando empieza la última canción, el DJ añade canciones según tus gustos (perfil local con vectores, MMR y enfriamiento por artista), con la radio de YouTube y Last.fm como fuentes de candidatos y tu biblioteca como respaldo ([docs/dj.md](docs/dj.md)).
 
 Detalles y límites: [docs/youtube_music_audio_engine.md](docs/youtube_music_audio_engine.md).
 
@@ -28,12 +26,18 @@ Detalles y límites: [docs/youtube_music_audio_engine.md](docs/youtube_music_aud
 - Letras interactivas: toca un verso sincronizado para avanzar o retroceder, ajusta el volumen y vuelve al reproductor con **Volver**. Buscar una posición conserva tu decisión de reproducir o pausar.
 - Inicio con carruseles horizontales de datos reales; DJ de descubrimiento con gestos: izquierda omite, derecha guarda el favorito y encola.
 - **Para ti** recomienda según favoritos, listas y escuchas recientes. **DJ personal**, sin voz, continúa la cola con esas preferencias; las novedades de YouTube son opcionales y se consultan con límites visibles.
-- **Jam**: cola compartida en red local, QR, permisos del anfitrión y reproducción sincronizada opcional con fuentes de audio propias.
+- **Jam**: cola compartida en red local o en línea (Supabase), QR, permisos del anfitrión y reproducción sincronizada opcional con fuentes de audio propias.
 - Colores extraídos de la portada, ambiente reactivo a la energía y visualizador FFT del audio real.
 - Ecualizador DSP de ocho bandas, presets y reducción automática de ganancia para los refuerzos.
 - Controles multimedia del sistema, servicio de audio Android, pausa por desconexión e interrupciones de audio.
 - SQLite local; restaura cola y posición **en pausa**. Temas claro/oscuro/sistema y movimiento reducido.
 - Paletas Automático, Morado, Terracota, Ámbar y Verde bosque para toda la interfaz.
+- **Temas** Modern (por defecto), Atelier, Brasa y Slush, con logo propio.
+- **Aleatorio** que no gasta las canciones saltadas: siguen en la cola y pueden volver a salir (nunca dos veces seguidas).
+- **Cuenta Aurora** (Supabase, gratis): correo, contraseña y nombre de usuario, foto de perfil (genérica hasta que subas una; la anterior se borra del almacenamiento). Sincroniza me gusta, playlists, historial y perfil de gustos del DJ entre dispositivos.
+- **Amigos**: solicitudes por nombre de usuario; envía canciones y playlists o invita a tu Jam en línea. Llegan a una bandeja en tiempo real con aviso en la app.
+- **Last.fm**: cada usuario conecta su cuenta para registrar lo que escucha (scrobbling), ver sus estadísticas en Perfil y alimentar el DJ. La contraseña solo se usa para iniciar sesión y no se guarda.
+- **Discord y Duvet**: muestran «Escuchando Aurora Music» con canción, artista, tiempo y portada (Windows); en una Jam indica que escuchas en grupo.
 
 Spotify aporta descripciones y portadas; el audio proviene de archivos locales y
 YouTube. El DJ usa señales locales y filtros persistentes por artista, canción y
@@ -213,5 +217,5 @@ Consulta [docs/VALIDATION.md](docs/VALIDATION.md) para pruebas reproducibles, re
 1. Sube `version:` en `pubspec.yaml` (p. ej. `1.2.0+10`) y haz commit en `main`.
 2. Crea y empuja la etiqueta: `git tag v1.2.0 && git push origin v1.2.0` (`v1.2.0-beta.1` publica una pre-release, solo visible en el «Canal beta»).
 3. `.github/workflows/release.yml` compila Windows (`Aurora-Setup-1.2.0.exe`, Inno Setup con `installer/aurora.iss`) y Android (`Aurora-1.2.0.apk`, ARM64 firmado), genera `checksums.txt` (SHA-256) y crea el release con notas automáticas. Edita las notas en GitHub si quieres; la app las muestra.
-4. Secretos del repositorio requeridos: `ANDROID_KEYSTORE_BASE64`, `ANDROID_STORE_PASSWORD`, `ANDROID_KEY_PASSWORD`, `ANDROID_KEY_ALIAS`. **El APK debe firmarse siempre con la misma keystore**; si cambia, Android rechaza la actualización.
+4. Secretos del repositorio requeridos: `ANDROID_KEYSTORE_BASE64`, `ANDROID_STORE_PASSWORD`, `ANDROID_KEY_PASSWORD`, `ANDROID_KEY_ALIAS`. Para cuentas, Jam en línea, Last.fm y Discord: `AURORA_SUPABASE_URL`, `AURORA_SUPABASE_ANON_KEY` (solo la clave anónima), `AURORA_LASTFM_API_KEY`, `AURORA_LASTFM_SECRET` y `AURORA_DISCORD_CLIENT_ID`; sin ellos esas funciones aparecen como «no configurado». En local se pasan con `--dart-define-from-file` desde un `.env` que Git ignora. El SQL de Supabase está en `docs/jam_supabase.sql`, `docs/accounts_supabase.sql`, `docs/friends_supabase.sql` y `docs/friends_share_kinds.sql`. **El APK debe firmarse siempre con la misma keystore**; si cambia, Android rechaza la actualización.
 5. La app consulta `releases/latest` de `kaz-py/auroraMusic` (sin token, con ETag) al iniciar, como máximo cada 6 h, y desde Ajustes → Actualizaciones. Nunca instala un archivo cuyo SHA-256 no coincida con `checksums.txt`.
