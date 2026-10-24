@@ -2671,10 +2671,12 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
           ),
         ],
       ),
-      if (WindowControls.supported)
+      if (WindowControls.supported || DuvetPresence.platformSupported)
         (
-          title: 'Ventana y bandeja',
-          subtitle: 'Cierre, bandeja del sistema e inicio',
+          title: WindowControls.supported ? 'Ventana y bandeja' : 'Duvet',
+          subtitle: WindowControls.supported
+              ? 'Cierre, bandeja del sistema e inicio'
+              : 'Lo que escuchas, en tu perfil',
           children: [DesktopSettingsTiles(shell: _desktop, duvet: _duvet)],
         ),
       (

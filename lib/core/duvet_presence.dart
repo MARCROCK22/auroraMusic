@@ -17,17 +17,19 @@ abstract final class DuvetPresenceSetting {
 }
 
 /// Lo que suena, como actividad «Escuchando» de Duvet: la app de escritorio la
-/// recibe por su tubería IPC y la muestra en el perfil del usuario. Solo
-/// Windows. Escribe solo cuando cambia lo que se ve (otra pista, pausa o un
-/// salto) y cada 30 s mientras suena, lo que la vuelve a mostrar si Duvet se
+/// recibe por su IPC (tubería en Windows, socket Unix en Linux) y la muestra
+/// en el perfil del usuario. Escribe solo cuando cambia lo que se ve (otra
+/// pista, pausa o un salto) y cada 30 s mientras suena, lo que la vuelve a mostrar si Duvet se
 /// abre o se reinicia después; sin Duvet abierto no hace nada más.
 class DuvetPresence {
   DuvetPresence(
     this.controller, {
     DuvetPipe? pipe,
     @visibleForTesting bool? supported,
-  }) : _pipe = pipe ?? DuvetPipe(),
-       _supported = supported ?? Platform.isWindows;
+  }) : _pipe = pipe ?? duvetTransport(),
+       _supported = supported ?? platformSupported;
+
+  static bool get platformSupported => Platform.isWindows || Platform.isLinux;
   final AppController controller;
   final DuvetPipe _pipe;
   final bool _supported;
@@ -40,7 +42,7 @@ class DuvetPresence {
 
   Future<void> setEnabled(bool value) async {
     await controller.preferences.setBool(DuvetPresenceSetting.key, value);
-    _push();
+    if (_supported) _push();
   }
 
   // El controlador no avisa de un salto; el motor de audio, sí (y de cada
@@ -124,6 +126,98 @@ Map<String, Object?> duvetActivity(
       'large_text': track.album ?? track.title,
     },
 };
+
+/// El IPC de Duvet en esta plataforma: la tubería con nombre en Windows y un
+/// socket Unix en el resto.
+DuvetPipe duvetTransport({bool? windows, Map<String, String>? environment}) =>
+    (windows ?? Platform.isWindows)
+    ? DuvetPipe()
+    : DuvetSocket(DuvetSocket.candidates(environment ?? Platform.environment));
+
+/// Linux: el socket Unix de la app de escritorio de Duvet, con los mismos
+/// mensajes que la tubería (un JSON por línea; cerrarlo borra la actividad).
+/// shortcut: Duvet no documenta la ruta en Linux; se prueban las habituales
+/// (como discord-ipc). Si se confirma otra, añadirla a [candidates].
+class DuvetSocket extends DuvetPipe {
+  DuvetSocket(this.paths);
+  final List<String> paths;
+  Socket? _socket;
+  bool _connecting = false;
+  int _generation = 0;
+  Map<String, Object?>? _pending;
+
+  static List<String> candidates(Map<String, String> environment) => [
+    for (final directory in {
+      environment['XDG_RUNTIME_DIR'],
+      environment['TMPDIR'],
+      '/tmp',
+    })
+      if (directory != null && directory.isNotEmpty) '$directory/duvet-ipc',
+  ];
+
+  /// Escribe si ya hay conexión; si no, conecta en segundo plano y envía
+  /// [message] al conectar (false mientras tanto, o si Duvet no está abierto).
+  @override
+  bool send(Map<String, Object?> message) {
+    final socket = _socket;
+    if (socket == null) {
+      _pending = message;
+      if (!_connecting) unawaited(_connect());
+      return false;
+    }
+    socket.add(utf8.encode('${jsonEncode(message)}\n'));
+    return true;
+  }
+
+  @override
+  void close() {
+    _generation++;
+    _pending = null;
+    final socket = _socket;
+    _socket = null;
+    socket?.destroy();
+  }
+
+  Future<void> _connect() async {
+    _connecting = true;
+    final generation = _generation;
+    try {
+      for (final path in paths) {
+        if (FileSystemEntity.typeSync(path) !=
+            FileSystemEntityType.unixDomainSock) {
+          continue;
+        }
+        final Socket socket;
+        try {
+          socket = await Socket.connect(
+            InternetAddress(path, type: InternetAddressType.unix),
+            0,
+          );
+        } on SocketException {
+          continue;
+        }
+        if (generation != _generation) {
+          socket.destroy();
+          return;
+        }
+        _socket = socket;
+        void drop([Object? _]) {
+          if (identical(_socket, socket)) _socket = null;
+          socket.destroy();
+        }
+
+        socket.listen((_) {}, onError: drop, onDone: drop);
+        unawaited(socket.done.then(drop, onError: drop));
+        final pending = _pending;
+        _pending = null;
+        if (pending != null) send(pending);
+        return;
+      }
+    } finally {
+      _connecting = false;
+    }
+  }
+}
 
 /// La tubería IPC de la app de escritorio de Duvet, por FFI: el `File` de Dart
 /// no abre tuberías con nombre en Windows (convierte la ruta en UNC). Un mensaje
