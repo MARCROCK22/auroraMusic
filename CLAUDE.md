@@ -59,6 +59,14 @@ cola nativa), pero con la interfaz de Aurora. **No cambiar la estética.**
   (`track.getSimilar`/`artist.getSimilar`) y estadísticas del Perfil. La clave y el
   secreto de la app van por `--dart-define=AURORA_LASTFM_API_KEY/AURORA_LASTFM_SECRET`;
   sin ellos la función queda desactivada.
+- Cuentas (`lib/account/`, decisión del usuario 2026-10-24): Supabase con correo +
+  contraseña + usuario, sesión en almacenamiento seguro, avatar genérico hasta subir foto
+  (la foto anterior se borra del bucket `avatars`). Sincroniza me gusta, playlists,
+  historial y perfil de gustos (LWW por `updated_at`). SQL: `docs/accounts_supabase.sql`.
+- Amigos (`lib/friends/`): solicitudes por usuario y canciones compartidas a una bandeja
+  en tiempo real; RLS solo entre amigos aceptados. SQL: `docs/friends_supabase.sql`.
+- Discord (`lib/discord/`): Rich Presence solo en Windows por named pipe
+  (`AURORA_DISCORD_CLIENT_ID`). Tema por defecto: Modern. Logo: `lib/ui/brand/aurora_logo.dart`.
 - Detalle: `docs/youtube_music_audio_engine.md`.
 
 ## Comandos (PowerShell, Windows)

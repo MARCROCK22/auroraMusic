@@ -11,7 +11,8 @@ import '../jam/transport/jam_config.dart';
 
 /// Se sobrescribe al arrancar (main.dart) con la instancia de AppController.
 final accountServiceProvider = ChangeNotifierProvider<AccountService>(
-  (ref) => throw StateError('Override accountServiceProvider at startup.'),
+  // main.dart la sobrescribe; sin claves (tests) queda no disponible.
+  (ref) => AccountService(),
 );
 
 class AccountProfile {
