@@ -1,109 +1,120 @@
-import 'package:aurora_music/listenbrainz/lb_stats.dart';
-import 'package:aurora_music/listenbrainz/listenbrainz_client.dart';
+import 'package:aurora_music/lastfm/lastfm_client.dart';
+import 'package:aurora_music/lastfm/lastfm_stats.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('parsea grabaciones, artistas y géneros', () {
-    final rec = {
-      'payload': {
-        'recordings': [
+  test('parsea top, recientes y total (números como texto)', () {
+    final tracks = LfmParser.topTracks({
+      'toptracks': {
+        'track': [
           {
-            'track_name': 'A',
-            'artist_name': 'X',
-            'listen_count': 10,
-            'recording_mbid': 'm1',
+            'name': 'A',
+            'playcount': '10',
+            'artist': {'name': 'X'},
           },
-          {'track_name': 'B', 'artist_name': 'Y', 'listen_count': 4},
+          {
+            'name': 'B',
+            'playcount': '4',
+            'artist': {'name': 'Y'},
+          },
           {'bad': 1},
         ],
       },
-    };
-    final recs = LbStatsParser.recordings(rec);
-    expect(recs.map((e) => e.name), ['A', 'B']);
-    expect(recs.first.subtitle, 'X');
-    final mbids = LbStatsParser.recordingMbids(rec);
-    expect(mbids, ['m1', null]);
-    final genres = LbStatsParser.genres(recs, mbids, {
-      'm1': ['Rock', 'indie'],
     });
-    expect(genres.first.name, 'rock');
-    expect(genres.first.count, 10);
+    expect(tracks.map((t) => t.name), ['A', 'B']);
+    expect(tracks.first.count, 10);
+    expect(tracks.first.subtitle, 'X');
+    // una sola entrada llega como objeto
     expect(
-      LbStatsParser.artists({
-        'payload': {
-          'artists': [
-            {'artist_name': 'X', 'listen_count': 7},
-          ],
+      LfmParser.topArtists({
+        'topartists': {
+          'artist': {'name': 'Solo', 'playcount': '3'},
         },
-      }).single.count,
-      7,
+      }).single.name,
+      'Solo',
     );
-  });
-
-  test('actividad, hora favorita, racha y total', () {
-    final day = {
-      'payload': {
-        'daily_activity': {
-          'Monday': [
-            {'hour': 3, 'listen_count': 2},
-            {'hour': 21, 'listen_count': 5},
-          ],
-          'Tuesday': [
-            {'hour': 21, 'listen_count': 1},
-          ],
-        },
+    final recent = LfmParser.recent({
+      'recenttracks': {
+        'track': [
+          {
+            'name': 'Ahora',
+            'artist': {'#text': 'X'},
+            '@attr': {'nowplaying': 'true'},
+          },
+          {
+            'name': 'Antes',
+            'artist': {'#text': 'Y'},
+            'date': {'uts': '1700000000'},
+          },
+        ],
       },
-    };
-    final stats = ListenStats(hourly: LbStatsParser.hourly(day));
-    expect(stats.favoriteHour, 21);
-    expect(LbStatsParser.streak([0, 2, 3, 1, 0]), 3);
-    expect(LbStatsParser.streak([1, 0, 2]), 1);
+    });
+    expect(recent.first.at, isNull);
+    expect(recent.last.at, 1700000000);
     expect(
-      LbStatsParser.listenCount({
-        'payload': {'count': 42},
+      LfmParser.playcount({
+        'user': {'playcount': '1234'},
       }),
-      42,
+      1234,
     );
-    expect(LbStatsParser.recordings('basura'), isEmpty);
-    expect(const ListenStats().favoriteHour, isNull);
+    expect(LfmParser.topTracks('basura'), isEmpty);
+    expect(
+      LfmParser.similarTracks({
+        'similartracks': {
+          'track': [
+            {
+              'name': 'S',
+              'artist': {'name': 'Z'},
+            },
+          ],
+        },
+      }).single.artist,
+      'Z',
+    );
   });
 
-  test('JSON de caché ida y vuelta', () {
-    final s = ListenStats(
+  test('ListenStats se serializa y rechaza datos corruptos', () {
+    const s = ListenStats(
       totalListens: 5,
-      recordings: const [StatItem('A', 3, subtitle: 'X')],
-      hourly: List.filled(24, 1),
-      activity: const [1, 2],
+      recordings: [StatItem('A', 3, subtitle: 'X')],
+      artists: [StatItem('X', 3)],
+      recent: [RecentItem('A', 'X', at: 1)],
     );
     final back = ListenStats.fromJson(s.toJson())!;
-    expect(back.topTrack!.subtitle, 'X');
     expect(back.totalListens, 5);
+    expect(back.recent.single.at, 1);
     expect(ListenStats.fromJson({'t': 'x'}), isNull);
   });
 
-  test('userStats pide los endpoints y el token va en la cabecera', () async {
-    final paths = <String>[];
-    final client = ListenBrainzClient(
+  test('userStats pide user.* con el periodo, por GET y sin firma', () async {
+    final methods = <String>[];
+    final client = LastfmClient(
+      apiKey: 'k',
+      secret: 'sec',
       transport: (r) async {
-        paths.add(r.uri.path);
-        expect(r.uri.toString().contains('tok-secret'), isFalse);
-        expect(r.headers['Authorization'], 'Token tok-secret');
-        if (r.uri.path.endsWith('/recordings')) {
-          return const LbResponse(
+        final q = r.uri.queryParameters;
+        methods.add('${q['method']}:${q['period']}');
+        expect(r.method, 'GET');
+        expect(q['user'], 'juan');
+        expect(q.containsKey('api_sig'), isFalse);
+        expect(r.uri.toString(), isNot(contains('sec')));
+        return switch (q['method']) {
+          'user.getTopTracks' => const LfmResponse(
             200,
-            '{"payload":{"recordings":[{"track_name":"A","artist_name":"X","listen_count":2}]}}',
-          );
-        }
-        if (r.uri.path.endsWith('/listen-count')) {
-          return const LbResponse(200, '{"payload":{"count":9}}');
-        }
-        return const LbResponse(204, '');
+            '{"toptracks":{"track":[{"name":"A","playcount":"2","artist":{"name":"X"}}]}}',
+          ),
+          'user.getInfo' => const LfmResponse(
+            200,
+            '{"user":{"playcount":"9"}}',
+          ),
+          _ => const LfmResponse(404, '{"error":6,"message":"x"}'),
+        };
       },
     );
-    final s = await client.userStats('juan', StatsRange.month, 'tok-secret');
+    final s = await client.userStats('juan', StatsRange.quarter);
     expect(s.totalListens, 9);
     expect(s.topTrack!.name, 'A');
-    expect(s.topGenre, isNull);
-    expect(paths.any((p) => p.endsWith('/daily-activity')), isTrue);
+    expect(s.artists, isEmpty);
+    expect(methods, contains('user.getTopTracks:3month'));
   });
 }

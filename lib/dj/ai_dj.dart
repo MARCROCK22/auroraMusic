@@ -341,7 +341,7 @@ List<DjQuery> djDiscoveryQueries(
 }
 
 /// De dónde sale un candidato; la mezcla de fuentes reparte cuota por cubo.
-enum RecBucket { similar, adjacent, discovery, classics, radio, listenbrainz }
+enum RecBucket { similar, adjacent, discovery, classics, radio, lastfm }
 
 class DjCandidate {
   const DjCandidate(

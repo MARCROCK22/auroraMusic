@@ -93,7 +93,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           $env:ANDROID_KEYSTORE_PATH = Join-Path $env:RUNNER_TEMP 'aurora-signing/release.jks'
-          flutter build apk --release --target-platform android-arm64 --dart-define=AURORA_SUPABASE_URL=${{ secrets.AURORA_SUPABASE_URL }} --dart-define=AURORA_SUPABASE_ANON_KEY=${{ secrets.AURORA_SUPABASE_ANON_KEY }}
+          flutter build apk --release --target-platform android-arm64 --dart-define=AURORA_SUPABASE_URL=${{ secrets.AURORA_SUPABASE_URL }} --dart-define=AURORA_SUPABASE_ANON_KEY=${{ secrets.AURORA_SUPABASE_ANON_KEY }} --dart-define=AURORA_LASTFM_API_KEY=${{ secrets.AURORA_LASTFM_API_KEY }} --dart-define=AURORA_LASTFM_SECRET=${{ secrets.AURORA_LASTFM_SECRET }}
           if ($LASTEXITCODE -ne 0) { throw 'Signed Android release build failed.' }
 
       - name: Remove temporary release keystore

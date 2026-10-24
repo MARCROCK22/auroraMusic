@@ -1,18 +1,13 @@
-import 'dart:convert';
-
 import '../core/models.dart';
 import '../dj/ai_dj.dart';
 import '../dj/reco_memory.dart';
 
-/// Versión del cliente enviada como `submission_client_version`.
+/// Versión del cliente (User-Agent).
 // shortcut: versión fija como en LyricsService; actualizar al subir de versión.
-const kListenBrainzClientVersion = '1.3.0';
+const kLastfmClientVersion = '1.3.0';
 
-/// Tamaño máximo documentado por listen (bytes de su JSON).
-const kMaxListenBytes = 10240;
-
-/// Un listen: una pista escuchada que se publica en ListenBrainz.
-/// Nunca contiene credenciales; se guarda tal cual en la cola de disco.
+/// Una escucha que se publica en Last.fm. Nunca contiene credenciales; se
+/// guarda tal cual en la cola de disco.
 class Listen {
   const Listen({
     required this.artist,
@@ -20,33 +15,27 @@ class Listen {
     required this.listenedAt,
     this.album,
     this.durationMs,
-    this.originUrl,
-    this.musicService,
   });
 
   final String artist, title;
 
   /// Inicio de la reproducción, Unix UTC en segundos.
   final int listenedAt;
-  final String? album, originUrl, musicService;
+  final String? album;
   final int? durationMs;
 
-  /// `playing_now` no lleva `listened_at`.
-  Map<String, Object?> toPayload({bool playingNow = false}) => {
-    if (!playingNow) 'listened_at': listenedAt,
-    'track_metadata': {
-      'artist_name': artist,
-      'track_name': title,
-      if (album != null) 'release_name': album,
-      'additional_info': {
-        'submission_client': 'Aurora',
-        'submission_client_version': kListenBrainzClientVersion,
-        if (musicService != null) 'music_service': musicService,
-        if (originUrl != null) 'origin_url': originUrl,
-        if (durationMs != null) 'duration_ms': durationMs,
-      },
-    },
-  };
+  /// Parámetros de `track.scrobble` (con sufijo `[index]`) o de
+  /// `track.updateNowPlaying` (sin índice ni marca de tiempo).
+  Map<String, String> toParams({int? index, bool playingNow = false}) {
+    String k(String n) => index == null ? n : '$n[$index]';
+    return {
+      k('artist'): artist,
+      k('track'): title,
+      if (!playingNow) k('timestamp'): '$listenedAt',
+      k('album'): ?album,
+      if (durationMs != null) k('duration'): '${durationMs! ~/ 1000}',
+    };
+  }
 
   Map<String, Object?> toJson() => {
     'artist': artist,
@@ -54,8 +43,6 @@ class Listen {
     'at': listenedAt,
     if (album != null) 'album': album,
     if (durationMs != null) 'ms': durationMs,
-    if (originUrl != null) 'url': originUrl,
-    if (musicService != null) 'svc': musicService,
   };
 
   /// `null` si el registro del disco no es válido.
@@ -64,19 +51,14 @@ class Listen {
     final artist = raw['artist'], title = raw['title'], at = raw['at'];
     if (artist is! String || title is! String || at is! int) return null;
     if (artist.trim().isEmpty || title.trim().isEmpty) return null;
-    String? str(String key) => raw[key] is String ? raw[key] as String : null;
     return Listen(
       artist: artist,
       title: title,
       listenedAt: at,
-      album: str('album'),
+      album: raw['album'] is String ? raw['album'] as String : null,
       durationMs: raw['ms'] is int ? raw['ms'] as int : null,
-      originUrl: str('url'),
-      musicService: str('svc'),
     );
   }
-
-  int get payloadBytes => utf8.encode(jsonEncode(toPayload())).length;
 }
 
 final _topic = RegExp(r'\s+-\s+topic\s*$', caseSensitive: false);
@@ -104,30 +86,20 @@ String? listenTitle(String raw) {
   return recsNormalizeTitle(title).isEmpty ? null : title;
 }
 
-/// Clave de identidad de «la misma canción» (para deduplicar).
-String listenIdentity(Track track) => recsTrackKey(track);
-
-/// Construye el listen de [track] o `null` si falta artista/título fiable o
-/// se pasa del tamaño máximo. [duration] manda sobre `track.duration`.
+/// Construye la escucha de [track] o `null` si falta artista/título fiable.
+/// [duration] manda sobre `track.duration`.
 Listen? buildListen(Track track, DateTime startedAt, {Duration? duration}) {
   final artist = listenArtist(track.artist), title = listenTitle(track.title);
   if (artist == null || title == null) return null;
   final length = (duration ?? Duration.zero) > Duration.zero
       ? duration!
       : track.duration;
-  final page = track.pageUrl == null ? null : Uri.tryParse(track.pageUrl!);
-  final web = page != null && page.hasScheme && page.scheme.startsWith('http');
-  final youtube =
-      web && (page.host.contains('youtube.') || page.host == 'youtu.be');
   final album = track.album?.trim();
-  final listen = Listen(
+  return Listen(
     artist: artist,
     title: title,
     listenedAt: startedAt.toUtc().millisecondsSinceEpoch ~/ 1000,
     album: album == null || album.isEmpty ? null : album,
     durationMs: length > Duration.zero ? length.inMilliseconds : null,
-    originUrl: web ? page.toString() : null,
-    musicService: youtube ? 'youtube.com' : null,
   );
-  return listen.payloadBytes > kMaxListenBytes ? null : listen;
 }

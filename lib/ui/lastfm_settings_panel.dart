@@ -1,25 +1,27 @@
 import 'package:flutter/material.dart';
 
-import '../listenbrainz/listenbrainz_service.dart';
-import '../listenbrainz/scrobbler.dart';
+import '../lastfm/lastfm_service.dart';
+import '../lastfm/scrobbler.dart';
 import '../theme/brasa_theme.dart';
 
-/// Ajustes de ListenBrainz: opcional, apagado por defecto. El token se pega en
-/// un campo oculto, se valida (solo se muestra el usuario) y se guarda en el
-/// almacenamiento seguro del sistema.
-class ListenBrainzSettingsPanel extends StatefulWidget {
-  const ListenBrainzSettingsPanel({super.key, required this.service});
-  final ListenBrainzService service;
+/// Ajustes de Last.fm: opcional, apagado por defecto. Cada usuario conecta su
+/// cuenta con usuario y contraseña; la contraseña solo se envía para obtener la
+/// sesión y no se guarda. La clave de sesión va al almacenamiento seguro.
+class LastfmSettingsPanel extends StatefulWidget {
+  const LastfmSettingsPanel({super.key, required this.service});
+  final LastfmService service;
   @override
-  State<ListenBrainzSettingsPanel> createState() => _State();
+  State<LastfmSettingsPanel> createState() => _State();
 }
 
-class _State extends State<ListenBrainzSettingsPanel> {
-  final _token = TextEditingController();
+class _State extends State<LastfmSettingsPanel> {
+  final _user = TextEditingController();
+  final _password = TextEditingController();
 
   @override
   void dispose() {
-    _token.dispose();
+    _user.dispose();
+    _password.dispose();
     super.dispose();
   }
 
@@ -40,10 +42,12 @@ class _State extends State<ListenBrainzSettingsPanel> {
     return d.inMinutes < 1 ? 'hace unos segundos' : 'hace ${d.inMinutes} min';
   }
 
-  Future<void> _validate() async {
-    final value = _token.text;
-    await widget.service.validateAndSave(value);
-    if (mounted && widget.service.hasToken) _token.clear();
+  Future<void> _connect() async {
+    final password = _password.text;
+    await widget.service.connect(_user.text, password);
+    if (!mounted) return;
+    _password.clear(); // la contraseña no se queda en pantalla
+    if (widget.service.hasSession) _user.clear();
   }
 
   @override
@@ -51,68 +55,73 @@ class _State extends State<ListenBrainzSettingsPanel> {
     listenable: widget.service,
     builder: (context, _) {
       final s = widget.service;
-      final working = s.status == LbStatus.working;
+      if (!s.configured) {
+        return const Text('Last.fm no está configurado en esta compilación.');
+      }
+      final working = s.status == LfmStatus.working;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
             'Privacidad: si lo activas, Aurora publica en tu perfil de '
-            'ListenBrainz lo que escuchas (artista, título, duración, hora de '
-            'inicio y el nombre «Aurora»). Por defecto esos historiales son '
-            'públicos en ListenBrainz salvo que lo cambies allí. También pide '
-            'a ListenBrainz recomendaciones y novedades para tu cuenta. Está '
-            'desactivado hasta que lo enciendas.',
+            'Last.fm lo que escuchas (artista, título, álbum, duración y hora '
+            'de inicio). Tu perfil de Last.fm puede ser público según lo que '
+            'hayas elegido allí. También pide a Last.fm canciones similares '
+            'para las recomendaciones. Tu contraseña solo se envía a Last.fm '
+            'para iniciar sesión y no se guarda. Está desactivado hasta que '
+            'lo enciendas.',
           ),
           if (s.secureUnavailable) ...[
             const SizedBox(height: 8),
             const Text(
-              'Este sistema no ofrece almacenamiento seguro para el token: '
-              'ListenBrainz no está disponible.',
+              'Este sistema no ofrece almacenamiento seguro para la sesión: '
+              'Last.fm no está disponible.',
             ),
           ],
           if (s.needsEnable) ...[
             const SizedBox(height: 8),
             const Text(
-              'Token guardado, pero el interruptor está apagado: no se envía '
+              'Cuenta conectada, pero el interruptor está apagado: no se envía '
               'ninguna escucha. Actívalo para empezar a publicar.',
-            ),
-          ],
-          if (s.scrobbler.authFailed) ...[
-            const SizedBox(height: 8),
-            const Text(
-              'Autenticación fallida: ListenBrainz rechazó el token. '
-              'Pulsa «Probar conexión» o cierra sesión y valida otro.',
             ),
           ],
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             activeTrackColor: isBrasa(context) ? Brasa.cream : null,
             activeThumbColor: isBrasa(context) ? Brasa.void_ : null,
-            title: const Text('Enviar mi historial a ListenBrainz'),
+            title: const Text('Enviar mi historial a Last.fm'),
             subtitle: Text(
-              s.hasToken
+              s.connected
                   ? 'Cuenta: ${s.username ?? '—'}. Al apagarlo se borra la cola pendiente.'
-                  : 'Valida tu token para poder activarlo.',
+                  : 'Conecta tu cuenta para poder activarlo.',
             ),
             value: s.enabled,
             onChanged: s.secureUnavailable || working
                 ? null
                 : (v) => s.setEnabled(v),
           ),
-          if (!s.hasToken) ...[
+          if (!s.hasSession) ...[
             TextField(
-              controller: _token,
+              controller: _user,
+              enabled: !s.secureUnavailable && !working,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'Usuario de Last.fm',
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _password,
               obscureText: true,
               enableSuggestions: false,
               autocorrect: false,
               enabled: !s.secureUnavailable && !working,
               decoration: const InputDecoration(
-                labelText: 'Token de usuario de ListenBrainz',
-                helperText:
-                    'Está en listenbrainz.org/settings. No se muestra ni se guarda en texto plano.',
-                helperMaxLines: 3,
+                labelText: 'Contraseña de Last.fm',
+                helperText: 'Solo se usa para iniciar sesión; no se guarda.',
+                helperMaxLines: 2,
               ),
-              onSubmitted: (_) => _validate(),
+              onSubmitted: (_) => _connect(),
             ),
             const SizedBox(height: 8),
           ],
@@ -120,23 +129,17 @@ class _State extends State<ListenBrainzSettingsPanel> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              if (!s.hasToken)
+              if (!s.hasSession)
                 FilledButton.icon(
-                  onPressed: s.secureUnavailable || working ? null : _validate,
-                  icon: const Icon(Icons.verified_outlined),
-                  label: Text(working ? 'Validando…' : 'Validar'),
+                  onPressed: s.secureUnavailable || working ? null : _connect,
+                  icon: const Icon(Icons.login),
+                  label: Text(working ? 'Conectando…' : 'Conectar'),
                 ),
-              if (s.hasToken)
-                OutlinedButton.icon(
-                  onPressed: working ? null : s.testConnection,
-                  icon: const Icon(Icons.wifi_tethering),
-                  label: const Text('Probar conexión'),
-                ),
-              if (s.hasToken || s.pending > 0)
+              if (s.hasSession || s.pending > 0)
                 OutlinedButton.icon(
                   onPressed: working ? null : s.signOut,
                   icon: const Icon(Icons.logout),
-                  label: const Text('Cerrar sesión y borrar token y cola'),
+                  label: const Text('Desconectar y borrar sesión y cola'),
                 ),
             ],
           ),

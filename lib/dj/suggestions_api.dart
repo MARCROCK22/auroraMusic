@@ -121,7 +121,7 @@ const defaultRecMix = <RecBucket, double>{
   RecBucket.adjacent: 0.30,
   RecBucket.discovery: 0.15,
   RecBucket.classics: 0.05,
-  RecBucket.listenbrainz: 0.08, // cuota pequeña: el perfil local manda
+  RecBucket.lastfm: 0.08, // cuota pequeña: el perfil local manda
   RecBucket.radio:
       0.20, // radio de YouTube del llamador: sin cuota se penalizaba
 };
@@ -653,7 +653,7 @@ class SuggestionsApi {
         RecBucket.discovery => 'Descubrimiento',
         RecBucket.classics => 'Un clásico imprescindible',
         RecBucket.radio => 'Radio de YouTube',
-        RecBucket.listenbrainz => 'Recomendado por ListenBrainz',
+        RecBucket.lastfm => 'Recomendado por Last.fm',
       };
     }
 
