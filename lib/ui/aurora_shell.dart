@@ -74,6 +74,10 @@ import 'artists_page.dart';
 import 'follow_widgets.dart';
 import '../follow/follow_providers.dart';
 import 'track_actions.dart';
+import 'friends_page.dart';
+import '../friends/friends_providers.dart';
+import '../friends/friends_service.dart';
+import 'undo_snackbar.dart';
 import '../audio/routed_music_audio.dart';
 import '../audio_web/web_music_audio.dart';
 import '../updater/update_controller.dart';
@@ -94,6 +98,7 @@ const _sections = [
   'Descargar vídeos',
   'Artistas',
   'Ecualizador',
+  'Amigos',
 ];
 const _icons = [
   Icons.home_outlined,
@@ -110,6 +115,7 @@ const _icons = [
   Icons.video_file_outlined,
   Icons.mic_none_rounded,
   Icons.equalizer,
+  Icons.people_outline,
 ];
 const _primarySections = [0, 1, 8, 2, 3];
 
@@ -231,6 +237,32 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     _audio.setVisualizationEnabled(false);
     _listenForJamLinks();
     _startFollow();
+    _friendsSub = ref
+        .read(friendsServiceProvider)
+        .notices
+        .listen(_friendsNotice);
+  }
+
+  StreamSubscription<FriendsNotice>? _friendsSub;
+
+  /// Solicitudes + canciones sin ver, para la insignia de «Amigos».
+  int get _friendsBadge {
+    final f = ref.watch(friendsServiceProvider);
+    return f.unseenCount + f.incoming.length;
+  }
+
+  void _friendsNotice(FriendsNotice n) {
+    if (!mounted) return;
+    showUndoSnackBar(
+      ScaffoldMessenger.maybeOf(context),
+      Text(
+        n.kind == FriendsNoticeKind.share
+            ? '${n.username} te envió una canción'
+            : '${n.username} quiere ser tu amigo',
+      ),
+      label: 'Ver',
+      onAction: () => _navigate(14),
+    );
   }
 
   /// Carga los artistas seguidos y busca novedades (como mucho cada ~12 h).
@@ -329,6 +361,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _friendsSub?.cancel();
     _desktop.dispose();
     WindowControls.onArguments = null;
     WindowControls.setCloseConfirmation(null);
@@ -854,6 +887,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         onPlaylist: (playlist) => _openLibrary(playlist: playlist),
         onCreatePlaylist: () => _createPlaylist(c),
         shortcuts: ref.watch(shortcutServiceProvider),
+        friendsBadge: _friendsBadge,
       );
     }
     final colors = Theme.of(context).colorScheme;
@@ -912,7 +946,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                 children: [
                   for (final i in _primarySections) _navItem(i, wide),
                   const Divider(indent: 20, endIndent: 20, height: 18),
-                  for (final i in [12, 10, 11, 9, 4, 5, 6, 13])
+                  for (final i in [12, 10, 11, 9, 14, 4, 5, 6, 13])
                     _navItem(i, wide),
                   if (wide && c.playlists.isNotEmpty) ...[
                     const Divider(indent: 20, endIndent: 20, height: 18),
@@ -967,14 +1001,20 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
                     : MainAxisAlignment.center,
                 children: [
                   const SizedBox(width: 12),
-                  Icon(
-                    _icons[index],
-                    size: 19,
-                    color: modern
-                        ? (active ? colors.onPrimary : colors.onSurfaceVariant)
-                        : active
-                        ? colors.primary
-                        : colors.onSurfaceVariant,
+                  Badge(
+                    isLabelVisible: index == 14 && _friendsBadge > 0,
+                    label: Text('$_friendsBadge'),
+                    child: Icon(
+                      _icons[index],
+                      size: 19,
+                      color: modern
+                          ? (active
+                                ? colors.onPrimary
+                                : colors.onSurfaceVariant)
+                          : active
+                          ? colors.primary
+                          : colors.onSurfaceVariant,
+                    ),
                   ),
                   if (wide) ...[
                     const SizedBox(width: 12),
@@ -1022,7 +1062,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
 
   /// Slush: estas secciones llevan su propio titular gigante (SlushPage).
   bool get _slushOwned =>
-      isSlush(context) && const [1, 2, 3, 7, 11, 12].contains(_section);
+      isSlush(context) && const [1, 2, 3, 7, 11, 12, 14].contains(_section);
 
   Widget _header(AppController c, bool rail) {
     if (rail && _slushOwned) return const SizedBox.shrink();
@@ -1086,6 +1126,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
         ],
       ),
       11 => (const Color(0xffa9d0ff), 'VÍDEOS', 'MP4', ['yt-dlp']),
+      14 => (Slush.mint, 'AMIGOS', 'HOLA', const <String>[]),
       12 => (
         Slush.yellow,
         'ARTISTAS',
@@ -1447,6 +1488,11 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
               if (query.isNotEmpty) _submitSearch(c, query);
             },
           ),
+        );
+      case 14:
+        return _slushPage(
+          c,
+          FriendsPage(controller: c, onSettings: () => _navigate(7)),
         );
       case 9:
       case 10:

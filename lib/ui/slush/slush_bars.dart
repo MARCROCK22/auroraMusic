@@ -18,6 +18,7 @@ const slushTabs = <(int, String)>[
   (3, 'DESCARGAS'),
   (8, 'DJ'),
   (9, 'JAM'),
+  (14, 'AMIGOS'),
 ];
 
 Widget _round(

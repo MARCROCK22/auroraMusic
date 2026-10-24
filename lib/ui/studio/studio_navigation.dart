@@ -385,7 +385,9 @@ class StudioSidebar extends StatelessWidget {
     required this.onPlaylist,
     this.onCreatePlaylist,
     this.shortcuts,
+    this.friendsBadge = 0,
   });
+  final int friendsBadge;
   final VoidCallback? onCreatePlaylist;
   final ShortcutService? shortcuts;
   final AppController controller;
@@ -549,6 +551,14 @@ class StudioSidebar extends StatelessWidget {
                   _nav(context, 9, 'Jam', 'Jam', StudioSymbols.groups, ''),
                   _nav(
                     context,
+                    14,
+                    'Amigos',
+                    'Amigos',
+                    Icons.people_outline,
+                    friendsBadge > 0 ? '$friendsBadge' : '',
+                  ),
+                  _nav(
+                    context,
                     5,
                     'Cola de reproducción',
                     'Cola de reproducción',
@@ -671,6 +681,12 @@ class StudioSidebar extends StatelessWidget {
       (4, 'Modo Vinilo', 'Modo Vinilo', StudioSymbols.album),
       (6, 'Letras', 'Letras', StudioSymbols.lyrics),
       (9, 'Jam', 'Jam', StudioSymbols.groups),
+      (
+        14,
+        friendsBadge > 0 ? 'Amigos ($friendsBadge)' : 'Amigos',
+        'Amigos',
+        Icons.people_outline,
+      ),
       (13, 'Ecualizador', 'Ecualizador', StudioSymbols.equalizer),
       (
         5,

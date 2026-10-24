@@ -32,6 +32,7 @@ class SlushMobileTopBar extends StatelessWidget {
     (12, Icons.mic_none_rounded, 'Artistas'),
     (11, Icons.video_file_outlined, 'Descargar vídeos'),
     (9, Icons.groups_outlined, 'Jam'),
+    (14, Icons.people_outline, 'Amigos'),
     (4, Icons.album_outlined, 'Modo Vinilo'),
     (5, Icons.queue_music, 'Cola de reproducción'),
     (6, Icons.lyrics_outlined, 'Letras'),
