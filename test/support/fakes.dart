@@ -201,7 +201,11 @@ Future<AppController> createTestController({
   Map<String, Object> preferences = const {},
 }) async {
   // Los tests de cola exacta no quieren pistas sugeridas; auto_refill las pide.
-  SharedPreferences.setMockInitialValues({'autoRefill': false, ...preferences});
+  SharedPreferences.setMockInitialValues({
+    'autoRefill': false,
+    'themeKind': 'atelier',
+    ...preferences,
+  });
   final prefs = await SharedPreferences.getInstance();
   final directory = await Directory.systemTemp.createTemp('aurora_test_');
   final database = LibraryDatabase(NativeDatabase.memory());
