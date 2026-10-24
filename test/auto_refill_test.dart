@@ -1,5 +1,6 @@
 import 'package:aurora_music/app_controller.dart';
 import 'package:aurora_music/core/models.dart';
+import 'package:aurora_music/dj/suggestions_api.dart';
 import 'package:aurora_music/core/queue_policy.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'support/fakes.dart';
@@ -71,12 +72,38 @@ void main() {
     expect(app.queue.length, 1);
   });
 
-  test('shuffle no rellena', () async {
+  // La cola nunca termina: con shuffle una pista suelta también se continúa.
+  test('shuffle con una sola pista: se rellena y continúa', () async {
     final app = await make();
     app.setShuffle(true);
     await app.playTrack(library[0], context: [library[0]]);
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    expect(app.queue.length, 1);
+    await eventually(() => app.queue.length >= 1 + kQueueLookahead);
+    final before = app.queue.length;
+    audio.position = audio.duration;
+    audio.completions.add(null);
+    await eventually(() => app.currentTrack?.id != library[0].id);
+    expect(app.queue.length, greaterThanOrEqualTo(before));
+  });
+
+  test('pista de búsqueda (replaceQueue false) continúa al terminar', () async {
+    final app = await make();
+    await app.playTrack(library[0], replaceQueue: false);
+    await eventually(() => app.queue.length >= 1 + kQueueLookahead);
+    audio.position = audio.duration;
+    audio.completions.add(null);
+    await eventually(() => app.currentTrack?.id != library[0].id);
+  });
+
+  test('motor caído: sigue con la biblioteca', () async {
+    final app = await make();
+    app.suggestionsApi = SuggestionsApi(
+      fetchCandidates: (_) async => throw 'offline',
+    );
+    await app.playTrack(library[0], context: [library[0]]);
+    await eventually(() => app.queue.length > 1);
+    audio.position = audio.duration;
+    audio.completions.add(null);
+    await eventually(() => app.currentTrack?.id != library[0].id);
   });
 
   test('ajuste apagado no rellena', () async {
