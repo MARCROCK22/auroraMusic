@@ -124,14 +124,7 @@ Si Windows impide crear los enlaces de plugins, ejecuta `./scripts/prepare_windo
 
 ### Linux
 
-Ubuntu 22.04+ o equivalente. Compilar:
-
-```bash
-sudo apt-get install clang cmake ninja-build pkg-config lld libgtk-3-dev liblzma-dev libstdc++-12-dev libsecret-1-dev libjsoncpp-dev libasound2-dev libopus-dev libogg-dev
-flutter build linux --release
-```
-
-El paquete queda en `build/linux/x64/release/bundle` (el release lo publica como `Aurora-<versión>-linux-x64.tar.gz`; se extrae y se abre `aurora_music`). Para reproducir YouTube y formatos que no sean mp3/wav/ogg/flac hace falta `ffmpeg` en el `PATH`; las descargas usan `yt-dlp`, `ffmpeg` y `ffprobe` del sistema (p. ej. `apt install yt-dlp ffmpeg`) o la carpeta de Ajustes. Sin el reproductor oficial en WebView (respaldo solo de Windows), sin controles multimedia del sistema (MPRIS), bandeja, inicio automático, enlaces `aurora://` ni actualizador integrado. Las sesiones se guardan con libsecret (requiere un llavero, p. ej. GNOME Keyring).
+Instalación, compilación, requisitos y diferencias con Windows: [docs/LINUX.md](docs/LINUX.md).
 
 ### Herramientas Windows
 
