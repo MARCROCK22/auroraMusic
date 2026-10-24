@@ -459,6 +459,14 @@ void main() {
         JamSupabaseConfig.validate('https://x.supabase.co', 'sb_secret_x'),
         isNotNull,
       );
+      // Coma pegada al copiar la URL: el host no resuelve.
+      expect(
+        JamSupabaseConfig.validate(
+          'https://x.supabase.co,',
+          'sb_publishable_x',
+        ),
+        isNotNull,
+      );
       expect(
         JamSupabaseConfig.validate(
           'https://x.supabase.co',

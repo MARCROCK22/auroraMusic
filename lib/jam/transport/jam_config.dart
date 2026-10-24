@@ -33,7 +33,7 @@ class JamSupabaseConfig {
     final uri = Uri.tryParse(url);
     if (uri == null ||
         uri.scheme != 'https' ||
-        uri.host.isEmpty ||
+        !RegExp(r'^[a-z0-9.-]+$').hasMatch(uri.host) ||
         uri.userInfo.isNotEmpty ||
         uri.hasQuery ||
         uri.hasFragment) {

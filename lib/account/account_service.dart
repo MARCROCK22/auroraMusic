@@ -90,6 +90,8 @@ AccountException mapAccountError(Object e) {
   if (text.contains('socket') ||
       text.contains('clientexception') ||
       text.contains('failed host lookup') ||
+      text.contains('host lookup') ||
+      text.contains('getaddrinfo') ||
       text.contains('connection')) {
     return const AccountException(
       'Sin conexión. Revisa tu red e inténtalo de nuevo.',

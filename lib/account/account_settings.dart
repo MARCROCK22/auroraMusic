@@ -188,7 +188,8 @@ class _AccountSettingsState extends State<AccountSettings> {
           autocorrect: false,
           decoration: const InputDecoration(labelText: 'Correo'),
         ),
-        if (_creating)
+        const SizedBox(height: 12),
+        if (_creating) ...[
           TextField(
             key: const ValueKey('account-username'),
             controller: _username,
@@ -199,6 +200,8 @@ class _AccountSettingsState extends State<AccountSettings> {
               helperText: 'Minúsculas, números, _ y .',
             ),
           ),
+          const SizedBox(height: 12),
+        ],
         TextField(
           key: const ValueKey('account-password'),
           controller: _password,
