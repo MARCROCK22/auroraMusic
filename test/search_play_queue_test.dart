@@ -25,13 +25,15 @@ void main() {
 
   List<String> ids(AppController c) => c.queue.map((x) => x.id).toList();
 
-  test('search result plays alone and keeps the queue ahead', () async {
+  test('search result drops the old playlist but keeps manual queue', () async {
     final c = await start();
     await c.playNext(all[3]);
     final results = [all[4], all[5], _t('x')];
     await c.playTrack(results[0], context: results, replaceQueue: false);
     expect(c.currentTrack?.id, 'e');
-    expect(ids(c).take(5), ['a', 'e', 'd', 'b', 'c']);
+    expect(ids(c).take(3), ['a', 'e', 'd']);
+    expect(ids(c).contains('b'), isFalse);
+    expect(ids(c).contains('c'), isFalse);
     expect(ids(c).contains('f'), isFalse);
     expect(ids(c).contains('x'), isFalse);
   });
@@ -41,7 +43,7 @@ void main() {
     await c.playTrack(all[2], replaceQueue: false);
     expect(c.currentTrack?.id, 'c');
     expect(ids(c).where((id) => id == 'c'), hasLength(1));
-    expect(ids(c).take(3), ['a', 'c', 'b']);
+    expect(ids(c).take(2), ['a', 'c']);
   });
 
   test('empty queue starts from the tapped seed only', () async {

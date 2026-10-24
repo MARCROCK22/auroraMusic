@@ -1901,14 +1901,18 @@ class AppController extends ChangeNotifier {
     if (_routeToYouTubeMusic(selected)) return;
     final seen = <String>{};
     if (!replaceQueue) {
-      // Lo sonado y lo que viene se quedan; solo se quita la pista tocada de
-      // delante. El relleno de _playCurrent completa si faltan.
+      // Lo sonado se queda; de lo que viene solo sigue lo puesto a mano (o la
+      // cola del DJ): el resto de la playlist/radio anterior se descarta para
+      // no volver a ella. El relleno de _playCurrent completa si faltan.
       final head = queueIndex >= 0 && queueIndex < queue.length
           ? queueIndex + 1
           : 0;
       final ahead = [
         for (final t in queue.skip(head))
-          if (t.id != selected.id && !recommendationTracksMatch(t, selected)) t,
+          if (t.id != selected.id &&
+              !recommendationTracksMatch(t, selected) &&
+              (_personalDjActive || manualQueuedIds.contains(t.id)))
+            t,
       ];
       queue = [...queue.take(head), selected, ...ahead];
       queueIndex = head;
