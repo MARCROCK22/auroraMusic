@@ -337,7 +337,7 @@ class AppController extends ChangeNotifier {
         try {
           final related = await src
               .related(id)
-              .timeout(const Duration(seconds: 6));
+              .timeout(const Duration(seconds: 4));
           for (var i = 0; i < related.length; i++) {
             extra.add(
               DjCandidate(
@@ -394,7 +394,9 @@ class AppController extends ChangeNotifier {
   int _engineFailures = 0;
   DateTime? _engineRetryAt;
 
-  /// Tiempo máximo que se espera al motor antes de seguir con lo local.
+  /// Tiempo máximo que se espera al motor antes de seguir con lo local. Por
+  /// encima de `SuggestionsApi.budget` (9 s): el motor corta sus fuentes a
+  /// tiempo y devuelve lo reunido; esto solo salta si se cuelga del todo.
   Duration refillEngineTimeout = const Duration(seconds: 12);
 
   /// Sustituye el motor de sugerencias (pruebas).
@@ -2151,7 +2153,9 @@ class AppController extends ChangeNotifier {
         _adoptWebTrackMetadata();
         _notify();
         // Con menos de $kQueueLookahead por delante se deja lista la continuación (DJ y red).
-        if (_loadedTrackId == track.id && audio.isPlaying) {
+        // _playIntent, no audio.isPlaying: en Android/web ese estado llega
+        // después por evento y el relleno se saltaba hasta el final.
+        if (_loadedTrackId == track.id && _playIntent) {
           unawaited(_topUpQueue());
         }
       }
@@ -2395,20 +2399,24 @@ class AppController extends ChangeNotifier {
     if (_jamPlaybackActive) return;
     if (_youtubeMusicActive) return;
     if (queue.isEmpty) return;
-    if (!fromCompletion &&
-        _loadedTrackId == currentTrack?.id &&
-        djIsSkip(audio.position, audio.duration)) {
-      _recordDjSignal(DjSignal.skip);
-    }
+    final heard = _loadedTrackId == currentTrack?.id;
+    final skipped =
+        !fromCompletion && (!heard || djIsSkip(audio.position, audio.duration));
+    if (skipped && heard) _recordDjSignal(DjSignal.skip);
     _playIntent = true;
     final pendingNext =
         _playNextCount > 0 && _playNextAnchorId == currentTrack?.id
         ? queueIndex + 1
         : null;
     if (shuffle && queue.length > 1) {
+      // Aleatorio: saltar (Siguiente antes de djIsSkip: <30 s o <30 % de la
+      // pista, o sin haber cargado) no cuenta como oída; sigue en la cola y
+      // puede volver a salir en esta vuelta, pero nunca justo a continuación.
+      if (skipped) _shufflePlayed.remove(queueIndex);
       List<int> unplayed() => List.generate(queue.length, (i) => i)
           .where(
             (i) =>
+                i != queueIndex &&
                 !_shufflePlayed.contains(i) &&
                 (!(usesOfficialYouTubeMusic || usesYouTubeWebAudio) ||
                     isNativePlayable(queue[i])),
@@ -2505,6 +2513,7 @@ class AppController extends ChangeNotifier {
     _playIntent = true;
     if (shuffle && _shuffleHistory.isNotEmpty) {
       queueIndex = _shuffleHistory.removeLast();
+      _shufflePlayed.add(queueIndex);
     } else {
       final previous = [for (var i = queueIndex - 1; i >= 0; i--) i]
           .where(

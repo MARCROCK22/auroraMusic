@@ -197,7 +197,7 @@ Future<AppController> createTestController({
   List<Track> tracks = const [],
   List<MusicPlaylist> playlists = const [],
   AudioBackend? audio,
-  FakeSource? source,
+  SourceBackend? source,
   Map<String, Object> preferences = const {},
 }) async {
   // Los tests de cola exacta no quieren pistas sugeridas; auto_refill las pide.
