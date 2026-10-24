@@ -37,7 +37,7 @@ Detalles y límites: [docs/youtube_music_audio_engine.md](docs/youtube_music_aud
 - **Cuenta Aurora** (Supabase, gratis): correo, contraseña y nombre de usuario, foto de perfil (genérica hasta que subas una; la anterior se borra del almacenamiento). Sincroniza me gusta, playlists, historial y perfil de gustos del DJ entre dispositivos.
 - **Amigos**: solicitudes por nombre de usuario; envía canciones y playlists o invita a tu Jam en línea. Llegan a una bandeja en tiempo real con aviso en la app.
 - **Last.fm**: cada usuario conecta su cuenta para registrar lo que escucha (scrobbling), ver sus estadísticas en Perfil y alimentar el DJ. La contraseña solo se usa para iniciar sesión y no se guarda.
-- **Discord y Duvet**: muestran «Escuchando Aurora Music» con canción, artista, tiempo y portada (Windows); en una Jam indica que escuchas en grupo.
+- **Discord y Duvet**: muestran «Escuchando Aurora Music» con canción, artista, tiempo y portada (Windows y Linux); en una Jam indica que escuchas en grupo.
 
 Spotify aporta descripciones y portadas; el audio proviene de archivos locales y
 YouTube. El DJ usa señales locales y filtros persistentes por artista, canción y

@@ -4,7 +4,7 @@ import '../dj/reco_memory.dart';
 
 /// Versión del cliente (User-Agent).
 // shortcut: versión fija como en LyricsService; actualizar al subir de versión.
-const kLastfmClientVersion = '1.3.0';
+const kLastfmClientVersion = '1.4.0';
 
 /// Una escucha que se publica en Last.fm. Nunca contiene credenciales; se
 /// guarda tal cual en la cola de disco.
