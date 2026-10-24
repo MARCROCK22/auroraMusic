@@ -10,8 +10,29 @@ import '../core/models.dart';
 
 const discordClientId = String.fromEnvironment('AURORA_DISCORD_CLIENT_ID');
 
-/// Rich Presence solo existe en Windows y con un client id compilado.
-bool get discordAvailable => Platform.isWindows && discordClientId.isNotEmpty;
+/// Rich Presence: Windows (tubería) y Linux (socket Unix), con client id.
+bool get discordAvailable => _desktop && discordClientId.isNotEmpty;
+
+bool get _desktop => Platform.isWindows || Platform.isLinux;
+
+/// Sockets IPC de Discord en Linux: `discord-ipc-N` en el directorio de
+/// ejecución o temporal, también dentro de Flatpak y Snap.
+List<String> discordSocketPaths(Map<String, String> environment) => [
+  for (final directory in {
+    environment['XDG_RUNTIME_DIR'],
+    environment['TMPDIR'],
+    environment['TMP'],
+    environment['TEMP'],
+    '/tmp',
+  })
+    if (directory != null && directory.isNotEmpty)
+      for (final sandbox in const [
+        '',
+        'app/com.discordapp.Discord/',
+        'snap.discord/',
+      ])
+        for (var i = 0; i < 10; i++) '$directory/${sandbox}discord-ipc-$i',
+];
 
 /// Trama IPC de Discord: int32le opcode + int32le longitud + JSON utf8.
 Uint8List encodeDiscordFrame(int opcode, Map<String, Object?> payload) {
@@ -171,7 +192,7 @@ class DiscordPresence {
   }
 
   void _send(Map<String, Object?> command) {
-    if (clientId.isEmpty || !Platform.isWindows) return;
+    if (clientId.isEmpty || !_desktop) return;
     try {
       final json = jsonEncode(command);
       final port = _port;
@@ -199,10 +220,10 @@ class DiscordPresence {
           status = message;
         }
       });
-      _isolate = await Isolate.spawn(_presenceWorker, (
-        inbox.sendPort,
-        clientId,
-      ));
+      final void Function((SendPort, String)) worker = Platform.isWindows
+          ? _presenceWorker
+          : _presenceWorkerUnix;
+      _isolate = await Isolate.spawn(worker, (inbox.sendPort, clientId));
     } catch (_) {
       _spawning = false;
     }
@@ -302,6 +323,117 @@ void _presenceWorker((SendPort, String) args) {
       drop();
       toMain.send('reconectando');
       timer = Timer(const Duration(seconds: 30), flush);
+    }
+  }
+
+  inbox.listen((message) {
+    if (message is! String) return;
+    latest = message; // solo importa la última
+    dirty = true;
+    timer?.cancel();
+    timer = Timer(const Duration(milliseconds: 50), flush);
+  });
+}
+
+/// Worker de Linux: lo mismo que [_presenceWorker] sobre un socket Unix, que en
+/// dart:io solo es asíncrono.
+Future<void> _presenceWorkerUnix((SendPort, String) args) async {
+  final (toMain, clientId) = args;
+  final inbox = ReceivePort();
+  toMain.send(inbox.sendPort);
+  Socket? socket;
+  final buffer = <int>[];
+  Completer<({int opcode, Map<String, dynamic> payload})>? reply;
+  String? latest;
+  var dirty = false;
+  var busy = false;
+  Timer? timer;
+
+  void drop() {
+    socket?.destroy();
+    socket = null;
+    buffer.clear();
+    final waiting = reply;
+    reply = null;
+    if (waiting != null && !waiting.isCompleted) {
+      waiting.completeError(const SocketException('closed'));
+    }
+  }
+
+  void received(List<int> data) {
+    buffer.addAll(data);
+    try {
+      for (
+        var frame = decodeDiscordFrame(buffer);
+        frame != null;
+        frame = decodeDiscordFrame(buffer)
+      ) {
+        buffer.removeRange(0, frame.length);
+        final waiting = reply;
+        reply = null;
+        waiting?.complete((opcode: frame.opcode, payload: frame.payload));
+      }
+    } on FormatException {
+      drop();
+    }
+  }
+
+  Future<({int opcode, Map<String, dynamic> payload})> next() {
+    final waiting = reply = Completer();
+    return waiting.future.timeout(const Duration(seconds: 10));
+  }
+
+  Future<bool> connect() async {
+    for (final path in discordSocketPaths(Platform.environment)) {
+      if (FileSystemEntity.typeSync(path) !=
+          FileSystemEntityType.unixDomainSock) {
+        continue;
+      }
+      try {
+        final candidate = await Socket.connect(
+          InternetAddress(path, type: InternetAddressType.unix),
+          0,
+        );
+        socket = candidate;
+        candidate.listen(received, onError: (_) => drop(), onDone: drop);
+        candidate.add(encodeDiscordFrame(0, {'v': 1, 'client_id': clientId}));
+        if ((await next()).payload['evt'] == 'READY') return true;
+      } catch (_) {}
+      drop();
+    }
+    toMain.send('sin Discord');
+    return false;
+  }
+
+  Future<void> flush() async {
+    timer = null;
+    if (busy || latest == null || !dirty) return;
+    busy = true;
+    try {
+      if (socket == null && !await connect()) {
+        timer = Timer(const Duration(seconds: 30), flush);
+        return;
+      }
+      dirty = false;
+      socket!.add(
+        encodeDiscordFrame(1, jsonDecode(latest!) as Map<String, Object?>),
+      );
+      final answer = await next();
+      if (answer.opcode == 2) throw const FormatException('closed');
+      toMain.send(
+        answer.payload['evt'] == 'ERROR'
+            ? 'error: ${answer.payload['data']}'
+            : 'ok',
+      );
+    } catch (_) {
+      dirty = true;
+      drop();
+      toMain.send('reconectando');
+      timer = Timer(const Duration(seconds: 30), flush);
+    } finally {
+      busy = false;
+      // Llegó otra actividad mientras se enviaba esta.
+      if (dirty && timer == null) timer = Timer(Duration.zero, flush);
     }
   }
 

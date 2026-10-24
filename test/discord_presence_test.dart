@@ -101,4 +101,17 @@ void main() {
       false,
     );
   });
+
+  test('Linux: sockets discord-ipc-N, también en Flatpak y Snap', () {
+    final paths = discordSocketPaths({'XDG_RUNTIME_DIR': '/run/user/1000'});
+    expect(paths.first, '/run/user/1000/discord-ipc-0');
+    expect(paths, contains('/run/user/1000/discord-ipc-9'));
+    expect(
+      paths,
+      contains('/run/user/1000/app/com.discordapp.Discord/discord-ipc-0'),
+    );
+    expect(paths, contains('/run/user/1000/snap.discord/discord-ipc-0'));
+    expect(paths, contains('/tmp/discord-ipc-0'));
+    expect(paths.toSet(), hasLength(paths.length));
+  });
 }

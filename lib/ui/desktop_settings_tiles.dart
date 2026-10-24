@@ -5,8 +5,8 @@ import '../core/duvet_presence.dart';
 import '../core/window_controls.dart';
 import '../theme/brasa_theme.dart';
 
-/// Ajustes de ventana de Windows: comportamiento de la X, inicio con Windows y
-/// lo que escuchas en Duvet.
+/// Ajustes de escritorio: comportamiento de la X e inicio con Windows (solo
+/// Windows) y lo que escuchas en Duvet (Windows y Linux).
 class DesktopSettingsTiles extends StatefulWidget {
   const DesktopSettingsTiles({
     super.key,
@@ -36,33 +36,36 @@ class _DesktopSettingsTilesState extends State<DesktopSettingsTiles> {
   @override
   Widget build(BuildContext context) => Column(
     children: [
-      SwitchListTile(
-        contentPadding: EdgeInsets.zero,
-        activeTrackColor: isBrasa(context) ? Brasa.cream : null,
-        activeThumbColor: isBrasa(context) ? Brasa.void_ : null,
-        title: const Text('Al cerrar con X: minimizar a la bandeja'),
-        subtitle: Text(
-          _tray
-              ? 'La X siempre oculta Aurora en la bandeja (suene o no la música). Alt+F4 y «Salir» de la bandeja siempre cierran.'
-              : 'La X cierra Aurora. Alt+F4 siempre cierra.',
+      // Bandeja e inicio son del ejecutable de Windows; Duvet, también Linux.
+      if (WindowControls.supported) ...[
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          activeTrackColor: isBrasa(context) ? Brasa.cream : null,
+          activeThumbColor: isBrasa(context) ? Brasa.void_ : null,
+          title: const Text('Al cerrar con X: minimizar a la bandeja'),
+          subtitle: Text(
+            _tray
+                ? 'La X siempre oculta Aurora en la bandeja (suene o no la música). Alt+F4 y «Salir» de la bandeja siempre cierran.'
+                : 'La X cierra Aurora. Alt+F4 siempre cierra.',
+          ),
+          value: _tray,
+          onChanged: (v) {
+            setState(() => _tray = v);
+            widget.shell.setCloseToTray(v);
+          },
         ),
-        value: _tray,
-        onChanged: (v) {
-          setState(() => _tray = v);
-          widget.shell.setCloseToTray(v);
-        },
-      ),
-      SwitchListTile(
-        contentPadding: EdgeInsets.zero,
-        activeTrackColor: isBrasa(context) ? Brasa.cream : null,
-        activeThumbColor: isBrasa(context) ? Brasa.void_ : null,
-        title: const Text('Iniciar con Windows'),
-        value: _autostart,
-        onChanged: (v) async {
-          final ok = await WindowControls.invoke('setAutostart', v);
-          if (ok && mounted) setState(() => _autostart = v);
-        },
-      ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          activeTrackColor: isBrasa(context) ? Brasa.cream : null,
+          activeThumbColor: isBrasa(context) ? Brasa.void_ : null,
+          title: const Text('Iniciar con Windows'),
+          value: _autostart,
+          onChanged: (v) async {
+            final ok = await WindowControls.invoke('setAutostart', v);
+            if (ok && mounted) setState(() => _autostart = v);
+          },
+        ),
+      ],
       SwitchListTile(
         contentPadding: EdgeInsets.zero,
         activeTrackColor: isBrasa(context) ? Brasa.cream : null,

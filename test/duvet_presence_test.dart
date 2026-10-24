@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:aurora_music/core/duvet_presence.dart';
 import 'package:aurora_music/core/models.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -102,5 +106,51 @@ void main() {
       await controller.seek(const Duration(minutes: 2));
       expect(pipe.sent, hasLength(3), reason: 'apagado no envía nada');
     },
+  );
+
+  test('transporte: tubería en Windows, socket Unix en Linux', () {
+    final windows = duvetTransport(windows: true);
+    expect(windows, isA<DuvetPipe>());
+    expect(windows, isNot(isA<DuvetSocket>()));
+    final linux = duvetTransport(
+      windows: false,
+      environment: {'XDG_RUNTIME_DIR': '/run/user/1000', 'TMPDIR': '/tmp'},
+    );
+    expect(linux, isA<DuvetSocket>());
+    expect((linux as DuvetSocket).paths, [
+      '/run/user/1000/duvet-ipc',
+      '/tmp/duvet-ipc',
+    ]);
+  });
+
+  test(
+    'socket Unix: conecta, envía un JSON por línea y cerrar corta',
+    () async {
+      final dir = await Directory.systemTemp.createTemp('duvet');
+      addTearDown(() => dir.delete(recursive: true));
+      final path = '${dir.path}/duvet-ipc';
+      final server = await ServerSocket.bind(
+        InternetAddress(path, type: InternetAddressType.unix),
+        0,
+      );
+      addTearDown(server.close);
+      final lines = StreamController<String>();
+      final closed = Completer<void>();
+      server.listen(
+        (client) => client
+            .cast<List<int>>()
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .listen(lines.add, onDone: closed.complete),
+      );
+
+      final socket = DuvetSocket(['${dir.path}/falta', path]);
+      expect(socket.send({'type': 'SET_ACTIVITY'}), isFalse);
+      final first = await lines.stream.first;
+      expect(jsonDecode(first), {'type': 'SET_ACTIVITY'});
+      socket.close();
+      await closed.future.timeout(const Duration(seconds: 5));
+    },
+    skip: Platform.isLinux ? false : 'Solo Linux',
   );
 }

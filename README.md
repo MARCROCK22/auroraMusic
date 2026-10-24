@@ -1,6 +1,6 @@
 # Aurora
 
-Reproductor de música en Flutter y Dart para **Windows x64 y Android 7+**. Interfaz en español, biblioteca local y búsqueda de YouTube Music mediante InnerTube, con reproducción nativa de solo audio (versión 1.1.0). yt-dlp queda como respaldo de resolución y para descargas explícitas.
+Reproductor de música en Flutter y Dart para **Windows x64, Linux x64 y Android 7+**. Interfaz en español, biblioteca local y búsqueda de YouTube Music mediante InnerTube, con reproducción nativa de solo audio (versión 1.1.0). yt-dlp queda como respaldo de resolución y para descargas explícitas.
 
 ## Motor de audio
 
@@ -122,6 +122,17 @@ flutter run -d <device-id> --no-pub
 
 Si Windows impide crear los enlaces de plugins, ejecuta `./scripts/prepare_windows_plugins.ps1` después de `flutter pub get`. El script crea junctions dentro del proyecto, sin cambiar opciones del sistema.
 
+### Linux
+
+Ubuntu 22.04+ o equivalente. Compilar:
+
+```bash
+sudo apt-get install clang cmake ninja-build pkg-config lld libgtk-3-dev liblzma-dev libstdc++-12-dev libsecret-1-dev libjsoncpp-dev libasound2-dev libopus-dev libogg-dev
+flutter build linux --release
+```
+
+El paquete queda en `build/linux/x64/release/bundle` (el release lo publica como `Aurora-<versión>-linux-x64.tar.gz`; se extrae y se abre `aurora_music`). Para reproducir YouTube y formatos que no sean mp3/wav/ogg/flac hace falta `ffmpeg` en el `PATH`; las descargas usan `yt-dlp`, `ffmpeg` y `ffprobe` del sistema (p. ej. `apt install yt-dlp ffmpeg`) o la carpeta de Ajustes. Sin el reproductor oficial en WebView (respaldo solo de Windows), sin controles multimedia del sistema (MPRIS), bandeja, inicio automático, enlaces `aurora://` ni actualizador integrado. Las sesiones se guardan con libsecret (requiere un llavero, p. ej. GNOME Keyring).
+
 ### Herramientas Windows
 
 `flutter run -d windows` y `flutter build windows` preparan automáticamente las herramientas durante la compilación: descargan las versiones fijadas si faltan, verifican sus hashes y las copian a `tools/` junto al ejecutable. Aurora las detecta sin configurar carpetas. La primera compilación necesita acceso a Internet; las siguientes reutilizan las herramientas verificadas.
@@ -216,6 +227,6 @@ Consulta [docs/VALIDATION.md](docs/VALIDATION.md) para pruebas reproducibles, re
 
 1. Sube `version:` en `pubspec.yaml` (p. ej. `1.2.0+10`) y haz commit en `main`.
 2. Crea y empuja la etiqueta: `git tag v1.2.0 && git push origin v1.2.0` (`v1.2.0-beta.1` publica una pre-release, solo visible en el «Canal beta»).
-3. `.github/workflows/release.yml` compila Windows (`Aurora-Setup-1.2.0.exe`, Inno Setup con `installer/aurora.iss`) y Android (`Aurora-1.2.0.apk`, ARM64 firmado), genera `checksums.txt` (SHA-256) y crea el release con notas automáticas. Edita las notas en GitHub si quieres; la app las muestra.
+3. `.github/workflows/release.yml` compila Windows (`Aurora-Setup-1.2.0.exe`, Inno Setup con `installer/aurora.iss`), Android (`Aurora-1.2.0.apk`, ARM64 firmado) y Linux (`Aurora-1.2.0-linux-x64.tar.gz`), genera `checksums.txt` (SHA-256) y crea el release con notas automáticas. Edita las notas en GitHub si quieres; la app las muestra.
 4. Secretos del repositorio requeridos: `ANDROID_KEYSTORE_BASE64`, `ANDROID_STORE_PASSWORD`, `ANDROID_KEY_PASSWORD`, `ANDROID_KEY_ALIAS`. Para cuentas, Jam en línea, Last.fm y Discord: `AURORA_SUPABASE_URL`, `AURORA_SUPABASE_ANON_KEY` (solo la clave anónima), `AURORA_LASTFM_API_KEY`, `AURORA_LASTFM_SECRET` y `AURORA_DISCORD_CLIENT_ID`; sin ellos esas funciones aparecen como «no configurado». En local se pasan con `--dart-define-from-file` desde un `.env` que Git ignora. El SQL de Supabase está en `docs/jam_supabase.sql`, `docs/accounts_supabase.sql`, `docs/friends_supabase.sql` y `docs/friends_share_kinds.sql`. **El APK debe firmarse siempre con la misma keystore**; si cambia, Android rechaza la actualización.
 5. La app consulta `releases/latest` de `kaz-py/auroraMusic` (sin token, con ETag) al iniciar, como máximo cada 6 h, y desde Ajustes → Actualizaciones. Nunca instala un archivo cuyo SHA-256 no coincida con `checksums.txt`.

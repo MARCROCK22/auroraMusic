@@ -204,7 +204,8 @@ class AppController extends ChangeNotifier {
   String get downloadsDirectoryPath =>
       preferences.getString('downloadsDirectory') ??
       p.join(supportDirectory.path, 'downloads');
-  bool get canConfigureDownloadDirectory => Platform.isWindows;
+  bool get canConfigureDownloadDirectory =>
+      Platform.isWindows || Platform.isLinux;
   bool get hasYouTubeSession => source.cookieFile != null;
   String? error;
   String? diagnostics;
@@ -1377,7 +1378,7 @@ class AppController extends ChangeNotifier {
       shuffle = preferences.getBool('shuffle') ?? false;
       autoRefill = preferences.getBool('autoRefill') ?? true;
       final directory = preferences.getString('toolDirectory');
-      if (directory != null && Platform.isWindows) {
+      if (directory != null && canConfigureDownloadDirectory) {
         try {
           await source.configureToolDirectory(directory);
         } catch (_) {
@@ -1419,7 +1420,8 @@ class AppController extends ChangeNotifier {
           };
           unawaited(task.catchError(_report));
         });
-      } else if (mediaControls && _controls == null) {
+      } else if (mediaControls && !Platform.isLinux && _controls == null) {
+        // (audio_service no tiene implementación para Linux.)
         try {
           _controls = MediaControls(
             audio: audio,
@@ -3601,7 +3603,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> openDownloadDirectory() async {
-    if (!Platform.isWindows) {
+    if (!canConfigureDownloadDirectory) {
       _report(
         UnsupportedError(
           'Abrir la carpeta de descargas no está disponible en Android.',
@@ -3612,9 +3614,11 @@ class AppController extends ChangeNotifier {
     try {
       final root = p.normalize(p.absolute(downloadsDirectoryPath));
       await Directory(root).create(recursive: true);
-      await Process.start('explorer.exe', [
-        root,
-      ], mode: ProcessStartMode.detached);
+      await Process.start(
+        Platform.isWindows ? 'explorer.exe' : 'xdg-open',
+        [root],
+        mode: ProcessStartMode.detached,
+      );
     } catch (exception) {
       _report(exception);
     }
@@ -3923,14 +3927,15 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> configureTools() async {
-    if (!Platform.isWindows) {
+    if (!canConfigureDownloadDirectory) {
       await runDiagnostics();
       return;
     }
     try {
       final directory = await FilePicker.getDirectoryPath(
-        dialogTitle:
-            'Carpeta con yt-dlp.exe, ffmpeg.exe, ffprobe.exe y deno.exe',
+        dialogTitle: Platform.isWindows
+            ? 'Carpeta con yt-dlp.exe, ffmpeg.exe, ffprobe.exe y deno.exe'
+            : 'Carpeta con yt-dlp, ffmpeg y ffprobe',
       );
       if (directory == null) return;
       await source.configureToolDirectory(directory);

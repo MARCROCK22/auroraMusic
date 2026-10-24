@@ -356,6 +356,7 @@ void main() {
       FakeSource(),
       proxyFactory: () async => _FakeProxy(),
       orchestratorFactory: () => orch,
+      webFallback: true,
     );
     orch.blacklisted.add('19y35jAcG6k');
     var audio = await source.resolve(_song);
@@ -466,6 +467,7 @@ void main() {
         return proxy;
       },
       orchestratorFactory: () => _FakeOrch(),
+      webFallback: true,
     );
     expect((await source.resolve(_song)).engine, AudioEngine.web);
     expect((await source.resolve(_song)).engine, AudioEngine.native);

@@ -27,8 +27,9 @@ class InnerTubeSource extends SourceBackend {
     StreamOrchestrator Function()? orchestratorFactory,
     bool? webFallback,
   }) : _post = post ?? _httpPost,
-       // The hidden official player never loads on Android (blank sheet).
-       _webFallbackEnabled = webFallback ?? !Platform.isAndroid,
+       // The hidden official player only exists on Windows (blank sheet on
+       // Android, no WebView plugin on Linux).
+       _webFallbackEnabled = webFallback ?? Platform.isWindows,
        _proxyFactory = proxyFactory ?? AudioProxy.start,
        _orchestratorFactory =
            orchestratorFactory ??

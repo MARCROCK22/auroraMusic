@@ -204,9 +204,7 @@ class MusicAudio extends AudioBackend {
             if (start > Duration.zero) {
               args.addAll(['-ss', '${start.inMicroseconds / 1000000}']);
             }
-            if (Platform.isWindows) {
-              args.addAll(ffmpegHttpsOptions(source.input));
-            }
+            args.addAll(ffmpegHttpsOptions(source.input));
             if (source.headers.isNotEmpty) {
               for (final entry in source.headers.entries) {
                 if (entry.key.contains(RegExp(r'[\r\n]')) ||
