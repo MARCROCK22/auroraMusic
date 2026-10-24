@@ -109,7 +109,8 @@ class Suggestion {
 }
 
 /// Fuente de candidatos de un cubo. Debe ser tolerante a fallos: si lanza o
-/// tarda más de [SuggestionsApi.sourceTimeout] se ignora.
+/// tarda más de [SuggestionsApi.sourceTimeout] (o de lo que queda de
+/// [SuggestionsApi.budget]) se ignora.
 class RecSource {
   const RecSource(this.bucket, this.fetch);
   final RecBucket bucket;
@@ -230,7 +231,8 @@ class SuggestionsApi {
     this.mix = defaultRecMix,
     RecsMemory? memory,
     this.exploration = 0.2,
-    this.sourceTimeout = const Duration(seconds: 10),
+    this.sourceTimeout = const Duration(seconds: 6),
+    this.budget = const Duration(seconds: 9),
     math.Random? random,
   }) : memory = memory ?? RecsMemory.shared,
        _random = random ?? math.Random();
@@ -244,6 +246,11 @@ class SuggestionsApi {
   /// Probabilidad ε de elegir por muestreo ponderado en vez de la mejor.
   final double exploration;
   final Duration sourceTimeout;
+
+  /// Tiempo total de `getSuggestions` para pedir a las fuentes: la escalera
+  /// («fuentes x3») solo usa lo que sobre y, si no queda, se devuelve lo ya
+  /// reunido. Quien llama debe esperar algo más que esto (ranking, memoria).
+  final Duration budget;
   final math.Random _random;
   final _cache = <String, List<DjCandidate>>{};
 
@@ -253,14 +260,18 @@ class SuggestionsApi {
   static String _key(SessionContext c) =>
       '${c.mode.name}|${(c.participants.map((p) => p.id).toList()..sort()).join(',')}';
 
-  Future<List<DjCandidate>> _gather(SessionContext ctx, {int boost = 1}) async {
+  Future<List<DjCandidate>> _gather(
+    SessionContext ctx, {
+    int boost = 1,
+    Duration? timeout,
+  }) async {
     final want = math.max(ctx.limit, 10) * boost;
     Future<List<DjCandidate>> run(
       RecBucket bucket,
       Future<List<DjCandidate>> Function() call,
     ) async {
       try {
-        final out = await call().timeout(sourceTimeout);
+        final out = await call().timeout(timeout ?? sourceTimeout);
         return [
           for (final c in out)
             DjCandidate(c.track, c.reason, prior: c.prior, bucket: bucket),
@@ -289,8 +300,12 @@ class SuggestionsApi {
     final key = _key(ctx);
     final now = ctx.now ?? DateTime.now();
     final rnd = math.Random(ctx.seed ?? _random.nextInt(1 << 30));
+    final clock = Stopwatch()..start();
     await memory.ensureLoaded();
-    var candidates = await _gather(ctx);
+    var candidates = await _gather(
+      ctx,
+      timeout: _shorter(sourceTimeout, budget - clock.elapsed),
+    );
     if (candidates.isNotEmpty) {
       if (_cache.length >= 16) _cache.remove(_cache.keys.first);
       _cache[key] = candidates;
@@ -332,9 +347,15 @@ class SuggestionsApi {
     final diag = SuggestionsDiagnostics();
     candidates = withLibrary(candidates);
     var picks = _rank(ctx, candidates, now, rnd, diag);
-    if (picks.length < ctx.limit) {
+    final left = budget - clock.elapsed;
+    if (picks.length < ctx.limit && left > Duration.zero) {
       diag.ladder.add('fuentes x3');
-      final more = await _gather(ctx, boost: 3);
+      // Sin tiempo de sobra no se pierde lo ya rankeado: se sigue con ello.
+      final more = await _gather(
+        ctx,
+        boost: 3,
+        timeout: _shorter(sourceTimeout, left),
+      );
       if (more.isNotEmpty) {
         _cache[key] = more;
         candidates = [...candidates, ...more];
@@ -376,6 +397,8 @@ class SuggestionsApi {
         }(),
     ];
   }
+
+  static Duration _shorter(Duration a, Duration b) => a < b ? a : b;
 
   List<
     ({

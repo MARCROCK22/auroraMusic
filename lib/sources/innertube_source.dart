@@ -290,7 +290,9 @@ class InnerTubeSource extends SourceBackend {
 
   /// Parses `musicResponsiveListItemRenderer` rows of a search response.
   /// Radio/autoplay de una pista (endpoint `next`, sin clave ni tokens PO).
-  Future<List<Track>> related(String videoId, {int limit = 10}) async {
+  /// 25: una sola llamada cubre el relleno de la cola (kQueueLookahead) aun
+  /// después de los filtros de repetición y artista.
+  Future<List<Track>> related(String videoId, {int limit = 25}) async {
     if (!_videoId.hasMatch(videoId) || limit <= 0) return [];
     final data = await _post('next', {
       'context': _context(),
