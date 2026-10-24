@@ -685,7 +685,7 @@ class InnerTubeSource extends SourceBackend {
     );
     return ResolvedAudio(
       input: uri.toString(),
-      duration: track.duration,
+      duration: stream.duration ?? track.duration,
       validateCompletion: () => _checkServedToEnd(proxy, id),
     );
   }

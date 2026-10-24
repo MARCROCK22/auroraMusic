@@ -104,7 +104,9 @@ class SettingsLayout extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 24, 24, 24),
               child: Center(
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 1100),
+                  constraints: BoxConstraints(
+                    maxWidth: isSlush(context) ? 1800 : 1100,
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [

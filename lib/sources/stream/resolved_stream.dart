@@ -15,6 +15,7 @@ class ResolvedStream {
     this.backend = StreamBackend.direct,
     this.mimeType,
     this.contentLength,
+    this.duration,
   });
 
   final String videoId;
@@ -28,6 +29,9 @@ class ResolvedStream {
   final StreamBackend backend;
   final String? mimeType;
   final int? contentLength;
+
+  /// Real length from the player response (`approxDurationMs`), if known.
+  final Duration? duration;
 
   bool expiredAt(
     DateTime now, {
@@ -44,6 +48,7 @@ class ResolvedStream {
     backend: value,
     mimeType: mimeType,
     contentLength: contentLength,
+    duration: duration,
   );
 }
 

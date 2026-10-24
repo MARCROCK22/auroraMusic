@@ -2070,7 +2070,9 @@ class AppController extends ChangeNotifier {
             autoAdvance &&
             !fromRecovery &&
             _failedSkips < 3 &&
-            queueIndex < queue.length - 1) {
+            (shuffle
+                ? queue.length - _shufflePlayed.length > 0
+                : repeat == RepeatMode.all || queueIndex < queue.length - 1)) {
           _failedSkips++;
           unawaited(next(fromCompletion: true));
         }
@@ -2295,7 +2297,7 @@ class AppController extends ChangeNotifier {
     if (!_playIntent || _disposed) return;
     final duration = audio.duration;
     if (duration > Duration.zero &&
-        audio.position + const Duration(milliseconds: 750) < duration) {
+        audio.position + const Duration(seconds: 2) < duration) {
       return;
     }
     _recordDjSignal(DjSignal.complete);

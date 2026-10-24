@@ -322,7 +322,7 @@ class SlushPlaylistGrid extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
       const gap = 18.0;
-      final cols = (box.maxWidth / 210).floor().clamp(2, 4);
+      final cols = (box.maxWidth / 210).floor().clamp(2, 8);
       final w = (box.maxWidth - 4 - gap * (cols - 1)) / cols;
       return Wrap(
         spacing: gap,
