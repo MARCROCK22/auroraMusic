@@ -4,9 +4,14 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 
 import '../app_controller.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../core/models.dart';
+import '../friends/friends_providers.dart';
+import '../friends/friends_service.dart';
 import '../jam/jam_controller.dart';
 import '../shortcuts/shortcut_service.dart';
+import 'friends_page.dart';
 import 'jam/jam_flows.dart';
 import 'undo_snackbar.dart';
 
@@ -145,6 +150,19 @@ class TrackActions {
     }
   }
 
+  /// Amigos solo si hay ProviderScope y una sesión iniciada.
+  FriendsService? get _friends {
+    try {
+      final f = ProviderScope.containerOf(
+        context,
+        listen: false,
+      ).read(friendsServiceProvider);
+      return f.signedIn ? f : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   List<PopupMenuEntry<VoidCallback>> entries(
     Track track, {
     List<TrackMenuExtra> extras = const [],
@@ -203,6 +221,12 @@ class TrackActions {
         () => app.toggleFavorite(track),
       ),
       item('Compartir', Icons.share_outlined, () => share(track)),
+      if (_friends case final f? when !track.isLocal)
+        item(
+          'Enviar a un amigo',
+          Icons.send_outlined,
+          () => showSendToFriendSheet(context, f, track),
+        ),
       if (_scope?.addToPlaylist != null)
         item(
           'Añadir a una lista',
