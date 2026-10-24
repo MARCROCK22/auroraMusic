@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'account/account_service.dart';
+import 'account/sync_service.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -51,6 +53,20 @@ class AppController extends ChangeNotifier {
     required this.supportDirectory,
     this.listenBrainz,
   });
+
+  /// Cuenta y sincronización (lib/account); null hasta que main las conecta.
+  AccountService? accounts;
+  SyncService? sync;
+
+  /// Vuelve a leer la biblioteca de la base (tras sincronizar con la cuenta).
+  Future<void> reloadLibrary() async {
+    tracks = await database.readTracks();
+    favoriteIds = await database.readFavorites();
+    playlists = await database.readPlaylists();
+    _loadPlaylistPhotos();
+    recentTracks = _lookup(await database.readHistory());
+    _notify();
+  }
 
   /// Scrobbling y recomendaciones opcionales de ListenBrainz (null = sin ellas).
   final ListenBrainzService? listenBrainz;

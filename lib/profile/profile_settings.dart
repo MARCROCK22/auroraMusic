@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../account/account_avatar.dart';
 import '../app_controller.dart';
 import '../ui/undo_snackbar.dart';
 
@@ -50,24 +51,14 @@ class _ProfileSettingsState extends State<ProfileSettings> {
   Widget build(BuildContext context) {
     final c = widget.controller;
     final avatar = c.profileAvatar;
-    final initial = c.profileName.isEmpty
-        ? '?'
-        : c.profileName.characters.first.toUpperCase();
+    final signedIn = c.accounts?.signedIn ?? false;
+    if (signedIn && _name.text != c.profileName) _name.text = c.profileName;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            CircleAvatar(
-              radius: 40,
-              backgroundImage: avatar == null ? null : MemoryImage(avatar),
-              child: avatar == null
-                  ? Text(
-                      initial,
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    )
-                  : null,
-            ),
+            AccountAvatar(bytes: avatar, radius: 40),
             const SizedBox(width: 16),
             Expanded(
               child: Wrap(
@@ -99,11 +90,16 @@ class _ProfileSettingsState extends State<ProfileSettings> {
           controller: _name,
           focusNode: _focus,
           maxLength: 24,
+          enabled: !signedIn,
           textInputAction: TextInputAction.done,
           decoration: const InputDecoration(labelText: 'Nombre de usuario'),
           onSubmitted: (_) => _save(),
         ),
-        const Text('Se muestra a los demás en la Jam.'),
+        Text(
+          signedIn
+              ? 'Es el usuario de tu cuenta.'
+              : 'Se muestra a los demás en la Jam.',
+        ),
       ],
     );
   }

@@ -24,7 +24,7 @@ class LibraryDatabase extends GeneratedDatabase {
   }
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
   @override
   Iterable<TableInfo<Table, Object?>> get allTables => const [];
   @override
@@ -49,12 +49,34 @@ class LibraryDatabase extends GeneratedDatabase {
       );
       await _createVectorTables();
       await _createFollowTables();
+      await _createSyncTables();
     },
     onUpgrade: (_, from, _) async {
       if (from < 2) await _createVectorTables();
       if (from < 3) await _createFollowTables();
+      if (from < 4) await _createSyncTables();
     },
   );
+
+  /// Estado de sincronización de cuentas (lib/account): una fila por elemento
+  /// local con su marca de cambio, si es lápida y si falta subirlo.
+  Future<void> _createSyncTables() => customStatement(
+    'CREATE TABLE IF NOT EXISTS sync_meta (kind TEXT NOT NULL, key TEXT NOT NULL, '
+    'updated_at INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, '
+    'dirty INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (kind, key))',
+  );
+
+  /// Se llama tras cada cambio local sincronizable (SyncService lo escucha).
+  void Function()? onLocalChange;
+
+  Future<void> _mark(String kind, String key, {bool deleted = false}) async {
+    await customStatement(
+      'INSERT INTO sync_meta VALUES (?,?,?,?,1) ON CONFLICT(kind,key) DO UPDATE SET '
+      'updated_at=excluded.updated_at, deleted=excluded.deleted, dirty=1',
+      [kind, key, DateTime.now().millisecondsSinceEpoch, deleted ? 1 : 0],
+    );
+    onLocalChange?.call();
+  }
 
   /// Artistas seguidos y novedades detectadas (lib/follow). Solo añade tablas.
   Future<void> _createFollowTables() async {
@@ -175,11 +197,14 @@ class LibraryDatabase extends GeneratedDatabase {
     return row == null ? null : _floats(row.read<Uint8List>('vector'));
   }
 
-  Future<void> saveTasteProfile(Float32List vector) => customStatement(
-    'INSERT INTO taste_profile VALUES (1,?,?,?) ON CONFLICT(id) DO UPDATE SET '
-    'dims=excluded.dims, vector=excluded.vector, updated_at=excluded.updated_at',
-    [vector.length, _bytes(vector), DateTime.now().millisecondsSinceEpoch],
-  );
+  Future<void> saveTasteProfile(Float32List vector) async {
+    await customStatement(
+      'INSERT INTO taste_profile VALUES (1,?,?,?) ON CONFLICT(id) DO UPDATE SET '
+      'dims=excluded.dims, vector=excluded.vector, updated_at=excluded.updated_at',
+      [vector.length, _bytes(vector), DateTime.now().millisecondsSinceEpoch],
+    );
+    await _mark('taste', '1');
+  }
 
   Future<List<Track>> readTracks() async =>
       (await customSelect('SELECT data FROM tracks ORDER BY rowid DESC').get())
@@ -199,12 +224,15 @@ class LibraryDatabase extends GeneratedDatabase {
     'SELECT track_id FROM favorites',
   ).get()).map((row) => row.read<String>('track_id')).toSet();
 
-  Future<void> setFavorite(String id, bool selected) => customStatement(
-    selected
-        ? 'INSERT OR IGNORE INTO favorites VALUES (?)'
-        : 'DELETE FROM favorites WHERE track_id=?',
-    [id],
-  );
+  Future<void> setFavorite(String id, bool selected) async {
+    await customStatement(
+      selected
+          ? 'INSERT OR IGNORE INTO favorites VALUES (?)'
+          : 'DELETE FROM favorites WHERE track_id=?',
+      [id],
+    );
+    await _mark('favorites', id, deleted: !selected);
+  }
 
   Future<List<MusicPlaylist>> readPlaylists() async =>
       (await customSelect('SELECT * FROM playlists ORDER BY rowid').get())
@@ -218,18 +246,26 @@ class LibraryDatabase extends GeneratedDatabase {
           )
           .toList();
 
-  Future<void> savePlaylist(MusicPlaylist playlist) => customStatement(
-    'INSERT INTO playlists (id,name,tracks) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,tracks=excluded.tracks',
-    [playlist.id, playlist.name, jsonEncode(playlist.trackIds)],
-  );
+  Future<void> savePlaylist(MusicPlaylist playlist) async {
+    await customStatement(
+      'INSERT INTO playlists (id,name,tracks) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,tracks=excluded.tracks',
+      [playlist.id, playlist.name, jsonEncode(playlist.trackIds)],
+    );
+    await _mark('playlists', playlist.id);
+  }
 
-  Future<void> deletePlaylist(String id) =>
-      customStatement('DELETE FROM playlists WHERE id=?', [id]);
+  Future<void> deletePlaylist(String id) async {
+    await customStatement('DELETE FROM playlists WHERE id=?', [id]);
+    await _mark('playlists', id, deleted: true);
+  }
 
-  Future<void> recordPlay(String id) => customStatement(
-    'INSERT INTO history VALUES (?,?) ON CONFLICT(track_id) DO UPDATE SET played_at=excluded.played_at',
-    [id, DateTime.now().millisecondsSinceEpoch],
-  );
+  Future<void> recordPlay(String id) async {
+    await customStatement(
+      'INSERT INTO history VALUES (?,?) ON CONFLICT(track_id) DO UPDATE SET played_at=excluded.played_at',
+      [id, DateTime.now().millisecondsSinceEpoch],
+    );
+    await _mark('history', id);
+  }
 
   Future<List<String>> readHistory() async => (await customSelect(
     'SELECT track_id FROM history ORDER BY played_at DESC LIMIT 100',

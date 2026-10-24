@@ -22,6 +22,7 @@ import '../core/source_backend.dart';
 import '../core/desktop_shell.dart';
 import '../core/window_controls.dart';
 import '../jam/jam_protocol.dart';
+import '../account/account_settings.dart';
 import '../profile/profile_settings.dart';
 import 'desktop_settings_tiles.dart';
 import 'playlist_views/playlist_view_mode_tile.dart';
@@ -2316,7 +2317,7 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
     'Almacenamiento y biblioteca' ||
     'Vista de playlists' ||
     'Música sin conexión' => 2,
-    'Perfil' || 'Actualizaciones' || 'ListenBrainz' => 3,
+    'Cuenta' || 'Perfil' || 'Actualizaciones' || 'ListenBrainz' => 3,
     _ => 4,
   };
 
@@ -2341,6 +2342,11 @@ class _AuroraShellState extends ConsumerState<AuroraShell>
             ),
           ),
         ],
+      ),
+      (
+        title: 'Cuenta',
+        subtitle: 'Sincroniza tu biblioteca entre dispositivos',
+        children: [AccountSettings(controller: c)],
       ),
       (
         title: 'Vista de playlists',

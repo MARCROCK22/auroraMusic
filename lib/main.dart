@@ -15,6 +15,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_controller.dart';
+import 'account/account_service.dart';
+import 'account/account_wiring.dart';
 import 'audio/music_audio.dart';
 import 'audio/android_music_audio.dart';
 import 'audio/routed_music_audio.dart';
@@ -115,6 +117,9 @@ class _AuroraBootstrapState extends State<AuroraBootstrap> {
       controller.dispose();
       throw StateError(message);
     }
+    try {
+      await connectAccount(controller);
+    } catch (_) {} // la cuenta es opcional: nunca bloquea el arranque
     _controller = controller;
     return controller;
   }
@@ -129,7 +134,12 @@ class _AuroraBootstrapState extends State<AuroraBootstrap> {
         final controller = snapshot.data;
         if (controller != null) {
           return ProviderScope(
-            overrides: [controllerProvider.overrideWith((ref) => controller)],
+            overrides: [
+              controllerProvider.overrideWith((ref) => controller),
+              accountServiceProvider.overrideWith(
+                (ref) => controller.accounts ?? AccountService(config: null),
+              ),
+            ],
             child: const AuroraApp(),
           );
         }
